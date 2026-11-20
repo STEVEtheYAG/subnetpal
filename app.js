@@ -79,7 +79,7 @@
   function buildReqs() {
     $('#reqs').innerHTML = Intake.OPTIONAL.map(o => `<div class="reqrow" data-row="${o.key}">
       <label class="check"><input type="checkbox" data-req="${o.key}"> ${esc(o.label)}</label>
-      <input class="cnt" data-count="${o.key}" inputmode="numeric" autocomplete="off" placeholder="How many ${esc(o.unit)}?" aria-label="Number of ${esc(o.unit)}" hidden>
+      <input class="cnt" data-count="${o.key}" inputmode="numeric" autocomplete="off" placeholder="How many?" aria-label="Number of ${esc(o.unit)}" hidden>
     </div>`).join('');
   }
   // Custom "Other" pools: rebuilt only on add / remove / client switch so typing keeps focus.
@@ -216,11 +216,8 @@
   const ipHtml = v => (/^\d+\.\d+\.\d+\.\d+$/.test(v) ? `<span class="ip" role="button" tabindex="0" data-ip="${esc(v)}" title="Tap to copy">${esc(v)}</span>` : esc(v));
   const rangeHtml = a => (a.prefix === 32 || !a.firstUsable || !a.lastUsable ? ipHtml(a.firstUsable || '-') : `${ipHtml(a.firstUsable)} - ${ipHtml(a.lastUsable)}`);
   async function copyIp(el) {
-    if (el.dataset.old !== undefined) return; // already flashing
     const v = el.dataset.ip, ok = await copy(v);
-    el.dataset.old = el.textContent; el.textContent = ok ? 'Copied' : 'Copy failed'; el.classList.add('flash');
     toast(ok ? `Copied ${v}` : 'Copy was blocked. Press and hold the address to copy it.');
-    setTimeout(() => { el.textContent = el.dataset.old; delete el.dataset.old; el.classList.remove('flash'); }, 900);
   }
   function bindCopyIps() {
     document.addEventListener('click', e => { const el = e.target.closest('.ip'); if (!el) return; e.preventDefault(); e.stopPropagation(); copyIp(el); }, true);

@@ -124,7 +124,6 @@ pre.code {
 /* tap-to-copy IPs */
 .ip { cursor: pointer; border-bottom: 1px dotted var(--mute); border-radius: 3px; padding: 1px 0; }
 .ip:hover, .ip:focus-visible { background: #ffffff1a; outline: none; }
-.ip.flash { color: #4ade80; border-bottom-color: #4ade80; font-weight: 700; }
 
 /* policies */
 .polrow { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 10px 12px; margin: 0 0 10px; }
@@ -241,8 +240,9 @@ body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .otherrow { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto; gap: 8px; margin: 0 0 8px 34px; align-items: center; }
 .otherrow input { margin: 0; width: 100%; min-width: 0; }
 #addOther { margin: 4px 0 0 34px; }
-.reqrow { display: block; }
-.reqrow .cnt { margin: 0 0 8px 34px; width: calc(100% - 34px); }
+.reqrow { display: flex; align-items: center; gap: 10px; }
+.reqrow .check { flex: 1 1 auto; min-width: 0; }
+.reqrow .cnt { margin: 0; flex: 0 0 120px; width: 120px; min-width: 0; }
 .reqrow .cnt[hidden] { display: none; }
 .check.small { min-height: 36px; font-size: 14px; color: var(--mute); }
 
