@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SubnetPal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Offline IP address planner (VLSM) for firewall builds. FortiGate CLI export.">
+<meta name="theme-color" content="#0f1419">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SubnetPal">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>SubnetPal</h1>
+    <span id="netpill" class="pill" title="Offline status">…</span>
+  </div>
+  <div class="projbar">
+    <select id="projSel" aria-label="Project"></select>
+    <div class="btnrow">
+      <button id="btnNew" class="btn sm">New</button>
+      <button id="btnRename" class="btn sm">Rename</button>
+      <button id="btnDup" class="btn sm">Copy</button>
+      <button id="btnDel" class="btn sm danger">Delete</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- PLAN -->
+  <section id="tab-plan" class="panel">
+    <div id="status" class="status" role="status"></div>
+
+    <div class="card">
+      <h2>Parent block</h2>
+      <label class="fld">CIDR
+        <input id="parent" data-o="parent" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16">
+      </label>
+      <div class="presetrow">
+        <label class="fld grow">Start from preset
+          <select id="presetSel"><option value="">Choose a preset…</option></select>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Options</h2>
+      <div class="grid2">
+        <label class="fld">Gateway position
+          <select id="o-gwPos" data-o="gwPos"><option value="first">First usable</option><option value="last">Last usable</option></select>
+        </label>
+        <label class="fld">Growth buffer %
+          <input id="o-growth" data-o="growth" inputmode="numeric" autocomplete="off">
+        </label>
+        <label class="fld">Static reserve (addresses after gateway)
+          <input id="o-staticReserve" data-o="staticReserve" inputmode="numeric" autocomplete="off">
+        </label>
+        <label class="fld">DHCP start offset (after static)
+          <input id="o-dhcpOffset" data-o="dhcpOffset" inputmode="numeric" autocomplete="off">
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Networks</h2>
+      <div id="rows"></div>
+      <button id="btnAdd" class="btn block primary">+ Add network</button>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="tab-results" class="panel" hidden>
+    <div id="summary" class="status"></div>
+    <div id="results"></div>
+    <div id="gaps"></div>
+  </section>
+
+  <!-- MAP -->
+  <section id="tab-map" class="panel" hidden>
+    <div class="card">
+      <h2>Address map</h2>
+      <label class="check"><input type="checkbox" id="fitUsed"> Zoom to used space</label>
+      <div id="map"></div>
+      <div id="legend" class="legend"></div>
+    </div>
+  </section>
+
+  <!-- EXPORT -->
+  <section id="tab-export" class="panel" hidden>
+    <div class="card">
+      <h2>Export</h2>
+      <label class="fld">FortiOS interface name placeholder
+        <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
+      </label>
+      <p class="hint">Used as the parent port for VLAN interfaces (or the interface name for non-VLAN networks) in the FortiOS snippet. Change it once here.</p>
+      <div class="exgrid">
+        <button class="btn primary" data-ex="csv">Copy CSV</button>
+        <button class="btn primary" data-ex="md">Copy Markdown</button>
+        <button class="btn primary" data-ex="forti">Copy FortiOS CLI</button>
+        <button class="btn primary" data-ex="text">Copy generic text</button>
+      </div>
+      <div id="exmsg" class="hint" aria-live="polite"></div>
+      <div class="warnbox">⚠ <span id="fortinote"></span></div>
+      <pre id="expreview" class="code" tabindex="0"></pre>
+    </div>
+  </section>
+
+  <!-- HANDOVER -->
+  <section id="tab-handover" class="panel" hidden>
+    <div class="card handover" id="handoverCard">
+      <div class="handover-head">
+        <h2 id="hoTitle">Network addressing</h2>
+        <div class="noprint btnrow">
+          <button id="hoCopy" class="btn sm">Copy Markdown</button>
+          <button id="hoPrint" class="btn sm">Print</button>
+        </div>
+      </div>
+      <div id="hoMeta" class="hint"></div>
+      <div id="handover"></div>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs" aria-label="Sections">
+  <button data-tab="plan" class="on">Plan</button>
+  <button data-tab="results">Results</button>
+  <button data-tab="map">Map</button>
+  <button data-tab="export">Export</button>
+  <button data-tab="handover">Handover</button>
+</nav>
+
+<script src="calc.js"></script>
+<script src="format.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
