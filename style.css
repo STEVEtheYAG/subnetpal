@@ -117,6 +117,33 @@ pre.code {
 .rtabs button { flex: 1; max-width: 200px; background: none; border: 0; border-bottom: 3px solid transparent; margin-bottom: -1px; min-height: 48px; padding: 0 14px; font-size: 16px; font-weight: 800; color: var(--mute); cursor: pointer; }
 .rtabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
 .sectionsum { margin: 4px 0 8px; color: var(--mute); font-size: 14px; }
+.rtabs { overflow-x: auto; scrollbar-width: none; }
+.rtabs button { flex: 1 0 auto; max-width: none; }
+@media (max-width: 520px) { .rtabs button { padding: 0 10px; font-size: 14px; } }
+
+/* tap-to-copy IPs */
+.ip { cursor: pointer; border-bottom: 1px dotted var(--mute); border-radius: 3px; padding: 1px 0; }
+.ip:hover, .ip:focus-visible { background: #ffffff1a; outline: none; }
+.ip.flash { color: #4ade80; border-bottom-color: #4ade80; font-weight: 700; }
+
+/* policies */
+.polrow { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 10px 12px; margin: 0 0 10px; }
+.polrow.deny { border-left: 4px solid #ff6b6b; }
+.polrow:not(.deny) { border-left: 4px solid #4ade80; }
+.polrow.bad { outline: 1px solid #f5b942; }
+.polhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.polhead b { min-width: 0; overflow-wrap: anywhere; }
+.polbtns { display: flex; gap: 6px; flex: none; }
+.polgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 10px; align-items: end; }
+.polgrid label, .polmore label { display: grid; gap: 4px; font-size: 13px; color: var(--mute); }
+.polgrid label.check, .polmore label.check { display: flex; align-items: center; gap: 8px; color: var(--text); min-height: 40px; }
+.polgrid select, .polmore select, .polmore textarea, #tagline { width: 100%; min-width: 0; }
+.polmore { margin-top: 10px; }
+.polmore summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.polmore textarea { margin: 6px 0; }
+.catbox { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 10px; }
+.polfinal { border: 1px dashed var(--line); border-radius: var(--r); padding: 10px 12px; margin: 0 0 12px; color: var(--mute); }
+#reachlist label.check { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 
 @media (min-width: 761px) {
   .row { grid-template-columns: 2fr 1fr 1fr 1.2fr; }

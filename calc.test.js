@@ -304,10 +304,10 @@ test('prefers a 10.x.0.0/16 and skips existing ranges', () => {
   assert.strictEqual(I.pickParent(['10.20.5.0/24', '10.21.0.0/24']).cidr, '10.22.0.0/16');
   assert.strictEqual(I.pickParent(['10.20.0.0/14']).cidr, '10.24.0.0/16'); // /14 covers 10.20-10.23
 });
-test('falls back to 172.16/12 then 192.168/16, then null', () => {
-  assert.strictEqual(I.pickParent(['10.0.0.0/8']).cidr, '172.16.0.0/16');
-  assert.strictEqual(I.pickParent(['10.0.0.0/8', '172.16.0.0/12']).cidr, '192.168.0.0/16');
-  assert.strictEqual(I.pickParent(['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']), null);
+test('falls back to 172.17+/16 (172.16 and 192.168 hold common home ranges, so are never auto-picked), then null', () => {
+  assert.strictEqual(I.pickParent(['10.0.0.0/8']).cidr, '172.17.0.0/16');
+  assert.strictEqual(I.pickParent(['10.0.0.0/8', '172.16.0.0/12']), null);
+  assert.strictEqual(I.pickParent(['10.0.0.0/8', '172.17.0.0/16']).cidr, '172.18.0.0/16');
 });
 test('invalid existing entries are ignored by the picker; parsing accepts lines, commas, spaces', () => {
   assert.strictEqual(I.pickParent(['nonsense']).cidr, '10.20.0.0/16');
@@ -677,6 +677,174 @@ test('"Other" pools appear in the client report and old clients migrate', () => 
   const h = require('./report.js').build(r, p);
   assert.ok(h.includes('4 Printers') && h.includes('A separate network for your Printers devices'));
   const old = I.newClient('old'); delete old.intake.others; I.migrate(old); assert.deepStrictEqual(old.intake.others, []);
+});
+
+console.log('Policies');
+const Pol = require('./policy.js');
+const polSample = () => { const { c, p, r } = sample(); return { c, p, r, al: r.allocations }; };
+const flat = list => list.map(x => `${x.src}>${x.dst}:${x.service}:${x.action}`);
+test('defaults reproduce the old starter policies and still export them', () => {
+  const { p, r, al } = polSample();
+  const d = Pol.defaults(al);
+  assert.ok(d.some(x => x.src === 'Guest' && x.dst === 'internet' && x.service === 'DNS,HTTP,HTTPS' && x.nat));
+  assert.ok(d.some(x => x.src === 'Guest' && x.dst === 'internal' && x.action === 'deny'));
+  assert.ok(!d.some(x => /Transit|Loopback/.test(x.src)));
+  const f = F.toFortiOS(r, p, 'port5');
+  assert.ok(/set name "SP_Guest_to_internal_block"/.test(f) && f.includes(Pol.NOTE));
+});
+test('tagline: "Guests can access the internet but nothing else"', () => {
+  const { al } = polSample();
+  const t = Pol.parse('Guests can access the internet but nothing else', al);
+  assert.deepStrictEqual(flat(t.policies), ['Guest>internet:DNS,HTTP,HTTPS:accept', 'Guest>internal:ALL:deny']);
+  assert.deepStrictEqual(t.unparsed, []);
+  assert.deepStrictEqual(flat(Pol.parse('Cameras internet only', al).policies).length, 2);
+});
+test('tagline templates: can\'t reach, can reach on a service, blocked from', () => {
+  const { al } = polSample();
+  assert.deepStrictEqual(flat(Pol.parse("Guests can't reach servers", al).policies), ['Guest>Servers:ALL:deny']);
+  assert.deepStrictEqual(flat(Pol.parse('Staff can reach servers on https and ssh', al).policies), ['Staff LAN>Servers:HTTPS,SSH:accept']);
+  assert.deepStrictEqual(flat(Pol.parse('Cameras blocked from the internet', al).policies), ['Cameras>internet:ALL:deny']);
+  assert.deepStrictEqual(flat(Pol.parse('Voice cannot reach cameras on ssh. Guests can reach the DMZ on web', al).policies), ['Voice>Cameras:SSH:deny', 'Guest>DMZ:HTTP,HTTPS:accept']);
+});
+test('unknown tagline is reported, not guessed', () => {
+  const { al } = polSample();
+  ['Make everything faster', 'Guests', 'Staff can reach servers on bananas', 'Printers can reach servers'].forEach(s => {
+    const t = Pol.parse(s, al); assert.strictEqual(t.policies.length, 0, s); assert.ok(t.unparsed.length >= 1 && t.unparsed[0].why, s);
+  });
+  const mixed = Pol.parse("Guests can't reach servers. Blah blah", al);
+  assert.strictEqual(mixed.policies.length, 1); assert.strictEqual(mixed.unparsed.length, 1);
+});
+test('applying parsed policies: replaces same source+destination, denies first', () => {
+  const { al } = polSample();
+  let list = Pol.defaults(al);
+  list = Pol.apply(list, Pol.parse('Guests internet only', al));
+  assert.deepStrictEqual(flat(list).filter(x => x.startsWith('Guest')), ['Guest>internal:ALL:deny', 'Guest>internet:DNS,HTTP,HTTPS:accept']);
+  list = Pol.apply(list, Pol.parse("Staff can't reach servers", al));
+  assert.strictEqual(flat(list)[0], 'Staff LAN>Servers:ALL:deny');
+  assert.strictEqual(list.filter(x => x.src === 'Staff LAN' && x.dst === 'Servers').length, 1);
+});
+test('FortiOS: edited policies replace the defaults, ordered, with NAT/log, profiles and a final deny', () => {
+  const { c, p, r, al } = polSample();
+  const mk = Pol.mkPolicy;
+  c.pol = { edited: true, list: [
+    mk({ src: 'Guest', dst: 'internal', action: 'deny', name: '' }),
+    mk({ src: 'Guest', dst: 'internet', service: 'DNS,HTTPS', nat: true, log: false, web: { mode: 'block', sites: 'https://bad.example.com/x, evil.test', cats: [26, 61] }, app: { mode: 'block', cats: [2, 6] } }),
+    mk({ src: 'Staff LAN', dst: 'Servers', service: 'SMB', nat: false }),
+    mk({ src: 'Gone', dst: 'internet' }),
+  ] };
+  const f = F.toFortiOS(r, I.toProject(c), 'port5');
+  const pol = f.slice(f.indexOf('config firewall policy'));
+  assert.ok(!/SP_Staff_LAN_to_internet/.test(pol));                     // defaults are gone
+  assert.ok(pol.indexOf('SP_Guest_to_internal_block') < pol.indexOf('SP_Guest_to_internet') && pol.indexOf('SP_Guest_to_internet') < pol.indexOf('SP_Final_deny'));
+  assert.ok(/set name "SP_Guest_to_internet"[\s\S]*?set service "DNS" "HTTPS"[\s\S]*?set nat enable[\s\S]*?set logtraffic disable[\s\S]*?set webfilter-profile "SP_Web_1"[\s\S]*?set application-list "SP_App_1"/.test(pol));
+  assert.ok(/set name "SP_Staff_LAN_to_Servers"[\s\S]*?set service "SMB"/.test(pol) && !/SP_Staff_LAN_to_Servers"[\s\S]{0,300}set nat enable/.test(pol));
+  assert.ok(/config webfilter urlfilter[\s\S]*set url "bad.example.com"[\s\S]*set url "evil.test"/.test(f) && /set category 26/.test(f) && /config application list[\s\S]*set category 2 6[\s\S]*set action block/.test(f));
+  assert.ok(/# Skipped \(network not in the current plan\): Gone to internet/.test(f));
+  assert.ok(/edit 0\s+set name "SP_Final_deny"[\s\S]*set action deny/.test(f) && f.trim().split('\n').slice(-1)[0].includes('Generated, untested'));
+  assert.ok(f.includes(Pol.NOTE) && f.includes(F.FORTI_NOTE));
+  const only = F.toPolicyFortiOS(r, I.toProject(c), 'port5');
+  assert.ok(only.includes('config firewall policy') && !only.includes('config system interface') && only.includes(Pol.NOTE));
+  Pol.resolve(c.pol.list, al).pols.forEach(x => assert.ok(x.name.length <= 40));
+  c.pol = { edited: false, list: [] };                                  // reset: defaults follow the plan again
+  assert.ok(/SP_Staff_LAN_to_internet/.test(F.toFortiOS(r, I.toProject(c), 'port5')));
+});
+test('FortiOS: allow-list web and app profiles end with a catch-all block', () => {
+  const { c, r } = polSample();
+  c.pol = { edited: true, list: [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true, web: { mode: 'allow', sites: 'work.example.com', cats: [] }, app: { mode: 'allow', cats: [3] } })] };
+  const f = F.toFortiOS(r, I.toProject(c), 'port5');
+  assert.ok(/set url "work.example.com"[\s\S]*set action allow[\s\S]*set url "\*"[\s\S]*set type wildcard[\s\S]*set action block/.test(f));
+  assert.ok(/edit 1[\s\S]*set category 3[\s\S]*set action pass[\s\S]*edit 2[\s\S]*set action block/.test(f.slice(f.indexOf('config application list'))));
+});
+
+console.log('Remote access');
+const R = require('./remote.js');
+const remoteClient = (count, mod) => {
+  const c = I.newClient('r'); c.intake.counts.staff = 20; c.intake.counts.servers = 3; c.intake.req.servers = true;
+  c.intake.remote = { on: true, count, reach: null }; if (mod) mod(c); I.applyIntake(c);
+  return { c, p: I.toProject(c), r: C.plan(I.toProject(c)) };
+};
+const parsedIn = (cidr, list) => { const q = C.parseCidr(cidr); return list.some(x => { const h = C.parseCidr(x); return h.start <= q.end && h.end >= q.start; }); };
+test('auto-pick never lands on a common home range', () => {
+  R.HOME_RANGES.forEach(h => assert.ok(!parsedIn(h, [])));              // sanity: list parses
+  const blockedAll = ['10.2.0.0/15', '10.4.0.0/14', '10.8.0.0/13', '10.16.0.0/12', '10.32.0.0/11', '10.64.0.0/10', '10.128.0.0/9'];
+  for (const ex of [[], ['10.20.0.0/16'], blockedAll, blockedAll.concat(['10.0.0.0/16'])]) {
+    const pk = I.pickParent(ex); assert.ok(pk, ex.join()); assert.ok(!R.homeClashes([pk.cidr]).length, pk.cidr);
+    const q = C.parseCidr(pk.cidr);
+    R.HOME_RANGES.forEach(h => { const hp = C.parseCidr(h); assert.ok(!(hp.start <= q.end && hp.end >= q.start), pk.cidr + ' vs ' + h); });
+  }
+  assert.strictEqual(I.pickParent(blockedAll).cidr, '172.17.0.0/16');   // 10.0/10.1 and 172.16 hold home ranges
+});
+test('VPN pool: sized from remote staff + growth buffer, aligned, outside every office network', () => {
+  const a = remoteClient('30').p; const ra = C.plan(a); const pa = R.plan(ra, a);
+  assert.ok(pa.ok && pa.where === 'inside');
+  assert.strictEqual(pa.need, Math.ceil(30 * 1.25));                      // growth None = 25%
+  assert.ok(pa.usable >= pa.need && pa.usable / 2 < pa.need + 2);         // smallest block that fits
+  const pp = C.parseCidr(pa.cidr); assert.strictEqual(pp.network, pp.ip);
+  assert.ok(pp.start >= ra.parent.start && pp.end <= ra.parent.end);
+  ra.allocations.forEach(x => { const q = C.parseCidr(x.cidr); assert.ok(q.end < pp.start || q.start > pp.end, x.name); });
+  const big = remoteClient('200', c => { c.intake.expansion = 'big'; });  // 200 * 2 = 400 -> /23
+  assert.strictEqual(R.plan(big.r, big.p).prefix, 23);
+  const tiny = remoteClient('', null); assert.strictEqual(R.plan(tiny.r, tiny.p).need, 2);
+  assert.ok(R.plan(tiny.r, tiny.p).notes.length === 1);
+  const off = remoteClient('5', c => { c.intake.remote.on = false; }); assert.strictEqual(R.plan(off.r, off.p), null);
+});
+test('VPN pool avoids existing ranges and home ranges, and falls back when the office block is full', () => {
+  const { r, p } = remoteClient('10', c => { c.intake.existing = '10.99.255.0/24'; c.parentAuto = false; c.parent = '10.99.0.0/16'; });
+  const pool = R.plan(r, p);
+  assert.ok(pool.ok && !parsedIn(pool.cidr, ['10.99.255.0/24']) && pool.end < C.parseCidr('10.99.255.0/24').start);
+  const full = remoteClient('10', c => { c.parentAuto = false; c.parent = '10.50.0.0/24'; c.opts.style = 'packed'; });
+  const fp = R.plan(full.r, full.p);
+  if (fp.ok) { const q = C.parseCidr(fp.cidr); full.r.allocations.forEach(x => { const o = C.parseCidr(x.cidr); assert.ok(o.end < q.start || o.start > q.end, x.name); }); }
+});
+test('split tunnel: Staff and Servers by default, tick list overrides, only internal networks offered', () => {
+  const { r, p, c } = remoteClient('10');
+  assert.deepStrictEqual(R.plan(r, p).reach, ['Staff LAN', 'Servers']);
+  assert.ok(R.reachable(r).every(a => ['transit', 'loopback', 'guest', 'dmz'].indexOf(require('./access.js').kindOf(a)) < 0));
+  c.intake.remote.reach = { Management: true, Servers: false, 'Staff LAN': true };
+  assert.deepStrictEqual(R.plan(r, I.toProject(c)).reach, ['Management', 'Staff LAN']);
+});
+test('split tunnel: an empty tick map means nothing is reachable (no policies), not the defaults', () => {
+  const { r, p, c } = remoteClient('10'); c.intake.remote.reach = {};
+  assert.deepStrictEqual(R.plan(r, I.toProject(c)).reach, []);
+  const f = F.toRemoteFortiOS(r, I.toProject(c), 'port5');
+  assert.ok(!f.includes('SP_VPN_SPLIT') && !f.includes('SP_VPN_to_') && f.includes('No office networks are ticked'));
+});
+test('home-range clash warning: existing ranges, manual office block, and only when remote staff are ticked', () => {
+  const a = remoteClient('10', c => { c.intake.existing = '192.168.1.0/24, 10.1.0.0/16'; });
+  const w = R.warnings(a.r, a.p);
+  assert.strictEqual(w.length, 2); assert.ok(w[0].startsWith('Remote-worker clash') && w[0].includes('192.168.1.0/24') && /home/.test(w[0]));
+  const m = remoteClient('10', c => { c.parentAuto = false; c.parent = '192.168.0.0/16'; });
+  assert.ok(R.warnings(m.r, m.p).some(x => x.includes('The office network')));
+  const off = remoteClient('10', c => { c.intake.existing = '192.168.1.0/24'; c.intake.remote.on = false; });
+  assert.deepStrictEqual(R.warnings(off.r, off.p), []);
+  assert.deepStrictEqual(R.warnings(remoteClient('10').r, remoteClient('10').p), []);
+});
+test('IPsec remote access CLI: pool, split tunnel, matching policy, placeholders and the note', () => {
+  const { r, p } = remoteClient('30');
+  const f = F.toRemoteFortiOS(r, p, 'port5'), pool = R.plan(r, p);
+  assert.ok(f.includes('config vpn ipsec phase1-interface') && f.includes('config vpn ipsec phase2-interface'));
+  assert.ok(f.includes(`set ipv4-start-ip ${pool.first}`) && f.includes(`set ipv4-end-ip ${pool.last}`) && f.includes('set ipv4-split-include "SP_VPN_SPLIT"'));
+  assert.ok(/set member "SP_Staff_LAN" "SP_Servers"/.test(f) && /set srcintf "SP_VPN"[\s\S]*set dstintf "vlan20"/.test(f) && /set dstintf "vlan30"/.test(f));
+  assert.ok(f.includes('PSK_CHANGE_ME') && f.includes('VPN_USERS_CHANGE_ME') && f.includes(F.FORTI_NOTE) && f.includes('lab VM'));
+  assert.strictEqual(F.toRemoteFortiOS(remoteClient('5', c => { c.intake.remote.on = false; }).r, remoteClient('5', c => { c.intake.remote.on = false; }).p), '');
+});
+test('plan diagram and client report include the VPN pool in plain language', () => {
+  const T = require('./topology.js');
+  const { r, p } = remoteClient('30'); const pool = R.plan(r, p);
+  const svg = T.build(r, p, { cols: 2, theme: 'light', standalone: true, vpn: pool });
+  assert.ok(svg.includes('REMOTE STAFF (VPN)') && svg.includes('Remote staff (VPN)') && svg.includes(pool.cidr));
+  assert.ok(!T.build(r, p, { theme: 'light' }).includes('Remote staff'));
+  const h = CR.build(r, p, svg);
+  assert.ok(h.includes('Remote working') && h.includes(pool.first) && h.includes('Staff LAN, Servers') && h.includes('7. Internet connection'));
+  const body = h.slice(h.indexOf('<body>')).replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ');
+  ['VLAN', 'CIDR', 'gateway', 'subnet', 'DHCP', 'IPsec', 'FortiOS', 'netmask'].forEach(w => assert.ok(!new RegExp(w, 'i').test(body), 'jargon: ' + w));
+  assert.ok(!CR.build(C.plan(sample().p), sample().p).includes('Remote working'));
+  const clash = remoteClient('10', c => { c.intake.existing = '192.168.1.0/24'; });
+  assert.ok(CR.build(clash.r, clash.p).includes('One thing to check'));
+});
+test('older clients migrate: remote, policies and tagline get defaults', () => {
+  const old = I.newClient('old'); delete old.intake.remote; delete old.pol; delete old.tagline; I.migrate(old);
+  assert.deepStrictEqual(old.intake.remote, { on: false, count: '', reach: null }); assert.deepStrictEqual(old.pol, { edited: false, list: [] }); assert.strictEqual(old.tagline, '');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

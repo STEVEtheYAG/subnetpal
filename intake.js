@@ -1,8 +1,8 @@
 /* SubnetPal - client intake -> suggested plan. Pure, no DOM. window.Intake / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./calc.js'), require('./calc6.js'));
-  else root.Intake = factory(root.Calc, root.Calc6);
-}(typeof self !== 'undefined' ? self : this, function (Calc, Calc6) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./calc.js'), require('./calc6.js'), require('./remote.js'));
+  else root.Intake = factory(root.Calc, root.Calc6, root.Remote);
+}(typeof self !== 'undefined' ? self : this, function (Calc, Calc6, Remote) {
   'use strict';
 
   const GROWTH = { none: 25, soon: 50, big: 100 };
@@ -25,12 +25,12 @@
 
   function newIntake() {
     const counts = {}; COUNT_FIELDS.forEach(k => { counts[k] = 0; });
-    return { counts, existing: '', expansion: 'none', req: { servers: false, guest: false, dmz: false, voice: false, cameras: false, iot: false }, others: [], wanNote: '' };
+    return { counts, existing: '', expansion: 'none', req: { servers: false, guest: false, dmz: false, voice: false, cameras: false, iot: false }, others: [], remote: { on: false, count: '', reach: null }, wanNote: '' };
   }
   function newClient(name) {
     return {
       id: uid(), name: name || 'New client', site: '', date: new Date().toISOString().slice(0, 10),
-      intake: newIntake(), parent: '', parentAuto: true, networks: [], v6: { enabled: true, prefix: Calc6.generateUla() },
+      intake: newIntake(), pol: { edited: false, list: [] }, tagline: '', parent: '', parentAuto: true, networks: [], v6: { enabled: true, prefix: Calc6.generateUla() },
       opts: Object.assign({}, Calc.DEFAULT_OPTS, { style: 'vlan24' }), ifName: 'PORT_CHANGE_ME', planEdited: false, genNotes: [],
     };
   }
@@ -39,20 +39,11 @@
   function parseExisting(text) { return String(text || '').split(/[\s,;]+/).filter(Boolean); }
 
   // Auto-pick a private /16 that overlaps none of the existing ranges. Prefers 10.x.0.0/16.
+  // Never picks a /16 that overlaps a common home-router range (see Remote.HOME_RANGES), so remote workers do not clash.
   function pickParent(existingList) {
     const ex = (existingList || []).map(Calc.parseCidr).filter(e => !e.error);
-    const clash = (start, size) => ex.some(e => e.start <= start + size - 1 && e.end >= start);
-    const cands = [];
-    for (let x = 20; x <= 255; x++) cands.push([10, x]);
-    for (let x = 2; x < 20; x++) cands.push([10, x]);
-    cands.push([10, 0], [10, 1]);
-    for (let x = 16; x <= 31; x++) cands.push([172, x]);
-    cands.push([192, 168]);
-    for (const [a, b] of cands) {
-      const start = a * 16777216 + b * 65536;
-      if (!clash(start, 65536)) return { cidr: `${a}.${b}.0.0/16`, start, prefix: 16 };
-    }
-    return null;
+    const home = Remote.HOME_RANGES.map(Calc.parseCidr);
+    return Remote.pickSixteen(ex.concat(home));
   }
 
   // intake -> { networks, notes }
@@ -113,6 +104,9 @@
     it.counts = Object.assign(newIntake().counts, it.counts);
     it.req = it.req || {};
     if (!Array.isArray(it.others)) it.others = [];
+    if (!it.remote || typeof it.remote !== 'object') it.remote = { on: false, count: '', reach: null };
+    if (!client.pol || !Array.isArray(client.pol.list)) client.pol = { edited: false, list: [] };
+    if (typeof client.tagline !== 'string') client.tagline = '';
     if (it.req.servers === undefined) it.req.servers = num(it.counts.servers) > 0;
     if (!client.v6) client.v6 = { enabled: false, prefix: '' };
     client.opts = Object.assign({}, Calc.DEFAULT_OPTS, client.opts);

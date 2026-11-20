@@ -1,8 +1,8 @@
 /* SubnetPal - plain-language client report (printable HTML, "Save as PDF" friendly). Pure, no DOM. window.ClientReport / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'));
-  else root.ClientReport = factory(root.Access);
-}(typeof self !== 'undefined' ? self : this, function (Access) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./remote.js'));
+  else root.ClientReport = factory(root.Access, root.Remote);
+}(typeof self !== 'undefined' ? self : this, function (Access, Remote) {
   'use strict';
 
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -143,6 +143,24 @@ section.page h2{margin-top:0}
 
     const wan = (it.wanNote || '').trim();
 
+    // Remote working (only when remote staff were ticked)
+    const vpn = Remote.plan(result, project);
+    let remoteSec = '', wanNo = 6;
+    if (vpn && vpn.ok) {
+      wanNo = 7;
+      reqRows.splice(3, 0, ['Remote staff', `${num(vpn.staff)} ${vpn.staff === 1 ? 'person' : 'people'} working away from the office, over a secure connection`]);
+      netRows.push([esc('Remote staff'), esc('People working from home or on the road. They connect over the secure link and are given an address from this reserved range.'),
+        `<span class="mono">${esc(vpn.first)} to ${esc(vpn.last)}</span>`, '<span class="mono">Not needed</span>']);
+      const clash = Remote.warnings(result, project);
+      remoteSec = `<section class="page">
+  <h2>6. Remote working</h2>
+  <p>${esc(plural(vpn.staff || 2, 'person', 'people'))} will work away from the office. They connect over a secure, encrypted link (a VPN). Each person is given an address from a reserved range, <b class="mono">${esc(vpn.first)} to ${esc(vpn.last)}</b>. It has room for about ${esc(num(vpn.usable))} people, which includes a ${esc(vpn.growth)}% allowance for growth.</p>
+  <p><b>What remote staff can reach:</b> ${vpn.reach.length ? esc(vpn.reach.join(', ')) : 'nothing inside the office yet'}. Only traffic for those areas travels through the secure link. Everything else, such as ordinary web browsing, uses their own home internet.</p>
+  <p><b>Home networks:</b> we avoid the address ranges most home routers use (for example ${esc(Remote.HOME_RANGES.slice(0, 3).join(', '))}), so a person's home network does not get in the way when they connect.</p>
+  ${clash.length ? '<p class="note"><b>One thing to check:</b> part of your existing set-up uses an address range that many home routers also use. Staff whose home network uses the same range may have trouble reaching it and might need to change their home router’s range.</p>' : ''}
+</section>`;
+    }
+
     const sub = [site, date].filter(Boolean).join(' · ');
     return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(name)} - Network design summary</title><style>${CSS}</style></head><body>
@@ -191,8 +209,9 @@ section.page h2{margin-top:0}
   ${result.v6 ? '<p>Your networks are also ready for the newer style of internet addressing (IPv6). It has so much room that it never needs a growth allowance.</p>' : ''}
 </section>
 
+${remoteSec}
 <section class="page">
-  <h2>6. Internet connection and remote access</h2>
+  <h2>${wanNo}. Internet connection and remote access</h2>
   ${wan ? `<p>${esc(wan).replace(/\r?\n/g, '<br>')}</p>` : '<p>No details about your internet connection or remote-access (VPN) needs have been recorded yet. These will be added once they are confirmed.</p>'}
   <p class="note">The internet connection is not part of the address plan above. It is set up using the details your internet provider gives us.</p>
 </section>

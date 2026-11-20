@@ -9,10 +9,11 @@
     dark: { bg: '', card: '#1f2832', line: '#44546a', text: '#e7edf3', mute: '#93a1b0', fw: '#173a5e', fwLine: '#4aa3ff', inet: '#22303d' },
     light: { bg: '#ffffff', card: '#f4f7fa', line: '#8796a6', text: '#111111', mute: '#555555', fw: '#dbeafe', fwLine: '#2563eb', inet: '#e5e7eb' },
   };
-  const ZONE_COLOR = { internal: '#4aa3ff', guest: '#f5b942', dmz: '#ff6b6b', link: '#93a1b0' };
+  const ZONE_COLOR = { internal: '#4aa3ff', guest: '#f5b942', dmz: '#ff6b6b', link: '#93a1b0', remote: '#37c2a0' };
   const SECTIONS = [
     { key: 'internal', title: 'INTERNAL NETWORKS', zones: ['internal'] },
     { key: 'isolated', title: 'ISOLATED: INTERNET ONLY / DMZ', zones: ['guest', 'dmz'] },
+    { key: 'remote', title: 'REMOTE STAFF (VPN)', zones: ['remote'] },
     { key: 'links', title: 'LINKS', zones: ['link'] },
   ];
 
@@ -21,6 +22,7 @@
 
   function zoneOf(a) {
     const k = Access.kindOf(a);
+    if (k === 'vpn') return 'remote';
     if (k === 'loopback') return null; // drawn inside the firewall box
     if (k === 'guest') return 'guest';
     if (k === 'dmz') return 'dmz';
@@ -39,6 +41,10 @@
     const cardW = cols === 1 ? 320 : 270, cardH = plain ? 62 : result.v6 ? 106 : 88, gap = 16, pad = 16, spineGap = 26;
     const x0 = pad + spineGap, gridW = cols * cardW + (cols - 1) * gap, W = x0 + gridW + pad;
     const cx = x0 + gridW / 2;
+    // The VPN pool is drawn as one more card (kind 'vpn'), dashed link, in its own section.
+    const vp = o.vpn && o.vpn.ok ? o.vpn : null;
+    const vpnAlloc = vp ? { name: 'Remote staff (VPN)', kind: 'vpn', role: 'VPN', vlan: '', cidr: vp.cidr, prefix: vp.prefix, firstUsable: vp.first, lastUsable: vp.last, gateway: '', hosts: vp.staff, v6: null } : null;
+    const drawn = vpnAlloc ? result.allocations.concat([vpnAlloc]) : result.allocations;
     const lo = plain ? null : result.allocations.find(a => Access.kindOf(a) === 'loopback');
     const fwH = lo ? 66 : 52, fwY = 92, fwW = 230;
 
@@ -58,9 +64,9 @@
     let anyRow = false;
     SECTIONS.forEach(sec => {
       if (plain && sec.key === 'links') return;
-      const items = result.allocations.filter(a => sec.zones.indexOf(zoneOf(a)) >= 0);
+      const items = drawn.filter(a => sec.zones.indexOf(zoneOf(a)) >= 0);
       if (!items.length) return;
-      const title = plain ? (sec.key === 'internal' ? 'YOUR NETWORKS' : 'KEPT APART FOR SAFETY') : sec.title;
+      const title = plain ? (sec.key === 'internal' ? 'YOUR NETWORKS' : sec.key === 'remote' ? 'REMOTE STAFF (SECURE CONNECTION)' : 'KEPT APART FOR SAFETY') : sec.title;
       nodes.push(`<text x="${x0}" y="${y + 6}" font-size="11" font-weight="700" letter-spacing="1" fill="${T.mute}">${esc(title)}</text>`);
       y += 22;
       for (let r = 0; r < items.length; r += cols) {
@@ -73,10 +79,11 @@
         row.forEach((a, i) => {
           const x = x0 + i * (cardW + gap), zone = zoneOf(a), zc = ZONE_COLOR[zone];
           const ci = Math.max(0, names.indexOf(a.name));
-          edges.push(`<path d="M${x + cardW / 2} ${busY} V${y}" stroke="${zc}" stroke-width="2" fill="none"${zone === 'link' ? ' stroke-dasharray="5 4"' : ''}/>`);
+          edges.push(`<path d="M${x + cardW / 2} ${busY} V${y}" stroke="${zc}" stroke-width="2" fill="none"${zone === 'link' || zone === 'remote' ? ' stroke-dasharray="5 4"' : ''}/>`);
           const max = Math.floor((cardW - 34) / 7.6);
-          const sub = a.prefix === 31 ? 'Point-to-point /31' : `GW ${a.gateway || '-'} · ${a.hosts} planned`;
-          const tag = `${a.vlan !== '' ? 'VLAN ' + a.vlan : 'No VLAN'}${a.role ? ' · ' + a.role : ''}`;
+          const isVpn = a.kind === 'vpn';
+          const sub = isVpn ? `${a.hosts} remote staff planned` : a.prefix === 31 ? 'Point-to-point /31' : `GW ${a.gateway || '-'} · ${a.hosts} planned`;
+          const tag = isVpn ? 'IPsec VPN pool' : `${a.vlan !== '' ? 'VLAN ' + a.vlan : 'No VLAN'}${a.role ? ' · ' + a.role : ''}`;
           if (plain) {
             const lastOct = String(a.lastUsable || '').split('.').pop();
             const rangeTxt = a.prefix === 32 ? a.firstUsable : `${a.firstUsable} to .${lastOct}`;

@@ -69,6 +69,13 @@
       </div>
       <p class="hint">Always planned: Staff LAN, Management, Transit and loopback.</p>
 
+      <div class="fld">Remote access
+        <div class="reqrow">
+          <label class="check"><input type="checkbox" id="rem-on"> Remote staff (IPsec VPN)</label>
+          <input class="cnt" id="rem-count" inputmode="numeric" autocomplete="off" placeholder="How many remote staff?" aria-label="Number of remote staff" hidden>
+        </div>
+      </div>
+
       <details id="more" class="more">
         <summary>More detail</summary>
         <label class="fld">Existing IP ranges in use (one per line, optional)
@@ -105,6 +112,8 @@
     <div class="rtabs" role="tablist" aria-label="Results">
       <button type="button" role="tab" data-tab="plan" aria-controls="sec-plan">Plan</button>
       <button type="button" role="tab" data-tab="diagram" aria-controls="sec-diagram">Diagram</button>
+      <button type="button" role="tab" data-tab="policies" aria-controls="sec-policies">Policies</button>
+      <button type="button" role="tab" data-tab="remote" aria-controls="sec-remote">Remote</button>
       <button type="button" role="tab" data-tab="export" aria-controls="sec-export">Export</button>
     </div>
 
@@ -129,6 +138,49 @@
           <button id="btnSvgCopy" class="btn sm" type="button">Copy SVG</button>
         </div>
         <p id="topomsg" class="hint"></p>
+      </div>
+    </section>
+
+    <section class="acc" id="sec-policies" role="tabpanel">
+      <div class="acc-body" id="body-policies" hidden>
+        <p class="sectionsum" id="sum-policies"></p>
+        <label class="fld">Describe a policy in a sentence
+          <textarea id="tagline" rows="2" autocomplete="off" spellcheck="false" placeholder="e.g. Guests can access the internet but nothing else"></textarea>
+        </label>
+        <p class="hint">Understood: "X internet only", "X can't reach Y", "X blocked from Y", "X can reach Y on https". Use network names from the plan. Separate several with a full stop.</p>
+        <div class="btnrow">
+          <button id="btnParse" class="btn sm" type="button">Build policies from this</button>
+          <button id="btnAddPol" class="btn sm" type="button">+ Add policy</button>
+          <button id="btnResetPol" class="btn sm" type="button">Reset to defaults</button>
+        </div>
+        <p id="parsemsg" class="hint" role="status"></p>
+        <div id="pollist"></div>
+        <div class="polfinal"><b>Last rule:</b> deny everything else (always applied at the bottom).</div>
+        <p id="polnote" class="hint warnbox"></p>
+        <div class="btnrow">
+          <button class="btn sm" type="button" data-copy="polcli">Copy policy CLI</button>
+        </div>
+        <pre class="code" id="pre-polcli"></pre>
+      </div>
+    </section>
+
+    <section class="acc" id="sec-remote" role="tabpanel">
+      <div class="acc-body" id="body-remote" hidden>
+        <p class="sectionsum" id="sum-remote"></p>
+        <p id="remoteoff" class="hint">Tick <b>Remote staff</b> in the intake on the left to plan VPN access.</p>
+        <div id="remoteon" hidden>
+          <p><b>VPN type:</b> IPsec (IKEv2 dial-up)</p>
+          <div id="vpnpool"></div>
+          <h3>Remote staff can reach <span class="dim">(split tunnel: only these networks go through the VPN)</span></h3>
+          <div id="reachlist"></div>
+          <details class="more2"><summary>Home ranges that are avoided</summary>
+            <p class="hint">Office address blocks are never auto-picked inside these common home-router ranges, so a remote worker's home network does not clash with the office.</p>
+            <p class="mono small" id="homelist"></p>
+          </details>
+          <p id="fortinote2" class="hint warnbox"></p>
+          <button class="btn sm" type="button" data-copy="remote">Copy IPsec remote access CLI</button>
+          <pre class="code" id="pre-remote"></pre>
+        </div>
       </div>
     </section>
 
@@ -169,6 +221,8 @@
 <script src="calc.js"></script>
 <script src="calc6.js"></script>
 <script src="access.js"></script>
+<script src="remote.js"></script>
+<script src="policy.js"></script>
 <script src="intake.js"></script>
 <script src="format.js"></script>
 <script src="report.js"></script>

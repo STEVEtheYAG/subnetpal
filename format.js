@@ -1,8 +1,8 @@
 /* SubnetPal - exporters (CSV, Markdown, text, FortiOS, client handover doc). Pure, no DOM. window.Fmt / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'));
-  else root.Fmt = factory(root.Access);
-}(typeof self !== 'undefined' ? self : this, function (Access) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./policy.js'), require('./remote.js'));
+  else root.Fmt = factory(root.Access, root.Policy, root.Remote);
+}(typeof self !== 'undefined' ? self : this, function (Access, Policy, Remote) {
   'use strict';
 
   const FORTI_NOTE = 'Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules.';
@@ -94,6 +94,55 @@
     });
   }
 
+  // Website filter + application control profiles for the policies that ask for them. Returns Map(policy id -> { web, app } profile names).
+  function profileCLI(L, pols) {
+    const out = new Map(), webs = [], apps = [];
+    pols.forEach(p => {
+      if (!p.web && !p.app) return;
+      const e = {}; out.set(p.id, e);
+      if (p.web) { e.web = 'SP_Web_' + (webs.length + 1); webs.push({ name: e.web, w: p.web }); }
+      if (p.app) { e.app = 'SP_App_' + (apps.length + 1); apps.push({ name: e.app, a: p.app }); }
+    });
+    if (webs.length) {
+      L.push('', '# Website filtering. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. Category IDs are unverified.');
+      L.push('config webfilter urlfilter');
+      webs.forEach(({ name, w }, i) => {
+        const sites = String(w.sites || '').split(/[\s,;]+/).map(s => s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim()).filter(Boolean);
+        const act = w.mode === 'allow' ? 'allow' : 'block';
+        L.push(`    edit ${101 + i}`, `        set name ${q(name + '_urls')}`, '        config entries');
+        sites.forEach((s, k) => L.push(`            edit ${k + 1}`, `                set url ${q(s)}`, '                set type simple', `                set action ${act}`, '            next'));
+        if (w.mode === 'allow') L.push(`            edit ${sites.length + 1}`, '                set url "*"', '                set type wildcard', '                set action block', '            next');
+        L.push('        end', '    next');
+      });
+      L.push('end', '', 'config webfilter profile');
+      webs.forEach(({ name, w }, i) => {
+        L.push(`    edit ${q(name)}`, '        config web', `            set urlfilter-table ${101 + i}`, '        end');
+        const cats = (w.cats || []).filter(Boolean);
+        if (cats.length) {
+          L.push('        config ftgd-wf', '            config filters');
+          cats.forEach((c, k) => L.push(`                edit ${k + 1}`, `                    set category ${c}`, `                    set action ${w.mode === 'allow' ? 'monitor' : 'block'}`, '                next'));
+          L.push('            end', '        end');
+        }
+        L.push('    next');
+      });
+      L.push('end');
+    }
+    if (apps.length) {
+      L.push('', '# Application control. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. Category IDs are unverified.');
+      L.push('config application list');
+      apps.forEach(({ name, a }) => {
+        const cats = (a.cats || []).filter(Boolean);
+        L.push(`    edit ${q(name)}`, '        config entries', '            edit 1');
+        if (cats.length) L.push(`                set category ${cats.join(' ')}`);
+        L.push(`                set action ${a.mode === 'allow' ? 'pass' : 'block'}`, '            next');
+        if (a.mode === 'allow') L.push('            edit 2', '                set action block', '            next');
+        L.push('        end', '    next');
+      });
+      L.push('end');
+    }
+    return out;
+  }
+
   // ifName: the single interface-name placeholder the user edits.
   function toFortiOS(result, project, ifName) {
     const ph = (ifName && String(ifName).trim()) || 'PORT_CHANGE_ME';
@@ -165,36 +214,48 @@
     });
     L.push('end');
 
-    const pols = Access.policies(allocs);
+    // Policies come from the Policies section (edited list) or, untouched, from the default access rules for this plan.
+    const res = Policy.resolve(Policy.effective(project, allocs), allocs);
+    const pols = res.pols;
     const internal = info.filter(x => Access.isInternal(x.a));
     if (pols.some(p => p.to === 'internal') && internal.length) {
       L.push('', 'config firewall addrgrp', '    edit "SP_INTERNAL"');
       L.push('        set member ' + internal.map(x => q(x.obj)).join(' '));
       L.push('    next', 'end');
     }
-    if (pols.length) {
-      L.push('', '# STARTER policies: review, tighten services, add logging/UTM profiles before any real use.');
-      L.push('config firewall policy');
-      pols.forEach(p => {
-        const f = byAlloc.get(p.from);
-        const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
-        const pname = ('SP_' + fname(p.name.replace('(block)', 'block'))).slice(0, 35);
-        L.push('    edit 0');
-        L.push(`        set name ${q(pname)}`);
-        L.push(`        set srcintf ${q(f.name)}`);
-        L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
-        L.push(`        set action ${p.action}`);
-        L.push(`        set srcaddr ${q(f.obj)}`);
-        L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP_INTERNAL' : t.obj)}`);
-        L.push('        set schedule "always"');
-        L.push(`        set service ${p.services.map(q).join(' ')}`);
-        if (p.to === 'internet' && p.action === 'accept') L.push('        set nat enable');
-        L.push('        set logtraffic all');
-        L.push(`        set comments ${q('SubnetPal starter policy')}`);
-        L.push('    next');
-      });
-      L.push('end');
-    }
+    // Optional security profiles (website filter, application control) attached to individual policies.
+    const prof = profileCLI(L, pols);
+    const usedNames = new Set();
+    const polName = (pre, p) => { let n = (pre + fname(p.name.replace('(block)', 'block'))).slice(0, 35), k = 2; while (usedNames.has(n)) n = (pre + fname(p.name.replace('(block)', 'block'))).slice(0, 32) + '_' + k++; usedNames.add(n); return n; };
+    L.push('', '# ' + Policy.NOTE);
+    L.push('# Policies are ordered top to bottom (first match wins); the last one denies everything else.');
+    L.push('config firewall policy');
+    pols.forEach(p => {
+      const f = byAlloc.get(p.from);
+      const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
+      L.push('    edit 0');
+      L.push(`        set name ${q(polName('SP_', p))}`);
+      L.push(`        set srcintf ${q(f.name)}`);
+      L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
+      L.push(`        set action ${p.action}`);
+      L.push(`        set srcaddr ${q(f.obj)}`);
+      L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP_INTERNAL' : t.obj)}`);
+      L.push('        set schedule "always"');
+      L.push(`        set service ${p.services.map(q).join(' ')}`);
+      if (p.action === 'accept' && p.nat) L.push('        set nat enable');
+      L.push(`        set logtraffic ${p.log ? 'all' : 'disable'}`);
+      const pr = prof.get(p.id);
+      if (pr && p.action === 'accept') {
+        L.push('        set utm-status enable', '        set ssl-ssh-profile "certificate-inspection"');
+        if (pr.web) L.push(`        set webfilter-profile ${q(pr.web)}`);
+        if (pr.app) L.push(`        set application-list ${q(pr.app)}`);
+      }
+      L.push(`        set comments ${q('SubnetPal policy')}`);
+      L.push('    next');
+    });
+    L.push('    edit 0', '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
+      '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', `        set comments ${q('SubnetPal final deny')}`, '    next', 'end');
+    res.skipped.forEach(n => L.push(`# Skipped (network not in the current plan): ${n}`));
     if (result.v6) {
       info.forEach(x => { x.obj6 = ('SP6_' + x.obj.slice(3)).slice(0, 79); });
       L.push('', 'config firewall address6');
@@ -206,21 +267,68 @@
         L.push('', 'config firewall addrgrp6', '    edit "SP6_INTERNAL"', '        set member ' + internal.map(x => q(x.obj6)).join(' '), '    next', 'end');
       }
       if (pols.length) {
-        L.push('', '# STARTER IPv6 policies mirror the IPv4 ones. No NAT. Review before any real use.');
+        L.push('', '# IPv6 policies mirror the IPv4 ones (no NAT, no website or application profiles). ' + Policy.NOTE);
         L.push('config firewall policy6');
+        usedNames.clear();
         pols.forEach(p => {
           const f = byAlloc.get(p.from);
           const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
-          const pname = ('SP6_' + fname(p.name.replace('(block)', 'block'))).slice(0, 35);
-          L.push('    edit 0', `        set name ${q(pname)}`, `        set srcintf ${q(f.name)}`);
+          L.push('    edit 0', `        set name ${q(polName('SP6_', p))}`, `        set srcintf ${q(f.name)}`);
           L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
           L.push(`        set action ${p.action}`, `        set srcaddr ${q(f.obj6)}`);
           L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
-          L.push('        set schedule "always"', `        set service ${p.services.map(q).join(' ')}`, '        set logtraffic all');
-          L.push(`        set comments ${q('SubnetPal starter policy')}`, '    next');
+          L.push('        set schedule "always"', `        set service ${p.services.map(q).join(' ')}`, `        set logtraffic ${p.log ? 'all' : 'disable'}`);
+          L.push(`        set comments ${q('SubnetPal policy')}`, '    next');
         });
-        L.push('end');
+        L.push('    edit 0', '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
+          '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', 'end');
       }
+    }
+    L.push('', '# ' + FORTI_NOTE);
+    return L.join('\n') + '\n';
+  }
+
+  // Just the address objects, profiles and policies from the main snippet (interfaces and DHCP left out).
+  function toPolicyFortiOS(result, project, ifName) {
+    const full = toFortiOS(result, project, ifName);
+    const i = full.indexOf('config firewall address\n');
+    const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
+      `# >>> INTERFACE NAME PLACEHOLDER: "${(ifName && String(ifName).trim()) || 'PORT_CHANGE_ME'}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ''];
+    return head.join('\n') + '\n' + (i >= 0 ? full.slice(i) : full);
+  }
+
+  // ---------- IPsec remote access (dial-up) ----------
+  function toRemoteFortiOS(result, project, ifName) {
+    const pool = Remote.plan(result, project);
+    if (!pool) return '';
+    const ph = (ifName && String(ifName).trim()) || 'PORT_CHANGE_ME';
+    const L = ['# ===== SubnetPal IPsec remote access snippet =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE, '# Verify on the lab VM before applying. PSK_CHANGE_ME, VPN_USERS_CHANGE_ME and the proposals below are placeholders.'];
+    if (!pool.ok) { L.push('# ' + pool.error); return L.join('\n') + '\n'; }
+    const names = ifaceNames(result.allocations, ph);
+    const reach = Remote.reachList(result, project);
+    const idx = a => result.allocations.indexOf(a);
+    const objOf = a => 'SP_' + (fname(a.name) || 'net');
+    L.push(`# Internet-facing interface is assumed to be "${WAN_IF}". Interface names for office networks use the placeholder "${ph}" like the main snippet.`);
+    pool.notes.forEach(n => L.push('# ' + n));
+    L.push('', 'config firewall address', '    edit "SP_VPN_POOL"', `        set subnet ${pool.network} ${pool.netmask}`, `        set comment ${q('VPN user pool ' + pool.cidr)}`, '    next');
+    reach.forEach(a => L.push(`    edit ${q(objOf(a))}`, `        set subnet ${a.network} ${a.netmask}`, `        set comment ${q(a.name + ' (' + a.cidr + ')')}`, '    next'));
+    L.push('end');
+    if (reach.length) L.push('', 'config firewall addrgrp', '    edit "SP_VPN_SPLIT"', '        set member ' + reach.map(a => q(objOf(a))).join(' '), '    next', 'end');
+    else L.push('', '# No office networks are ticked for remote staff, so there is no split-tunnel list or policy.');
+    L.push('', '# Phase 1: IKEv2 dial-up. Local users in a group, authenticated with a pre-shared key and XAuth (placeholders).',
+      'config vpn ipsec phase1-interface', '    edit "SP_VPN"', '        set type dynamic', `        set interface ${q(WAN_IF)}`, '        set ike-version 2',
+      '        set peertype any', '        set net-device disable', '        set mode-cfg enable', '        set proposal aes256-sha256', '        set dhgrp 14',
+      '        set dpd on-idle', '        set xauthtype auto', '        set authusrgrp "VPN_USERS_CHANGE_ME"',
+      `        set ipv4-start-ip ${pool.first}`, `        set ipv4-end-ip ${pool.last}`, `        set ipv4-netmask ${pool.netmask}`);
+    if (reach.length) L.push('        set ipv4-split-include "SP_VPN_SPLIT"');
+    L.push('        set add-route enable', '        set psksecret PSK_CHANGE_ME', '    next', 'end',
+      '', '# Phase 2', 'config vpn ipsec phase2-interface', '    edit "SP_VPN"', '        set phase1name "SP_VPN"', '        set proposal aes256-sha256', '    next', 'end');
+    if (reach.length) {
+      L.push('', '# Policy: VPN users reach only the ticked office networks.', 'config firewall policy');
+      reach.forEach(a => L.push('    edit 0', `        set name ${q(('SP_VPN_to_' + fname(a.name)).slice(0, 35))}`, '        set srcintf "SP_VPN"', `        set dstintf ${q(names[idx(a)])}`,
+        '        set action accept', '        set srcaddr "SP_VPN_POOL"', `        set dstaddr ${q(objOf(a))}`, '        set schedule "always"', '        set service "ALL"', '        set logtraffic all',
+        `        set comments ${q('SubnetPal remote access')}`, '    next'));
+      L.push('end');
     }
     L.push('', '# ' + FORTI_NOTE);
     return L.join('\n') + '\n';
@@ -300,7 +408,7 @@
   }
 
   return {
-    FORTI_NOTE, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, handoverRows, handoverCells,
+    FORTI_NOTE, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));
