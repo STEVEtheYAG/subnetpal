@@ -82,8 +82,19 @@
       <input class="cnt" data-count="${o.key}" inputmode="numeric" autocomplete="off" placeholder="How many ${esc(o.unit)}?" aria-label="Number of ${esc(o.unit)}" hidden>
     </div>`).join('');
   }
+  // Custom "Other" pools: rebuilt only on add / remove / client switch so typing keeps focus.
+  function renderOthers() {
+    const list = cur().intake.others || [];
+    $('#others').innerHTML = list.map((o, i) => `<div class="otherrow" data-oi="${i}">
+      <input class="oname" data-oname maxlength="20" autocomplete="off" placeholder="Name, e.g. Printers" aria-label="Pool name" value="${esc(o.name)}">
+      <input class="cnt ocount" data-ocount inputmode="numeric" autocomplete="off" placeholder="How many?" aria-label="Number of devices" value="${esc(o.count || '')}">
+      <button type="button" class="btn sm" data-oremove aria-label="Remove this pool">×</button>
+    </div>`).join('');
+    $('#addOther').disabled = list.length >= Intake.MAX_OTHERS;
+  }
   function renderIntake() {
     const c = cur(), it = c.intake;
+    renderOthers();
     $('#i-name').value = c.name || ''; $('#i-site').value = c.site || '';
     $('#c-staff').value = it.counts.staff || '';
     Intake.OPTIONAL.forEach(o => {
@@ -110,6 +121,11 @@
     if (t.id === 'i-name') c.name = t.value;
     else if (t.id === 'i-site') c.site = t.value;
     else if (t.id === 'i-wan') it.wanNote = t.value;
+    else if (t.dataset.oname !== undefined || t.dataset.ocount !== undefined) {
+      const o = (it.others || [])[Number(t.closest('.otherrow').dataset.oi)]; if (!o) return;
+      if (t.dataset.oname !== undefined) o.name = t.value; else o.count = t.value;
+      replan = true;
+    }
     else if (t.id === 'c-staff') { it.counts.staff = t.value; replan = true; }
     else if (t.dataset.count) { it.counts[t.dataset.count] = t.value; replan = true; }
     else if (t.dataset.req) {
@@ -131,6 +147,18 @@
   function bindIntake() {
     const body = $('#sidebody');
     body.addEventListener('input', onIntake);
+    $('#addOther').addEventListener('click', () => {
+      const it = cur().intake; it.others = it.others || [];
+      if (it.others.length >= Intake.MAX_OTHERS) return;
+      it.others.push({ name: '', count: '' });
+      Intake.applyIntake(cur()); renderOthers(); touch(); recalc();
+      const n = $$('[data-oname]'); n[n.length - 1].focus();
+    });
+    $('#others').addEventListener('click', e => {
+      const b = e.target.closest('[data-oremove]'); if (!b) return;
+      cur().intake.others.splice(Number(b.closest('.otherrow').dataset.oi), 1);
+      Intake.applyIntake(cur()); renderOthers(); touch(); recalc();
+    });
     $('#expansion').addEventListener('click', e => {
       const b = e.target.closest('.opt'); if (!b) return;
       cur().intake.expansion = b.dataset.exp; Intake.applyIntake(cur()); renderExpansion(); touch(); recalc();

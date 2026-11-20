@@ -19,12 +19,13 @@
     { kind: 'iot', key: 'iot', name: 'IoT', role: 'LAN', label: 'IoT', unit: 'IoT devices' },
   ];
 
+  const MAX_OTHERS = 10;
   const uid = () => Math.random().toString(36).slice(2, 9);
   const num = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; };
 
   function newIntake() {
     const counts = {}; COUNT_FIELDS.forEach(k => { counts[k] = 0; });
-    return { counts, existing: '', expansion: 'none', req: { servers: false, guest: false, dmz: false, voice: false, cameras: false, iot: false }, wanNote: '' };
+    return { counts, existing: '', expansion: 'none', req: { servers: false, guest: false, dmz: false, voice: false, cameras: false, iot: false }, others: [], wanNote: '' };
   }
   function newClient(name) {
     return {
@@ -72,6 +73,17 @@
       mk('staff', 'Staff LAN', Math.max(host.staff, 2), 'LAN'),
     ];
     optional.forEach(({ o, n }) => nets.push(mk(o.kind, o.name, Math.max(n, 2), o.role, o.kind === 'dmz' || o.kind === 'servers' ? { dhcp: false } : {})));
+    // Custom "Other" device pools: own VLAN (90, 100, ...), internet-only like IoT.
+    const taken = nets.map(n => n.name.toLowerCase()).concat(['transit', 'loopback']);
+    (intake.others || []).slice(0, MAX_OTHERS).forEach((o, i) => {
+      let name = String((o && o.name) || '').trim().slice(0, 20) || `Other ${i + 1}`;
+      const base = name; let k = 2;
+      while (taken.indexOf(name.toLowerCase()) >= 0) name = `${base} ${k++}`;
+      taken.push(name.toLowerCase());
+      const n = num(o && o.count);
+      if (!n) notes.push(`${name} had no device count, so it was sized for 2 devices.`);
+      nets.push(mk('other', name, Math.max(n, 2), 'LAN', { vlan: 90 + 10 * i }));
+    });
     nets.push(mk('transit', 'Transit', 2, 'Transit'), mk('loopback', 'Loopback', 1, 'Loopback'));
     return { networks: nets, notes };
   }
@@ -100,6 +112,7 @@
     const it = client.intake = client.intake || newIntake();
     it.counts = Object.assign(newIntake().counts, it.counts);
     it.req = it.req || {};
+    if (!Array.isArray(it.others)) it.others = [];
     if (it.req.servers === undefined) it.req.servers = num(it.counts.servers) > 0;
     if (!client.v6) client.v6 = { enabled: false, prefix: '' };
     client.opts = Object.assign({}, Calc.DEFAULT_OPTS, client.opts);
@@ -129,5 +142,5 @@
   // Client -> the project object Calc.plan and Fmt expect.
   const toProject = client => Object.assign({}, client, { existing: parseExisting(client.intake && client.intake.existing) });
 
-  return { GROWTH, EXPANSION_LABEL, VLAN_IDS, COUNT_FIELDS, OPTIONAL, SAMPLES, migrate, newIntake, newClient, parseExisting, pickParent, suggestNetworks, applyIntake, sampleClient, toProject };
+  return { GROWTH, EXPANSION_LABEL, VLAN_IDS, COUNT_FIELDS, OPTIONAL, MAX_OTHERS, SAMPLES, migrate, newIntake, newClient, parseExisting, pickParent, suggestNetworks, applyIntake, sampleClient, toProject };
 }));

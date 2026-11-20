@@ -215,6 +215,9 @@ body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 .chev { color: var(--mute); transition: transform .15s; flex: none; }
 .sumline[aria-expanded="true"] .chev, .acc.open > .acc-head .chev, details[open] > summary .chev { transform: rotate(180deg); }
+.otherrow { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto; gap: 8px; margin: 0 0 8px 34px; align-items: center; }
+.otherrow input { margin: 0; width: 100%; min-width: 0; }
+#addOther { margin: 4px 0 0 34px; }
 .reqrow { display: block; }
 .reqrow .cnt { margin: 0 0 8px 34px; width: calc(100% - 34px); }
 .reqrow .cnt[hidden] { display: none; }

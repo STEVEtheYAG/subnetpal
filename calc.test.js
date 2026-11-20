@@ -648,5 +648,36 @@ test('client report: escapes client text and handles a missing map or WAN note',
   assert.ok(CR.build(r, p).includes('No details about your internet connection'));
 });
 
+console.log('Other device pools');
+test('"Other" pools become their own networks (VLAN 90, 100...), sized by count, names made unique', () => {
+  const c = I.newClient('x'); c.intake.counts.staff = 20;
+  c.intake.others = [{ name: 'Printers', count: '12' }, { name: 'printers', count: '' }, { name: '', count: '5' }, { name: 'Staff LAN', count: 3 }];
+  I.applyIntake(c); const r = C.plan(I.toProject(c));
+  assert.ok(r.ok, JSON.stringify(r.errors));
+  const nets = c.networks.filter(n => n.kind === 'other');
+  assert.deepStrictEqual(nets.map(n => n.name), ['Printers', 'printers 2', 'Other 3', 'Staff LAN 2']);
+  assert.deepStrictEqual(nets.map(n => n.vlan), [90, 100, 110, 120]);
+  assert.strictEqual(by(r, 'Printers').cidr, r.parent.cidr.replace(/\d+\.0\/16$/, '90.0/24'));
+  assert.strictEqual(nets[1].hosts, 2);                                  // no count -> 2
+  assert.ok(c.genNotes.some(n => /no device count/.test(n)));
+});
+test('"Other" pools are internet-only, reachable from Management, and capped', () => {
+  const A = require('./access.js');
+  const c = I.newClient('x'); c.intake.counts.staff = 10; c.intake.others = [{ name: 'Printers', count: 4 }];
+  I.applyIntake(c); const r = C.plan(I.toProject(c));
+  const m = A.matrix(r.allocations); const row = m.rows.find(x => x.name === 'Printers');
+  assert.strictEqual(row.internet, true); assert.ok(row.cells.every(v => v !== true));
+  assert.strictEqual(m.rows.find(x => x.name === 'Management').cells[m.cols.indexOf('Printers')], true);
+  c.intake.others = Array.from({ length: 15 }, (_, i) => ({ name: 'P' + i, count: 1 }));
+  I.applyIntake(c); assert.strictEqual(c.networks.filter(n => n.kind === 'other').length, I.MAX_OTHERS);
+});
+test('"Other" pools appear in the client report and old clients migrate', () => {
+  const c = I.newClient('x'); c.intake.counts.staff = 10; c.intake.others = [{ name: 'Printers', count: 4 }];
+  I.applyIntake(c); const p = I.toProject(c), r = C.plan(p);
+  const h = require('./report.js').build(r, p);
+  assert.ok(h.includes('4 Printers') && h.includes('A separate network for your Printers devices'));
+  const old = I.newClient('old'); delete old.intake.others; I.migrate(old); assert.deepStrictEqual(old.intake.others, []);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

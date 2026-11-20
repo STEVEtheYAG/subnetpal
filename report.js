@@ -24,7 +24,9 @@
     transit: { label: 'Link to other equipment', who: 'A small private link that joins the firewall to your internet provider’s or another site’s equipment.' },
     loopback: { label: 'Firewall identity', who: 'A private address that gives the firewall a fixed identity on the network. No devices connect here.' },
   };
-  const kindInfo = a => KIND[Access.kindOf(a)] || { label: a.name, who: 'Added to suit your site.' };
+  const kindInfo = a => Access.kindOf(a) === 'other'
+    ? { label: a.name, who: `A separate network for your ${a.name} devices. Kept apart from staff and servers, with internet access only.` }
+    : KIND[Access.kindOf(a)] ||{ label: a.name, who: 'Added to suit your site.' };
 
   const EXP_PLAIN = {
     none: 'No major growth expected. A small safety margin was added.',
@@ -110,6 +112,7 @@ section.page h2{margin-top:0}
 
     // What you asked for
     const counts = Object.keys(COUNT_PLAIN).filter(k => n0(c[k]) > 0).map(k => plural(n0(c[k]), COUNT_PLAIN[k][0], COUNT_PLAIN[k][1]));
+    (it.others || []).forEach(o => { if (n0(o && o.count) > 0 && String(o.name || '').trim()) counts.push(`${n0(o.count)} ${String(o.name).trim()}`); });
     const sep = Object.keys(SEP_PLAIN).filter(k => req[k]).map(k => SEP_PLAIN[k]);
     const existing = project.existing || [];
     const reqRows = [

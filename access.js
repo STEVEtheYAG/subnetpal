@@ -6,7 +6,7 @@
   'use strict';
 
   const ROLE_KIND = { LAN: 'lan', Guest: 'guest', DMZ: 'dmz', Mgmt: 'mgmt', WAN: 'wan', Transit: 'transit', Loopback: 'loopback', '': 'lan' };
-  const INTERNAL = ['mgmt', 'staff', 'lan', 'servers', 'voice', 'cameras', 'iot'];
+  const INTERNAL = ['mgmt', 'staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other'];
   const NO_POLICY = ['transit', 'loopback', 'wan'];
 
   // Starter rules, by source kind: may it reach the internet, and which kinds may it initiate to.
@@ -17,9 +17,10 @@
     voice: { internet: true, to: ['servers'] },
     cameras: { internet: false, to: ['servers'] },
     iot: { internet: true, to: [] },
+    other: { internet: true, to: [] },
     guest: { internet: true, to: [] },
     dmz: { internet: true, to: [] },
-    mgmt: { internet: true, to: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'dmz'] },
+    mgmt: { internet: true, to: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'dmz'] },
   };
 
   const kindOf = a => a.kind || ROLE_KIND[a.role || ''] || 'lan';
@@ -74,6 +75,7 @@
       case 'voice': return has ? `Separate voice VLAN for ${n0(c.voice)} IP phones so call traffic can be prioritised and kept apart from other devices.` : 'Voice VLAN for IP phones.';
       case 'cameras': return has ? `Cameras VLAN for ${n0(c.cameras)} cameras, kept off the staff network and allowed to reach the recorder on the servers network only.` : 'Cameras VLAN.';
       case 'iot': return has ? `IoT VLAN for ${n0(c.iot)} smart or embedded devices, isolated so a compromised device cannot reach staff or servers.` : 'IoT VLAN.';
+      case 'other': return `Custom device pool "${a.name}" (${a.hosts} planned), kept on its own VLAN with internet access only.`;
       case 'guest': return has ? `Guest Wi-Fi separation requested: ${n0(c.guest)} guest users get internet access only, with no route to internal systems.` : 'Guest network with internet-only access.';
       case 'dmz': return has ? `DMZ for ${n0(c.dmz)} public-facing server${n0(c.dmz) === 1 ? '' : 's'}, isolated so a compromise cannot reach the internal network.` : 'DMZ for public-facing servers.';
       case 'transit': return 'Point-to-point /31 link for routing to the upstream router or another site.';
