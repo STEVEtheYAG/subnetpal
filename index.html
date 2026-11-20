@@ -157,10 +157,12 @@
         <div id="pollist"></div>
         <div class="polfinal"><b>Last rule:</b> deny everything else (always applied at the bottom).</div>
         <p id="polnote" class="hint warnbox"></p>
-        <div class="btnrow">
-          <button class="btn sm" type="button" data-copy="polcli">Copy policy CLI</button>
-        </div>
-        <pre class="code" id="pre-polcli"></pre>
+        <details class="more2" id="polclibox"><summary>Policy CLI</summary>
+          <div class="btnrow">
+            <button class="btn sm" type="button" data-copy="polcli">Copy policy CLI</button>
+          </div>
+          <pre class="code" id="pre-polcli"></pre>
+        </details>
       </div>
     </section>
 
@@ -203,8 +205,10 @@
             <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
           </label>
           <p id="fortinote" class="hint warnbox"></p>
-          <button class="btn sm" type="button" data-copy="forti">Copy FortiOS CLI</button>
-          <pre class="code" id="pre-forti"></pre>
+          <details class="more2" id="forticlibox"><summary>FortiOS CLI</summary>
+            <button class="btn sm" type="button" data-copy="forti">Copy FortiOS CLI</button>
+            <pre class="code" id="pre-forti"></pre>
+          </details>
         </div>
         <div id="out-csv" hidden>
           <button class="btn sm" type="button" data-copy="csv">Copy CSV</button>
