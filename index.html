@@ -102,11 +102,15 @@
   <main id="right" class="results">
     <div id="warn" role="alert"></div>
 
-    <section class="acc" id="sec-plan">
-      <button class="acc-head" type="button" data-sec="plan" aria-expanded="false" aria-controls="body-plan">
-        <span class="t">Plan</span><span class="s" id="sum-plan"></span><span class="chev" aria-hidden="true">▾</span>
-      </button>
-      <div class="acc-body" id="body-plan" hidden>
+    <div class="rtabs" role="tablist" aria-label="Results">
+      <button type="button" role="tab" data-tab="plan" aria-controls="sec-plan">Plan</button>
+      <button type="button" role="tab" data-tab="diagram" aria-controls="sec-diagram">Diagram</button>
+      <button type="button" role="tab" data-tab="export" aria-controls="sec-export">Export</button>
+    </div>
+
+    <section class="acc" id="sec-plan" role="tabpanel">
+      <div class="acc-body" id="body-plan">
+        <p class="sectionsum" id="sum-plan"></p>
         <div id="map"></div>
         <label class="check small"><input type="checkbox" id="fitUsed" checked> Zoom the map to the used space</label>
         <div id="legend" class="legend"></div>
@@ -116,11 +120,9 @@
       </div>
     </section>
 
-    <section class="acc" id="sec-diagram">
-      <button class="acc-head" type="button" data-sec="diagram" aria-expanded="false" aria-controls="body-diagram">
-        <span class="t">Diagram</span><span class="s" id="sum-diagram"></span><span class="chev" aria-hidden="true">▾</span>
-      </button>
+    <section class="acc" id="sec-diagram" role="tabpanel">
       <div class="acc-body" id="body-diagram" hidden>
+        <p class="sectionsum" id="sum-diagram"></p>
         <div id="topo" class="topo"></div>
         <div class="btnrow noprint">
           <button id="btnSvg" class="btn sm" type="button">Download SVG</button>
@@ -130,11 +132,9 @@
       </div>
     </section>
 
-    <section class="acc" id="sec-export">
-      <button class="acc-head" type="button" data-sec="export" aria-expanded="false" aria-controls="body-export">
-        <span class="t">Export</span><span class="s" id="sum-export"></span><span class="chev" aria-hidden="true">▾</span>
-      </button>
+    <section class="acc" id="sec-export" role="tabpanel">
       <div class="acc-body" id="body-export" hidden>
+        <p class="sectionsum" id="sum-export"></p>
         <div class="reportbox">
           <button class="btn" type="button" id="btnReport">Generate client documentation</button>
           <p class="hint">Opens a plain-language report for the client. Use Print, then Save as PDF.</p>
@@ -165,13 +165,6 @@
     </section>
   </main>
 </div>
-
-<nav class="tabs" aria-label="Jump to a section">
-  <span class="jumplabel">Jump to:</span>
-  <button type="button" data-tab="plan">Plan</button>
-  <button type="button" data-tab="diagram">Diagram</button>
-  <button type="button" data-tab="export">Export</button>
-</nav>
 
 <script src="calc.js"></script>
 <script src="calc6.js"></script>

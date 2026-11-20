@@ -25,7 +25,7 @@
 
   // ---------- state ----------
   let result = null;
-  let openSec = null;
+  let openSec = 'plan';
   let outView = 'forti';
   const openCards = new Set();
 
@@ -328,28 +328,27 @@
     else if (name === 'diagram') renderTopo();
     else if (name === 'export') renderExport();
   }
-  // Only one section is open at a time; name = null closes all.
+  // Tabs at the top of the results: exactly one section is shown at a time.
   function setOpen(name, scroll) {
+    if (SECTIONS.indexOf(name) < 0) name = 'plan';
     openSec = name;
     SECTIONS.forEach(s => {
       const on = s === name;
       $('#sec-' + s).classList.toggle('open', on);
-      $(`#sec-${s} .acc-head`).setAttribute('aria-expanded', String(on));
       $('#body-' + s).hidden = !on;
     });
-    $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
-    if (name) renderSection(name);
-    if (scroll && name) jump(name);
+    $$('.rtabs button').forEach(b => { const on = b.dataset.tab === name; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    renderSection(name);
+    if (scroll) jump();
   }
-  function jump(name) {
-    const el = $('#sec-' + name), reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const behavior = reduce ? 'auto' : 'smooth';
-    if (isPhone()) window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - 8), behavior });
-    else { const r = $('#right'); r.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top - r.getBoundingClientRect().top + r.scrollTop - 8), behavior }); }
+  // Bring the tab bar into view (top of the results).
+  function jump() {
+    const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    if (isPhone()) window.scrollTo({ top: Math.max(0, $('.rtabs').getBoundingClientRect().top + window.scrollY - 60), behavior });
+    else $('#right').scrollTo({ top: 0, behavior });
   }
   function bindAccordion() {
-    $$('.acc-head').forEach(b => b.addEventListener('click', () => { const n = b.dataset.sec; setOpen(openSec === n ? null : n, openSec !== n); }));
-    $$('nav.tabs button').forEach(b => b.addEventListener('click', () => setOpen(b.dataset.tab, true)));
+    $$('.rtabs button').forEach(b => b.addEventListener('click', () => setOpen(b.dataset.tab, false)));
     $('#fitUsed').addEventListener('change', renderMap);
     $('#cards').addEventListener('toggle', e => { const d = e.target.closest('details'); if (!d) return; if (d.open) openCards.add(d.dataset.name); else openCards.delete(d.dataset.name); }, true);
   }
@@ -396,6 +395,7 @@
     const done = c.name && c.name !== 'New client' && Number(c.intake.counts.staff) > 0;
     if (isPhone() && done) setSideCollapsed(true); // filled in: show just the one-line summary
   }());
+  setOpen('plan', false);
   registerSW();
   const legacy = { clients: 'plan', intake: 'plan', plan: 'plan', map: 'diagram', outputs: 'export' };
   window.SubnetPal = {
