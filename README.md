@@ -4,14 +4,13 @@ Offline-first installable PWA for client-intake-driven IP planning (VLSM) on fir
 
 ## How to use
 
-The app is one scrolling page. Once a client is open, Clients, Intake, Plan, Map and Outputs are stacked as numbered sections, and the floating **Jump to:** bar at the bottom scrolls to any of them and highlights the one in view. With no client open, only the Clients section shows.
+SubnetPal is one page. On a tablet or desktop the intake is a fixed left panel and the results scroll on the right, updating live as you type. On a phone the intake is a top section that collapses to a one-line summary ("Client: Acme · 5 networks") once you tap **Done**; tap the line to reopen it.
 
-1. **Clients** (home): tap **New client**, or add a sample client to see how it works. Open, duplicate or delete saved clients here.
-2. **Intake:** client name, site, date, device counts per segment, existing ranges in use (one CIDR per line), expansion (None / Soon / Big growth) and requirement ticks. Add a WAN/VPN note (handover only).
-3. **Generate plan:** picks a free private /16, then suggests Management, Staff LAN, Servers, Transit and Loopback plus any ticked networks with a count above 0. On the **Plan** screen, edit rows, VLANs and options; it recalculates live. Overlap with existing ranges shows as a red warning.
-4. **Map:** a graphical network map (Internet, firewall, every network with VLAN, CIDR and gateway; Guest and DMZ shown as isolated). Download or copy it as SVG for documents.
-5. **Outputs:** Handover (Markdown, HTML or Print), FortiOS CLI, CSV, generic text. Each has a Copy button. Set the interface name placeholder once on the FortiOS tab.
-6. Everything saves on the device automatically and works offline after the first load.
+1. **Intake (left):** client name, site, staff count and expected growth (None 25% / Soon 50% / Big growth 100% buffer). Tick **Guest wifi, Servers, DMZ, Voice / phones, Cameras or IoT** to add that network; a count box appears only when the box is ticked. Staff LAN, Management and Transit/loopback are always planned. **More detail** holds existing IP ranges, the WAN/VPN note (handover only), the addressing style, an address block override and IPv6.
+2. **Results (right)** are four collapsed sections, one open at a time: **Plan** (address map plus one card per network; tap a card for DHCP, static, broadcast, wildcard and host counts), **Diagram** (the network diagram, SVG download or copy), **Handover** (document for the client, Copy Markdown or HTML, Print / PDF) and **Export** (FortiOS CLI, CSV, text, each with a Copy button).
+3. The floating **Jump to:** bar at the bottom (Plan, Diagram, Handover, Export) opens a section and smooth-scrolls to it.
+4. The client menu at the top of the intake switches clients. Duplicate, delete and sample clients are under it. Everything saves on the device automatically and works offline after the first load.
+5. One warning banner appears at the top of the results only when something is wrong (an overlap with an existing range, the plan does not fit, or the addressing style had to fall back).
 
 ## Install on iPhone
 
@@ -45,17 +44,20 @@ Installed copies update on their next online open (cache-first with background r
 
 **Planning**
 - **Sizing:** needed = hosts + ceil(hosts x growth%) + network + broadcast + gateway, rounded up to a power of two; smallest block /30. Growth is not applied to /31 or /32.
-- **Expansion:** None = 25%, Soon = 50%, Big growth = 100% (sets the Growth buffer option; you can still change it on the Plan screen).
+- **Expansion:** None = 25%, Soon = 50%, Big growth = 100% (sets the growth buffer; it is used for sizing in packed style and for the spare-host notes in the handover).
 - **Allocation:** largest first, each block aligned to its own size, placed in the lowest free spot that avoids existing ranges. Results display in address order.
 - **/31 and /32:** role Transit with 2 or fewer hosts is a /31 (no gateway, no broadcast). Role Loopback (1 host) is a /32.
 - **Existing ranges:** they are reserved wherever they fall inside the parent block. If the parent overlaps one (only possible when you override the parent), the plan still avoids it and shows a red warning. Existing ranges that overlap each other give a warning.
-- **Parent auto-pick:** first free `10.x.0.0/16`, trying 10.20 upward then 10.2 to 10.19, then 10.0 and 10.1, then 172.16 to 172.31, then 192.168.0.0/16. If every option clashes, enter one manually. Typing a parent switches to manual; **Auto-pick parent** switches back. Changing existing ranges on Intake re-picks an auto parent live.
-- **Intake to networks:** Management, Staff LAN, Servers, Transit (/31) and Loopback (/32) are always suggested. Voice, Cameras, IoT, Guest and DMZ are added only if ticked and the count is above 0.
-  - Staff LAN = staff + wired + Wi-Fi devices. Servers = servers (minimum 2). Management = 10 + 1 per 30 Wi-Fi devices (access points). DMZ has its own count field ("Public servers (DMZ)"), which I added.
-  - A count for something that is not ticked is added to the Staff LAN (to Servers for DMZ) and noted on the Plan screen, so nothing is silently dropped. A ticked box with a count of 0 adds nothing and says so.
+- **Parent auto-pick:** first free `10.x.0.0/16`, trying 10.20 upward then 10.2 to 10.19, then 10.0 and 10.1, then 172.16 to 172.31, then 192.168.0.0/16. If every option clashes, enter one manually. Typing an address block under More detail switches to manual; clearing it switches back to auto. Changing existing ranges on Intake re-picks an auto parent live.
+- **Intake to networks:** Management, Staff LAN, Transit (/31) and Loopback (/32) are always planned. Servers, Guest, DMZ, Voice, Cameras and IoT are planned only when ticked. Servers is no longer always on.
+  - Staff LAN = staff count. Every ticked network is sized from its count (minimum 2). Management = 10 hosts. DMZ and Servers get no DHCP range.
+  - An unticked box is not planned, and any count typed earlier is ignored (the count box is hidden). A ticked box with no count is planned for 2 devices and a note says so (shown under "Unused space and notes").
+  - The older wired and Wi-Fi counts are gone from the form. Clients saved earlier keep them and they are still added to the Staff LAN. Older clients keep Servers only if they had a servers count.
+- **Addressing style (default one /24 per VLAN):** each network with a VLAN gets `<parent base>.<VLAN ID>.0/24`, so VLAN 20 in `10.20.0.0/16` is `10.20.20.0/24` with the gateway on `.1`. Transit (/31) and Loopback (/32) have no VLAN and share the third-octet-0 block (`10.20.0.0/31`, `10.20.0.2/32`). Every VLAN network is a /24 whatever its size, so the DHCP range simply fills the /24.
+- **Fallback to packed VLSM:** if one /24 per VLAN is not possible, the plan uses the old packed VLSM and the warning banner says why. The reasons are: the parent is smaller than a /16, a VLAN ID is missing, above 255 or used twice, a network needs more than a /24 (over about 200 hosts with growth), or the /24 for a VLAN overlaps an existing range. You can also pick Packed yourself under More detail.
 - **VLAN IDs:** Mgmt 10, Staff 20, Servers 30, Voice 40, Cameras 50, IoT 60, Guest 70, DMZ 80; Transit and Loopback none. All editable. Generating again resets them.
 - **Static and DHCP:** static reserve is the first N addresses after the gateway (default 10, clamped on small networks with a warning). DHCP follows the static reserve plus the offset. DHCP is offered on Staff LAN, Voice, Cameras, IoT and Guest, and not on Management, Servers, DMZ, Transit or Loopback.
-- **Editing:** editing any row marks the plan as edited, and Generate or Regenerate then asks before replacing it.
+- **No row editing:** the plan is always generated from the intake, live, so the Plan section has no editable rows (VLAN IDs, names and per-network options are not editable). Changing the intake replaces the plan. The only manual override is the address block under More detail. Clients saved earlier are regenerated from their intake when opened, so hand-edited rows from the previous version are not kept.
 
 **Access rules (handover matrix and FortiOS starter policies)**
 - Staff: internet, Servers, DMZ. Servers: internet only. Voice: internet and Servers. Cameras: Servers only (no internet). IoT and Guest: internet only (Guest limited to DNS/HTTP/HTTPS). DMZ: internet only, explicitly blocked from internal networks. Guest is also explicitly blocked from internal networks.
@@ -77,3 +79,7 @@ Installed copies update on their next online open (cache-first with background r
 - **IPv6 hosts:** client networks (the ones that get DHCP in IPv4) send router advertisements so devices self-configure (SLAAC). No DHCPv6 is generated, and no static IPv6 reserve is planned.
 - **IPv6 FortiOS:** adds `config ipv6` on each interface, `firewall address6`, `addrgrp6` and a `firewall policy6` mirror of the IPv4 starter policies (no NAT). `policy6` is assumed to exist in FortiOS 8.0, which is untested. If your build merges IPv6 into `firewall policy`, adapt that block. Same "Generated, untested" note applies.
 - **IPv6 limits:** no IPv6 in the gaps list or the unused-space numbers, no inbound DMZ policy, no prefix delegation to downstream routers, and no IPv6 WAN address plan (the WAN note is free text).
+
+- **Plan cards:** each card shows only name, type (VLAN n, Port, Transit or Loopback), usable range, port/gateway IP and netmask, with no CIDR and no device counts. DHCP, static, broadcast, wildcard, host counts and (when IPv6 is on) the IPv6 subnet are behind a tap. CIDR notation stays in the address-block summary, the unused-space detail and the exports.
+- **Phone layout:** the intake collapses by itself on load only if the client already has a name and a staff count. The Done button collapses it at any time. Breakpoint is 900px: wider is the two-panel layout.
+- **Accordion:** the four result sections start collapsed and one opens at a time. Tapping a Jump to item opens that section (closing the others) and scrolls to it.

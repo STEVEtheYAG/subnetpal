@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>SubnetPal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Client-intake IP planner (VLSM) for firewall builds. FortiGate CLI export and client handover document.">
+<meta name="description" content="Client-intake IP planner for firewall builds. FortiGate CLI export and client handover document.">
 <meta name="theme-color" content="#0f1419">
 <meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
@@ -22,202 +22,164 @@
     <h1>SubnetPal</h1>
     <span id="netpill" class="pill" title="Offline status">…</span>
   </div>
-  <div id="crumb" class="crumb"></div>
 </header>
 
-<main>
-  <!-- 1. CLIENT LIST -->
-  <section id="tab-clients" class="panel">
-    <div class="card">
-      <h2>Clients</h2>
-      <button id="btnNewClient" class="btn block primary">+ New client</button>
-      <div id="clientList"></div>
-    </div>
-    <div class="card">
-      <h2>Sample clients</h2>
-      <p class="hint">Add a ready-made client to see how the app works.</p>
-      <div id="samples" class="btnrow"></div>
-    </div>
-  </section>
-
-  <!-- 2. INTAKE -->
-  <section id="tab-intake" class="panel" hidden>
-    <div class="card">
-      <h2>Client</h2>
-      <div class="grid2">
-        <label class="fld span2">Client name<input id="i-name" autocomplete="off" placeholder="e.g. Acme Ltd"></label>
-        <label class="fld">Site / location<input id="i-site" autocomplete="off" placeholder="e.g. Head office"></label>
-        <label class="fld">Date<input id="i-date" type="date"></label>
+<div class="app">
+  <!-- LEFT: client intake (a top section on phones) -->
+  <aside id="side" class="side">
+    <button id="sumBtn" class="sumline" type="button" aria-expanded="true" aria-controls="sidebody">
+      <span id="sumText">Client</span><span class="chev" aria-hidden="true">▾</span>
+    </button>
+    <div id="sidebody">
+      <div class="clientbar">
+        <select id="clientSel" aria-label="Client"></select>
+        <button id="btnNew" class="btn sm" type="button">New</button>
       </div>
-    </div>
+      <details class="manage">
+        <summary>Duplicate, delete or add a sample</summary>
+        <div class="btnrow">
+          <button id="btnDup" class="btn sm" type="button">Duplicate</button>
+          <button id="btnDel" class="btn sm danger" type="button">Delete</button>
+        </div>
+        <div id="samples" class="btnrow"></div>
+      </details>
 
-    <div class="card">
-      <h2>Device counts per segment</h2>
-      <div class="grid3" id="counts"></div>
-      <p class="hint">Staff LAN = staff + wired + Wi-Fi devices. Counts for a segment that is not ticked below are added to the Staff LAN (or Servers for DMZ), so nothing is dropped.</p>
-    </div>
-
-    <div class="card">
-      <h2>Requirements</h2>
-      <div id="reqs"></div>
-    </div>
-
-    <div class="card">
-      <h2>Existing IP ranges in use</h2>
-      <label class="fld">One CIDR per line (leave empty if none)
-        <textarea id="i-existing" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16&#10;192.168.1.0/24"></textarea>
+      <label class="fld">Client name
+        <input id="i-name" autocomplete="off" placeholder="e.g. Acme Ltd">
       </label>
-    </div>
+      <label class="fld">Site / location
+        <input id="i-site" autocomplete="off" placeholder="e.g. Head office">
+      </label>
+      <label class="fld">Staff
+        <input id="c-staff" inputmode="numeric" autocomplete="off" placeholder="How many people?">
+      </label>
 
-    <div class="card">
-      <h2>Expected expansion</h2>
-      <div id="expansion" class="seg3" role="radiogroup" aria-label="Expected expansion">
-        <button class="opt" data-exp="none" role="radio">None<small>25% buffer</small></button>
-        <button class="opt" data-exp="soon" role="radio">Soon<small>50% buffer</small></button>
-        <button class="opt" data-exp="big" role="radio">Big growth<small>100% buffer</small></button>
+      <div class="fld">Expected growth
+        <div id="expansion" class="seg3" role="radiogroup" aria-label="Expected growth">
+          <button type="button" class="opt" role="radio" data-exp="none"><b>None</b><small>25% buffer</small></button>
+          <button type="button" class="opt" role="radio" data-exp="soon"><b>Soon</b><small>50% buffer</small></button>
+          <button type="button" class="opt" role="radio" data-exp="big"><b>Big growth</b><small>100% buffer</small></button>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <h2>WAN / VPN note</h2>
-      <label class="fld">Shown in the handover document only. Not planned.
-        <textarea id="i-wan" rows="3" placeholder="e.g. Fibre 500/500 plus 4G backup. IPsec to HQ."></textarea>
-      </label>
-    </div>
-
-    <div class="card">
-      <h2>IPv6</h2>
-      <label class="check"><input type="checkbox" id="v6-on"> Plan IPv6 alongside IPv4 (dual stack)</label>
-      <label class="fld">Site prefix. A /48 is typical. Leave a random private (ULA) one, or paste the prefix the ISP delegated.
-        <input id="v6-prefix" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="fd12:3456:789a::/48">
-      </label>
-      <button id="v6-new" class="btn" type="button">New random private prefix</button>
-      <p id="v6-msg" class="hint"></p>
-    </div>
-
-    <button id="btnGenerate" class="btn block primary big">Generate plan →</button>
-    <p class="hint">Generating replaces the network list on the Plan screen. Existing ranges and the growth setting also update the plan live.</p>
-  </section>
-
-  <!-- 3. PLAN -->
-  <section id="tab-plan" class="panel" hidden>
-    <div id="status" class="status" role="status"></div>
-    <div id="notes"></div>
-
-    <div class="card">
-      <h2>Parent block</h2>
-      <label class="fld">CIDR <span id="parentAutoTag" class="tag"></span>
-        <input id="parent" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16">
-      </label>
-      <div class="btnrow mt">
-        <button id="btnAutoParent" class="btn sm">Auto-pick parent</button>
-        <button id="btnRegen" class="btn sm">Regenerate from intake</button>
+      <div class="fld">Also needed (tick to add a network)
+        <div id="reqs"></div>
       </div>
-    </div>
+      <p class="hint">Always planned: Staff LAN, Management, Transit and loopback.</p>
 
-    <div class="card">
-      <h2>Options</h2>
-      <div class="grid2">
-        <label class="fld">Gateway position
-          <select id="o-gwPos" data-o="gwPos"><option value="first">First usable</option><option value="last">Last usable</option></select>
+      <details id="more" class="more">
+        <summary>More detail</summary>
+        <label class="fld">Existing IP ranges in use (one per line, optional)
+          <textarea id="i-existing" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16&#10;192.168.1.0/24"></textarea>
         </label>
-        <label class="fld">Growth buffer %
-          <input id="o-growth" data-o="growth" inputmode="numeric" autocomplete="off">
+        <label class="fld">WAN / VPN note (handover document only)
+          <textarea id="i-wan" rows="3" placeholder="e.g. Fibre 500/500 plus 4G backup. IPsec to HQ."></textarea>
         </label>
-        <label class="fld">Static reserve (after gateway)
-          <input id="o-staticReserve" data-o="staticReserve" inputmode="numeric" autocomplete="off">
+        <label class="fld">Addressing style
+          <select id="i-style">
+            <option value="vlan24">One /24 per VLAN (third octet = VLAN ID)</option>
+            <option value="packed">Packed (smallest subnets that fit)</option>
+          </select>
         </label>
-        <label class="fld">DHCP start offset
-          <input id="o-dhcpOffset" data-o="dhcpOffset" inputmode="numeric" autocomplete="off">
+        <label class="fld">Address block (leave empty to auto-pick a free private /16)
+          <input id="i-parent" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="auto">
         </label>
+        <label class="check"><input type="checkbox" id="v6-on"> Plan IPv6 as well (dual stack)</label>
+        <label class="fld">IPv6 site prefix (a /48 is typical)
+          <input id="v6-prefix" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="fd12:3456:789a::/48">
+        </label>
+        <button id="v6-new" class="btn sm" type="button">New random private prefix</button>
+        <p id="v6-msg" class="hint"></p>
+      </details>
+
+      <button id="btnDone" class="btn primary block phoneonly" type="button">Done</button>
+    </div>
+  </aside>
+
+  <!-- RIGHT: results, update live from the left -->
+  <main id="right" class="results">
+    <div id="warn" role="alert"></div>
+
+    <section class="acc" id="sec-plan">
+      <button class="acc-head" type="button" data-sec="plan" aria-expanded="false" aria-controls="body-plan">
+        <span class="t">Plan</span><span class="s" id="sum-plan"></span><span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="acc-body" id="body-plan" hidden>
+        <div id="map"></div>
+        <label class="check small"><input type="checkbox" id="fitUsed" checked> Zoom the map to the used space</label>
+        <div id="legend" class="legend"></div>
+        <h3>Networks <span class="dim">(tap a card for more)</span></h3>
+        <div id="cards" class="cards"></div>
+        <details class="more2"><summary>Unused space and notes</summary><div id="gaps"></div></details>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Networks</h2>
-      <div id="rows"></div>
-      <button id="btnAdd" class="btn block">+ Add network</button>
-    </div>
-
-    <h2 class="sect">Results</h2>
-    <div id="results"></div>
-    <div id="gaps"></div>
-
-    <div class="card">
-      <h2>Address map</h2>
-      <label class="check"><input type="checkbox" id="fitUsed"> Zoom to used space</label>
-      <div id="map"></div>
-      <div id="legend" class="legend"></div>
-    </div>
-  </section>
-
-  <!-- NETWORK MAP -->
-  <section id="tab-map" class="panel" hidden>
-    <div class="card">
-      <h2>Network map</h2>
-      <div id="topo"></div>
-      <div class="legend topolegend">
-        <div><span class="swatch" style="background:#4aa3ff"></span>Internal</div>
-        <div><span class="swatch" style="background:#f5b942"></span>Guest (internet only)</div>
-        <div><span class="swatch" style="background:#ff6b6b"></span>DMZ (isolated)</div>
-        <div><span class="swatch" style="background:#93a1b0"></span>Link (dashed)</div>
+    <section class="acc" id="sec-diagram">
+      <button class="acc-head" type="button" data-sec="diagram" aria-expanded="false" aria-controls="body-diagram">
+        <span class="t">Diagram</span><span class="s" id="sum-diagram"></span><span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="acc-body" id="body-diagram" hidden>
+        <div id="topo" class="topo"></div>
+        <div class="btnrow noprint">
+          <button id="btnSvg" class="btn sm" type="button">Download SVG</button>
+          <button id="btnSvgCopy" class="btn sm" type="button">Copy SVG</button>
+        </div>
+        <p id="topomsg" class="hint"></p>
       </div>
-      <div class="btnrow mt">
-        <button class="btn primary" id="btnSvg">Download SVG</button>
-        <button class="btn" id="btnSvgCopy">Copy SVG</button>
+    </section>
+
+    <section class="acc" id="sec-handover">
+      <button class="acc-head" type="button" data-sec="handover" aria-expanded="false" aria-controls="body-handover">
+        <span class="t">Handover</span><span class="s" id="sum-handover"></span><span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="acc-body" id="body-handover" hidden>
+        <div class="btnrow noprint">
+          <button class="btn sm" type="button" data-copy="md">Copy Markdown</button>
+          <button class="btn sm" type="button" data-copy="html">Copy HTML</button>
+          <button class="btn sm" type="button" id="btnPrint">Print / PDF</button>
+        </div>
+        <div id="docbox"></div>
       </div>
-      <div id="topomsg" class="hint" aria-live="polite"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- 4. OUTPUTS -->
-  <section id="tab-outputs" class="panel" hidden>
-    <div class="subtabs noprint" role="tablist">
-      <button data-out="handover" class="on">Handover</button>
-      <button data-out="forti">FortiOS</button>
-      <button data-out="csv">CSV</button>
-      <button data-out="text">Text</button>
-    </div>
-
-    <div id="out-handover" class="card">
-      <div class="noprint btnrow">
-        <button class="btn primary" data-copy="md">Copy Markdown</button>
-        <button class="btn" data-copy="html">Copy HTML</button>
-        <button class="btn" id="btnPrint">Print</button>
+    <section class="acc" id="sec-export">
+      <button class="acc-head" type="button" data-sec="export" aria-expanded="false" aria-controls="body-export">
+        <span class="t">Export</span><span class="s" id="sum-export"></span><span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="acc-body" id="body-export" hidden>
+        <div class="subtabs">
+          <button type="button" data-out="forti">FortiOS CLI</button>
+          <button type="button" data-out="csv">CSV</button>
+          <button type="button" data-out="text">Text</button>
+        </div>
+        <div id="out-forti">
+          <label class="fld">Interface name placeholder (used in the CLI)
+            <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
+          </label>
+          <p id="fortinote" class="hint warnbox"></p>
+          <button class="btn sm" type="button" data-copy="forti">Copy FortiOS CLI</button>
+          <pre class="code" id="pre-forti"></pre>
+        </div>
+        <div id="out-csv" hidden>
+          <button class="btn sm" type="button" data-copy="csv">Copy CSV</button>
+          <pre class="code" id="pre-csv"></pre>
+        </div>
+        <div id="out-text" hidden>
+          <button class="btn sm" type="button" data-copy="text">Copy text</button>
+          <pre class="code" id="pre-text"></pre>
+        </div>
+        <p id="exmsg" class="hint"></p>
       </div>
-      <div id="docbox"></div>
-    </div>
-
-    <div id="out-forti" class="card" hidden>
-      <label class="fld noprint">Interface name placeholder
-        <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
-      </label>
-      <p class="hint noprint">One field: used as the parent port for VLAN interfaces (or the interface name for non-VLAN networks). Policies assume the internet interface is <b>wan1</b>.</p>
-      <div class="warnbox">⚠ <span id="fortinote"></span></div>
-      <button class="btn primary block" data-copy="forti">Copy FortiOS CLI</button>
-      <pre id="pre-forti" class="code" tabindex="0"></pre>
-    </div>
-
-    <div id="out-csv" class="card" hidden>
-      <button class="btn primary block" data-copy="csv">Copy CSV</button>
-      <pre id="pre-csv" class="code" tabindex="0"></pre>
-    </div>
-
-    <div id="out-text" class="card" hidden>
-      <button class="btn primary block" data-copy="text">Copy generic text</button>
-      <pre id="pre-text" class="code" tabindex="0"></pre>
-    </div>
-    <div id="exmsg" class="hint noprint" aria-live="polite"></div>
-  </section>
-</main>
+    </section>
+  </main>
+</div>
 
 <nav class="tabs" aria-label="Jump to a section">
   <span class="jumplabel">Jump to:</span>
-  <button data-tab="clients" class="on">Clients</button>
-  <button data-tab="intake">Intake</button>
-  <button data-tab="plan">Plan</button>
-  <button data-tab="map">Map</button>
-  <button data-tab="outputs">Outputs</button>
+  <button type="button" data-tab="plan">Plan</button>
+  <button type="button" data-tab="diagram">Diagram</button>
+  <button type="button" data-tab="handover">Handover</button>
+  <button type="button" data-tab="export">Export</button>
 </nav>
 
 <script src="calc.js"></script>

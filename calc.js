@@ -99,6 +99,7 @@
       dhcpOffset: num(o.dhcpOffset, DEFAULT_OPTS.dhcpOffset),
       staticReserve: num(o.staticReserve, DEFAULT_OPTS.staticReserve),
       growth: num(o.growth, DEFAULT_OPTS.growth),
+      style: o.style === 'vlan24' ? 'vlan24' : 'packed', // 'vlan24' = one /24 per VLAN, third octet = VLAN ID
     };
   }
 
@@ -271,13 +272,59 @@
       return -1;
     };
 
-    const placed = [];
-    const unplaced = [];
-    for (const it of order) {
-      const at = findSpot(it.size);
-      if (at < 0) { unplaced.push(it); continue; }
-      placed.push(describe(it.n, at, it.sizing.prefix, it.sizing, opts));
-      occupied.push({ start: at, end: at + it.size - 1, label: String(it.n.name).trim() });
+    // One /24 per VLAN: network = parent base + VLAN ID x 256. Transit and Loopback share the third-octet-0 block.
+    // Returns { spots } or { why } when it cannot be done (the caller then falls back to packed VLSM).
+    const layoutVlan24 = () => {
+      if (p.size < 65536) return { why: `the parent block ${result.parent.cidr} is smaller than a /16, so there is no room for a /24 per VLAN.` };
+      const spots = [], seen = new Set(), infra = [];
+      for (const it of items) {
+        const name = String(it.n.name).trim();
+        if ((it.n.role || '') === 'Loopback' || it.sizing.prefix >= 31) { infra.push(it); continue; }
+        const raw = String(it.n.vlan == null ? '' : it.n.vlan).trim(), v = Number(raw);
+        if (raw === '' || !Number.isInteger(v) || v < 1 || v > 255) return { why: `${name} has no VLAN ID between 1 and 255.` };
+        if (it.sizing.prefix < 24) return { why: `${name} needs more than a /24 (${it.n.hosts} hosts plus growth).` };
+        if (seen.has(v)) return { why: `VLAN ${v} is used by more than one network.` };
+        seen.add(v);
+        const at = p.start + v * 256;
+        if (at + 255 > p.end) return { why: `VLAN ${v} does not fit inside ${result.parent.cidr}.` };
+        if (occupied.some(o => o.start <= at + 255 && o.end >= at)) return { why: `the /24 for VLAN ${v} (${intToIp(at)}) overlaps an existing range.` };
+        spots.push({ it, at, prefix: 24 });
+      }
+      infra.sort((a, b) => b.size - a.size || a.i - b.i);
+      for (const it of infra) {
+        let pos = p.start, found = -1;
+        while (pos + it.size - 1 <= p.start + 255) {
+          const end = pos + it.size - 1;
+          if (!occupied.some(o => o.start <= end && o.end >= pos) && !spots.some(s => s.infra && s.at <= end && s.at + sizeOf(s.prefix) - 1 >= pos)) { found = pos; break; }
+          pos += it.size;
+        }
+        if (found < 0) return { why: `there is no free space for ${String(it.n.name).trim()} in the ${intToIp(p.start)} block.` };
+        spots.push({ it, at: found, prefix: it.sizing.prefix, infra: true });
+      }
+      return { spots };
+    };
+
+    let placed = [];
+    let unplaced = [];
+    result.style = 'packed';
+    if (opts.style === 'vlan24') {
+      const v24 = layoutVlan24();
+      if (v24.why) result.styleNote = `Packed addressing is being used instead of one /24 per VLAN, because ${v24.why}`;
+      else {
+        result.style = 'vlan24';
+        v24.spots.forEach(s => {
+          placed.push(describe(s.it.n, s.at, s.prefix, s.it.sizing, opts));
+          occupied.push({ start: s.at, end: s.at + sizeOf(s.prefix) - 1, label: String(s.it.n.name).trim() });
+        });
+      }
+    }
+    if (result.style === 'packed') {
+      for (const it of order) {
+        const at = findSpot(it.size);
+        if (at < 0) { unplaced.push(it); continue; }
+        placed.push(describe(it.n, at, it.sizing.prefix, it.sizing, opts));
+        occupied.push({ start: at, end: at + it.size - 1, label: String(it.n.name).trim() });
+      }
     }
     placed.sort((a, b) => a.start - b.start);
     result.allocations = placed;

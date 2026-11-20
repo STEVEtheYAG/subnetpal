@@ -331,26 +331,29 @@ const withCounts = (counts, req, expansion, existing) => {
   c.intake.expansion = expansion || 'none'; c.intake.existing = existing || ''; return I.applyIntake(c);
 };
 const names = c => c.networks.map(n => n.name);
-test('always suggests Management, Staff LAN, Servers, Transit, Loopback', () => {
-  assert.deepStrictEqual(names(withCounts({})), ['Management', 'Staff LAN', 'Servers', 'Transit', 'Loopback']);
+test('always suggests Management, Staff LAN, Transit, Loopback; Servers only when ticked', () => {
+  assert.deepStrictEqual(names(withCounts({})), ['Management', 'Staff LAN', 'Transit', 'Loopback']);
+  assert.deepStrictEqual(names(withCounts({ servers: 4 })), ['Management', 'Staff LAN', 'Transit', 'Loopback']); // count alone does nothing
+  assert.deepStrictEqual(names(withCounts({ servers: 4 }, { servers: true })), ['Management', 'Staff LAN', 'Servers', 'Transit', 'Loopback']);
 });
-test('optional networks need the box ticked AND a count > 0', () => {
-  const c = withCounts({ staff: 10, voice: 12, cameras: 4, iot: 3, guest: 8, dmz: 2 }, { voice: true, cameras: true, iot: true, guest: true, dmz: true });
-  assert.deepStrictEqual(names(c), ['Management', 'Staff LAN', 'Servers', 'Voice', 'Cameras', 'IoT', 'Guest', 'DMZ', 'Transit', 'Loopback']);
+test('each ticked box plans its own network (checkbox-driven)', () => {
+  const c = withCounts({ staff: 10, voice: 12, cameras: 4, iot: 3, guest: 8, dmz: 2, servers: 3 }, { servers: true, voice: true, cameras: true, iot: true, guest: true, dmz: true });
+  assert.deepStrictEqual(names(c), ['Management', 'Staff LAN', 'Servers', 'Guest', 'DMZ', 'Voice', 'Cameras', 'IoT', 'Transit', 'Loopback']);
+  ['voice', 'cameras', 'iot', 'guest', 'dmz', 'servers'].forEach(k => {
+    const one = withCounts({ staff: 10, voice: 12, cameras: 4, iot: 3, guest: 8, dmz: 2, servers: 3 }, { [k]: true });
+    assert.strictEqual(names(one).length, 5, k); // 4 always-on + only the ticked one
+  });
+});
+test('unticked boxes are not planned and their counts are ignored; ticked with no count is sized for 2', () => {
+  const c = withCounts({ staff: 10, wired: 2, voice: 5, guest: 4, dmz: 3 });
+  assert.deepStrictEqual(names(c), ['Management', 'Staff LAN', 'Transit', 'Loopback']);
+  assert.strictEqual(c.networks.find(n => n.name === 'Staff LAN').hosts, 12); // nothing folded in
   const ticked0 = withCounts({ staff: 10 }, { voice: true, guest: true });
-  assert.ok(!names(ticked0).includes('Voice') && !names(ticked0).includes('Guest'));
-  assert.ok(ticked0.genNotes.some(n => /Voice was ticked but the count is 0/.test(n)));
-});
-test('counts without a ticked box are folded in, not dropped', () => {
-  const c = withCounts({ staff: 10, wired: 2, wifi: 3, voice: 5, guest: 4, servers: 2, dmz: 3 });
-  const net = n => c.networks.find(x => x.name === n);
-  assert.strictEqual(net('Staff LAN').hosts, 10 + 2 + 3 + 5 + 4);
-  assert.strictEqual(net('Servers').hosts, 5); // 2 + 3 dmz
-  assert.ok(!names(c).includes('Voice') && !names(c).includes('DMZ'));
-  assert.ok(c.genNotes.length === 3);
+  assert.strictEqual(ticked0.networks.find(n => n.name === 'Voice').hosts, 2);
+  assert.ok(ticked0.genNotes.some(n => /Voice was ticked with no count/.test(n)));
 });
 test('host counts: staff = staff+wired+wifi, servers min 2, mgmt = 10 + APs', () => {
-  const c = withCounts({ staff: 20, wired: 5, wifi: 61, servers: 1 });
+  const c = withCounts({ staff: 20, wired: 5, wifi: 61, servers: 1 }, { servers: true });
   const net = n => c.networks.find(x => x.name === n);
   assert.strictEqual(net('Staff LAN').hosts, 86);
   assert.strictEqual(net('Servers').hosts, 2);
@@ -359,14 +362,14 @@ test('host counts: staff = staff+wired+wifi, servers min 2, mgmt = 10 + APs', ()
   assert.strictEqual(net('Loopback').hosts, 1);
 });
 test('auto VLAN IDs by role, editable, Transit/Loopback none', () => {
-  const c = withCounts({ staff: 5, voice: 5, cameras: 5, iot: 5, guest: 5, dmz: 5 }, { voice: true, cameras: true, iot: true, guest: true, dmz: true });
+  const c = withCounts({ staff: 5, voice: 5, cameras: 5, iot: 5, guest: 5, dmz: 5, servers: 5 }, { servers: true, voice: true, cameras: true, iot: true, guest: true, dmz: true });
   const v = {}; c.networks.forEach(n => { v[n.name] = n.vlan; });
   assert.deepStrictEqual(v, { Management: 10, 'Staff LAN': 20, Servers: 30, Voice: 40, Cameras: 50, IoT: 60, Guest: 70, DMZ: 80, Transit: '', Loopback: '' });
   c.networks[1].vlan = 200; // editable
   assert.strictEqual(C.plan(I.toProject(c)).allocations.find(a => a.name === 'Staff LAN').vlan, 200);
 });
 test('roles and DHCP defaults on suggested networks', () => {
-  const c = withCounts({ staff: 5, guest: 5, dmz: 2 }, { guest: true, dmz: true });
+  const c = withCounts({ staff: 5, guest: 5, dmz: 2, servers: 2 }, { servers: true, guest: true, dmz: true });
   const r = C.plan(I.toProject(c));
   assert.ok(r.ok, JSON.stringify(r.errors));
   assert.ok(by(r, 'Staff LAN').dhcpStart && by(r, 'Guest').dhcpStart);
@@ -376,7 +379,7 @@ test('roles and DHCP defaults on suggested networks', () => {
 
 console.log('Expansion buffer');
 test('None / Soon / Big growth = 25 / 50 / 100 % and change the sizing', () => {
-  const pre = x => { const c = withCounts({ staff: 40 }, {}, x); const r = C.plan(I.toProject(c)); assert.ok(r.ok, JSON.stringify(r.errors)); return [c.opts.growth, by(r, 'Staff LAN').prefix, by(r, 'Staff LAN').buffer]; };
+  const pre = x => { const c = withCounts({ staff: 40 }, {}, x); c.opts.style = 'packed'; const r = C.plan(I.toProject(c)); assert.ok(r.ok, JSON.stringify(r.errors)); return [c.opts.growth, by(r, 'Staff LAN').prefix, by(r, 'Staff LAN').buffer]; };
   assert.deepStrictEqual(pre('none'), [25, 26, 10]); // 40+10+3=53 -> /26
   assert.deepStrictEqual(pre('soon'), [50, 26, 20]); // 40+20+3=63 -> /26
   assert.deepStrictEqual(pre('big'), [100, 25, 40]); // 40+40+3=83 -> /25
@@ -408,7 +411,7 @@ test('sample clients build valid plans', () => {
   const b = I.sampleClient('Small branch with DMZ');
   assert.strictEqual(b.parent, '10.21.0.0/16'); // HQ 10.20/16 avoided
   assert.strictEqual(b.opts.growth, 50);
-  assert.deepStrictEqual(names(b), ['Management', 'Staff LAN', 'Servers', 'Voice', 'Cameras', 'Guest', 'DMZ', 'Transit', 'Loopback']);
+  assert.deepStrictEqual(names(b), ['Management', 'Staff LAN', 'Servers', 'Guest', 'DMZ', 'Voice', 'Cameras', 'Transit', 'Loopback']);
 });
 
 console.log('Access rules and outputs');
@@ -551,6 +554,63 @@ test('new clients default to dual stack with a ULA; map shows IPv6', () => {
   const { p, r } = v6sample();
   const svg = require('./topology.js').build(r, p, { cols: 1, theme: 'light', standalone: true });
   assert.ok(svg.includes('v6 2001:db8:abcd:20::/64'));
+});
+
+console.log('Addressing style: /24 per VLAN');
+const v24 = (counts, req, mod) => { const c = withCounts(counts, req); if (mod) mod(c); const p = I.toProject(c); return { c, p, r: C.plan(p) }; };
+const third = cidr => Number(cidr.split('.')[2]);
+test('default style: one /24 per VLAN, third octet = VLAN ID (VLAN 20 = 10.x.20.0/24)', () => {
+  const { c, r } = v24({ staff: 20, servers: 2, guest: 5, dmz: 2, voice: 5, cameras: 5, iot: 5 }, { servers: true, guest: true, dmz: true, voice: true, cameras: true, iot: true });
+  assert.strictEqual(c.opts.style, 'vlan24');
+  assert.ok(r.ok, JSON.stringify(r.errors)); assert.strictEqual(r.style, 'vlan24'); assert.ok(!r.styleNote);
+  const base = c.parent.split('.').slice(0, 2).join('.');
+  const vlans = r.allocations.filter(a => a.vlan !== '');
+  assert.strictEqual(vlans.length, 8);
+  vlans.forEach(a => {
+    assert.strictEqual(a.cidr, `${base}.${a.vlan}.0/24`, a.name);
+    assert.strictEqual(third(a.cidr), a.vlan);
+    assert.strictEqual(a.gateway, `${base}.${a.vlan}.1`);
+    assert.strictEqual(a.netmask, '255.255.255.0');
+  });
+  assert.strictEqual(r.allocations.find(a => a.name === 'Staff LAN').cidr, `${base}.20.0/24`);
+  assert.strictEqual(C.findOverlaps(r.allocations).length, 0);
+});
+test('Transit is a /31 and Loopback a /32, both in the third-octet-0 block', () => {
+  const { c, r } = v24({ staff: 10 });
+  const base = c.parent.split('.').slice(0, 2).join('.');
+  const t = r.allocations.find(a => a.name === 'Transit'), l = r.allocations.find(a => a.name === 'Loopback');
+  assert.strictEqual(t.prefix, 31); assert.strictEqual(l.prefix, 32);
+  assert.strictEqual(third(t.cidr), 0); assert.strictEqual(third(l.cidr), 0);
+  assert.ok(t.cidr.startsWith(base + '.0.') && l.cidr.startsWith(base + '.0.'));
+  assert.strictEqual(C.findOverlaps(r.allocations).length, 0);
+});
+test('vlan24 fallback to packed with a note: parent too small / existing range in the way / duplicate VLAN / more than a /24', () => {
+  const small = v24({ staff: 20 }, {}, c => { c.parent = '10.50.0.0/22'; c.parentAuto = false; });
+  assert.ok(small.r.ok); assert.strictEqual(small.r.style, 'packed'); assert.ok(/smaller than a \/16/.test(small.r.styleNote));
+  assert.ok(small.r.allocations.every(a => a.cidr.startsWith('10.50.')));
+  const hit = v24({ staff: 20 }, {}, c => { c.parent = '10.60.0.0/16'; c.parentAuto = false; c.intake.existing = '10.60.20.0/24'; });
+  assert.strictEqual(hit.r.style, 'packed'); assert.ok(/VLAN 20/.test(hit.r.styleNote) && /existing range/.test(hit.r.styleNote));
+  const dup = v24({ staff: 20, guest: 5 }, { guest: true }, c => { c.networks.find(n => n.name === 'Guest').vlan = 20; });
+  assert.strictEqual(dup.r.style, 'packed'); assert.ok(/VLAN 20 is used by more than one/.test(dup.r.styleNote));
+  const big = v24({ staff: 400 });
+  assert.strictEqual(big.r.style, 'packed'); assert.ok(/needs more than a \/24/.test(big.r.styleNote));
+  [small, hit, dup, big].forEach(x => assert.strictEqual(C.findOverlaps(x.r.allocations).length, 0));
+});
+test('vlan24 keeps the existing-range rules: auto parent avoids existing ranges, plan still valid', () => {
+  const c = withCounts({ staff: 20 }, {}, 'none', '10.20.0.0/16\n10.21.0.0/16'), r = C.plan(I.toProject(c));
+  assert.strictEqual(c.parent, '10.22.0.0/16'); assert.ok(r.ok); assert.strictEqual(r.style, 'vlan24');
+});
+test('Calc.plan without a style option stays packed (backward compatible); packed can be chosen', () => {
+  const p = { parent: '10.0.0.0/24', networks: [{ name: 'A', hosts: 20, vlan: 20, role: 'LAN' }] };
+  const r = C.plan(p); assert.strictEqual(r.style, 'packed'); assert.strictEqual(r.allocations[0].prefix, 27);
+  const c = withCounts({ staff: 20 }); c.opts.style = 'packed'; I.applyIntake(c);
+  assert.strictEqual(c.opts.style, 'packed'); assert.strictEqual(C.plan(I.toProject(c)).style, 'packed');
+});
+test('migrating an older client: Servers stays on only if it had a count', () => {
+  const old = I.newClient('old'); delete old.intake.req.servers; old.intake.counts.servers = 3; delete old.v6;
+  I.migrate(old); assert.strictEqual(old.intake.req.servers, true); assert.strictEqual(old.v6.enabled, false);
+  const none = I.newClient('old2'); delete none.intake.req.servers; none.intake.counts.servers = 0;
+  I.migrate(none); assert.strictEqual(none.intake.req.servers, false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
