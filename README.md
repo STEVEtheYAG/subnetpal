@@ -4,6 +4,8 @@ Offline-first installable PWA for client-intake-driven IP planning (VLSM) on fir
 
 ## How to use
 
+The app is one scrolling page. Once a client is open, Clients, Intake, Plan, Map and Outputs are stacked as numbered sections, and the floating **Jump to:** bar at the bottom scrolls to any of them and highlights the one in view. With no client open, only the Clients section shows.
+
 1. **Clients** (home): tap **New client**, or add a sample client to see how it works. Open, duplicate or delete saved clients here.
 2. **Intake:** client name, site, date, device counts per segment, existing ranges in use (one CIDR per line), expansion (None / Soon / Big growth) and requirement ticks. Add a WAN/VPN note (handover only).
 3. **Generate plan:** picks a free private /16, then suggests Management, Staff LAN, Servers, Transit and Loopback plus any ticked networks with a count above 0. On the **Plan** screen, edit rows, VLANs and options; it recalculates live. Overlap with existing ranges shows as a red warning.

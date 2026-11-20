@@ -32,15 +32,33 @@
   function show(v) {
     if (v !== 'clients' && !cur()) v = 'clients';
     view = v;
-    $$('nav.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === v); b.disabled = b.dataset.tab !== 'clients' && !cur(); });
-    $$('.panel').forEach(p => { p.hidden = p.id !== 'tab-' + v; });
+    const has = !!cur();
+    $$('nav.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === v); b.disabled = b.dataset.tab !== 'clients' && !has; });
+    $$('.panel').forEach(p => { p.hidden = p.id !== 'tab-clients' && !has; }); // one scrolling page: all sections once a client is open
     $('#crumb').textContent = cur() && v !== 'clients' ? cur().name + (cur().site ? ' · ' + cur().site : '') : '';
-    if (v === 'clients') renderClients();
-    if (v === 'intake') renderIntake();
-    if (v === 'plan') { renderPlanInputs(); recalc(); }
-    if (v === 'map') { recalc(); renderTopo(); }
-    if (v === 'outputs') { recalc(); renderOutputs(); }
-    window.scrollTo(0, 0);
+    renderClients();
+    if (has) { renderIntake(); renderPlanInputs(); recalc(); }
+    jump(v);
+  }
+  // Scroll to a section. The floating "Jump to" menu and every show() call use this.
+  function jump(v) {
+    const el = $('#tab-' + v);
+    if (!el || v === 'clients') window.scrollTo(0, 0);
+    else window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - 12), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
+  // Highlight the section currently in view.
+  let spyBusy = false;
+  function spy() {
+    if (spyBusy) return; spyBusy = true;
+    setTimeout(() => {
+      spyBusy = false;
+      const ps = $$('.panel').filter(p => !p.hidden);
+      let at = ps[0] ? ps[0].id.slice(4) : 'clients';
+      ps.forEach(p => { if (p.getBoundingClientRect().top <= window.innerHeight * 0.35) at = p.id.slice(4); });
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4 && ps.length) at = ps[ps.length - 1].id.slice(4);
+      view = at;
+      $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === at));
+    }, 60);
   }
 
   // ---------- network map ----------
@@ -261,9 +279,7 @@
     result = Calc.plan(project());
     Calc6.annotate(result, cur().v6).forEach(w => result.warnings.push(w));
     renderV6Msg();
-    if (view === 'plan' || view === 'outputs' || view === 'intake') renderStatus();
-    if (view === 'plan') { renderResults(); renderMap(); }
-    if (view === 'outputs') renderOutputs();
+    renderStatus(); renderResults(); renderMap(); renderTopo(); renderOutputs();
     save();
   }
 
@@ -360,6 +376,7 @@
   buildIntakeForm();
   $$('nav.tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
   bindClients(); bindIntake(); bindPlan(); bindTopo(); bindOutputs();
+  window.addEventListener('scroll', spy, { passive: true });
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   show('clients');
