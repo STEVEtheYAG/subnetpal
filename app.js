@@ -231,7 +231,7 @@
           <dl class="nf">
             <div><dt>Usable range</dt><dd class="mono">${ipHtml(p.first)} - ${ipHtml(p.last)}</dd></div>
             <div><dt>Pool</dt><dd class="mono">${esc(p.cidr)}</dd></div>
-            <div><dt>Netmask</dt><dd class="mono">${ipHtml(p.netmask)}</dd></div>
+            <div><dt>Netmask</dt><dd class="mono">${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}</dd></div>
           </dl>
         </summary>
         <dl class="nf extra"><div><dt>Remote staff planned</dt><dd class="mono">${p.staff} + ${p.growth}% buffer</dd></div><div><dt>Pool size</dt><dd class="mono">${p.size.toLocaleString()} (${p.usable.toLocaleString()} usable)</dd></div><div><dt>Placement</dt><dd class="mono">${p.where === 'inside' ? 'office block, outside every network' : 'separate block'}</dd></div></dl>
@@ -255,7 +255,7 @@
           <dl class="nf">
             <div><dt>Usable range</dt><dd class="mono">${rangeHtml(a)}</dd></div>
             <div><dt>Port / gateway IP</dt><dd class="mono">${ipHtml(a.gateway || a.firstUsable || '-')}</dd></div>
-            <div><dt>Netmask</dt><dd class="mono">${ipHtml(a.netmask)}</dd></div>
+            <div><dt>Netmask</dt><dd class="mono">${ipHtml(a.netmask)} /${esc(a.prefix)}</dd></div>
           </dl>
         </summary>
         <dl class="nf extra">${extra.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${esc(v)}</dd></div>`).join('')}</dl>
@@ -490,7 +490,7 @@
     $('#vpnpool').innerHTML = !pool.ok ? `<p class="hint warnbox">${esc(pool.error)}</p>` :
       `<dl class="nf extra"><div><dt>VPN address pool</dt><dd class="mono">${esc(pool.cidr)}</dd></div>
         <div><dt>Usable range</dt><dd class="mono">${ipHtml(pool.first)} - ${ipHtml(pool.last)}</dd></div>
-        <div><dt>Netmask</dt><dd class="mono">${ipHtml(pool.netmask)}</dd></div>
+        <div><dt>Netmask</dt><dd class="mono">${ipHtml(pool.netmask)} /${esc(String(pool.cidr).split('/')[1])}</dd></div>
         <div><dt>Sized for</dt><dd class="mono">${pool.staff} staff + ${pool.growth}% buffer = ${pool.need} (pool holds ${pool.usable.toLocaleString()})</dd></div>
         <div><dt>Placement</dt><dd class="mono">${pool.where === 'inside' ? 'inside the office block, outside every network' : 'separate block (the office block is full)'}</dd></div></dl>` +
       pool.notes.map(n => `<p class="hint">${esc(n)}</p>`).join('');
