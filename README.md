@@ -37,7 +37,7 @@ Installed copies update on their next online open (cache-first with background r
 
 ## Files
 
-`topology.js` network map SVG · `calc.js` subnet maths (no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS, handover doc · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
+`topology.js` network map SVG · `calc.js` subnet maths (no DOM) · `calc6.js` IPv6 layer (BigInt, no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS, handover doc · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
 
 ## Assumptions
 
@@ -67,5 +67,11 @@ Installed copies update on their next online open (cache-first with background r
 
 **App**
 - **Storage:** clients live in `localStorage` (key `subnetpal.v2`) on the device. Nothing is sent anywhere. Clearing Safari website data deletes them, so copy outputs you need. The earlier "named projects" data (key `subnetpal.v1`) is not migrated.
-- **Validation:** hosts at least 1, VLAN 1-4094, names required and unique (case-insensitive), growth 0-500%, CIDRs strict (host bits set is an error). Duplicate VLAN IDs and non-RFC1918 parents are warnings. IPv4 only.
+- **Validation:** hosts at least 1, VLAN 1-4094, names required and unique (case-insensitive), growth 0-500%, CIDRs strict (host bits set is an error). Duplicate VLAN IDs and non-RFC1918 parents are warnings. The IPv4 plan is the source of truth; IPv6 is added on top (see below).
 - **Handover doc:** Markdown for pasting, printable HTML for PDF via Print. The WAN/VPN note appears there only and is never planned.
+- **IPv6 (dual stack):** on by default for new clients; untick it on Intake for IPv4 only. Older saved clients without the setting stay IPv4 only until you tick it.
+- **IPv6 site prefix:** a random private ULA `/48` (`fdxx:xxxx:xxxx::/48`, RFC 4193) is generated and kept with the client. Paste an ISP-delegated prefix to replace it. It must be `/56` or shorter. There is no existing-range avoidance for IPv6, because a random ULA does not clash in practice.
+- **IPv6 numbering:** every network gets one `/64`, the standard size, so there is no IPv6 sizing or growth buffer. The subnet number is the VLAN written as hex digits, so VLAN 20 is `...:20::/64` and VLAN 70 is `...:70::/64`. Networks without a usable VLAN take the first free number and a warning says so. Transit is a `/127` in subnet `fe` and Loopback is a `/128` in subnet `ff`. The firewall takes `::1` on each network.
+- **IPv6 hosts:** client networks (the ones that get DHCP in IPv4) send router advertisements so devices self-configure (SLAAC). No DHCPv6 is generated, and no static IPv6 reserve is planned.
+- **IPv6 FortiOS:** adds `config ipv6` on each interface, `firewall address6`, `addrgrp6` and a `firewall policy6` mirror of the IPv4 starter policies (no NAT). `policy6` is assumed to exist in FortiOS 8.0, which is untested. If your build merges IPv6 into `firewall policy`, adapt that block. Same "Generated, untested" note applies.
+- **IPv6 limits:** no IPv6 in the gaps list or the unused-space numbers, no inbound DMZ policy, no prefix delegation to downstream routers, and no IPv6 WAN address plan (the WAN note is free text).

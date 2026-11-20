@@ -195,3 +195,4 @@ table.plain th, table.plain td { white-space: normal; }
 }
 .tablewrap.scroll { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); }
 @media print { .tablewrap.scroll { border: 0; overflow: visible; background: #fff; } }
+.hint.bad { color: #ff8d95; }

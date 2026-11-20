@@ -22,11 +22,12 @@
   // ---------- CSV / Markdown / text ----------
   function toCSV(result) {
     const head = ['Name', 'VLAN', 'Role', 'CIDR', 'Netmask', 'Wildcard', 'Network', 'Gateway', 'First usable', 'Last usable', 'Broadcast', 'Total addresses', 'Usable hosts', 'Static range', 'DHCP range'];
+    if (result.v6) head.push('IPv6 subnet', 'IPv6 gateway');
     const lines = [head.map(csvCell).join(',')];
     result.allocations.forEach(a => lines.push([
       a.name, a.vlan, a.role, a.cidr, a.netmask, a.wildcard, a.network, a.gateway, a.firstUsable, a.lastUsable, a.broadcast,
       a.totalAddresses, a.usableHosts, rng(a.staticStart, a.staticEnd), rng(a.dhcpStart, a.dhcpEnd),
-    ].map(csvCell).join(',')));
+    ].concat(result.v6 ? [a.v6 ? a.v6.cidr : '', a.v6 ? a.v6.address : ''] : []).map(csvCell).join(',')));
     return lines.join('\n') + '\n';
   }
 
@@ -48,6 +49,7 @@
       name: a.name, vlan: a.vlan === '' ? '' : String(a.vlan), role: a.role, subnet: a.cidr, mask: a.netmask,
       gateway: a.gateway || (a.prefix === 31 ? 'n/a (point-to-point)' : ''), usable: usable(a),
       static: rng(a.staticStart, a.staticEnd), dhcp: rng(a.dhcpStart, a.dhcpEnd),
+      subnet6: a.v6 ? a.v6.cidr : '', gateway6: a.v6 ? a.v6.address : '',
     }));
   }
   const HANDOVER_HEAD = ['Network', 'VLAN', 'Role', 'Subnet', 'Subnet mask', 'Default gateway', 'Usable range', 'Static range', 'DHCP range'];
@@ -56,11 +58,14 @@
   function toText(result, project) {
     const out = [];
     if (project && project.name) out.push(`IP plan: ${project.name}`);
-    out.push(`Parent block: ${result.parent.cidr}`, '');
+    out.push(`Parent block: ${result.parent.cidr}`);
+    if (result.v6) out.push(`IPv6 site prefix: ${result.v6.cidr} (${result.v6.kind})`);
+    out.push('');
     result.allocations.forEach(a => {
       out.push(`${a.name}${a.vlan !== '' ? ` (VLAN ${a.vlan})` : ''}${a.role ? ` [${a.role}]` : ''}`);
       out.push(`  Network:   ${a.cidr}  (mask ${a.netmask}, wildcard ${a.wildcard})`);
       if (a.gateway) out.push(`  Gateway:   ${a.gateway}`);
+      if (a.v6) out.push(`  IPv6:      ${a.v6.cidr}  (firewall address ${a.v6.address})`);
       out.push(`  Usable:    ${usable(a)}`);
       if (a.broadcast) out.push(`  Broadcast: ${a.broadcast}`);
       out.push(`  Addresses: ${a.totalAddresses} total, ${a.usableHosts} usable`);
@@ -100,6 +105,7 @@
     L.push('# ===== SubnetPal FortiOS snippet =====');
     L.push('# ' + FORTI_NOTE);
     L.push(`# >>> INTERFACE NAME PLACEHOLDER: "${ph}"  <<<  Replace every occurrence with your real port/aggregate name.`);
+    if (result.v6) L.push(`# IPv6: site prefix ${result.v6.cidr} (${result.v6.kind}). Each network is a /64 (SLAAC via router advertisements on client networks). If IPv6 is hidden in the GUI, enable it under System > Feature Visibility.`);
     L.push('# VLAN sub-interfaces use the placeholder as their parent port. Non-VLAN networks use it as the interface name itself.');
     L.push(`# Policies assume the internet-facing interface is "${WAN_IF}". Change it if yours differs.`);
     L.push('');
@@ -109,6 +115,12 @@
       L.push('        set vdom "root"');
       L.push(`        set ip ${a.gateway ? a.gateway : a.firstUsable} ${a.netmask}`);
       L.push(`        set allowaccess ${ALLOWACCESS[a.role] || 'ping'}`);
+      if (a.v6) {
+        L.push('        config ipv6', '            set ip6-mode static', `            set ip6-address ${a.v6.address}/${a.v6.prefix}`);
+        L.push(`            set ip6-allowaccess ${ALLOWACCESS[a.role] || 'ping'}`);
+        if (a.dhcpStart) L.push('            set ip6-send-adv enable'); // client networks: advertise the /64 so devices self-configure (SLAAC)
+        L.push('        end');
+      }
       if (a.role === 'Loopback') L.push('        set type loopback');
       else if (a.vlan !== '') { L.push(`        set interface ${q(ph)}`); L.push(`        set vlanid ${a.vlan}`); }
       L.push(`        set role ${FORTI_ROLE[a.role] || 'lan'}`);
@@ -183,6 +195,33 @@
       });
       L.push('end');
     }
+    if (result.v6) {
+      info.forEach(x => { x.obj6 = ('SP6_' + x.obj.slice(3)).slice(0, 79); });
+      L.push('', 'config firewall address6');
+      info.forEach(x => {
+        L.push(`    edit ${q(x.obj6)}`, `        set ip6 ${x.a.v6.cidr}`, `        set comment ${q(x.a.name + ' (' + x.a.v6.cidr + ')')}`, '    next');
+      });
+      L.push('end');
+      if (pols.some(p => p.to === 'internal') && internal.length) {
+        L.push('', 'config firewall addrgrp6', '    edit "SP6_INTERNAL"', '        set member ' + internal.map(x => q(x.obj6)).join(' '), '    next', 'end');
+      }
+      if (pols.length) {
+        L.push('', '# STARTER IPv6 policies mirror the IPv4 ones. No NAT. Review before any real use.');
+        L.push('config firewall policy6');
+        pols.forEach(p => {
+          const f = byAlloc.get(p.from);
+          const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
+          const pname = ('SP6_' + fname(p.name.replace('(block)', 'block'))).slice(0, 35);
+          L.push('    edit 0', `        set name ${q(pname)}`, `        set srcintf ${q(f.name)}`);
+          L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
+          L.push(`        set action ${p.action}`, `        set srcaddr ${q(f.obj6)}`);
+          L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
+          L.push('        set schedule "always"', `        set service ${p.services.map(q).join(' ')}`, '        set logtraffic all');
+          L.push(`        set comments ${q('SubnetPal starter policy')}`, '    next');
+        });
+        L.push('end');
+      }
+    }
     L.push('', '# ' + FORTI_NOTE);
     return L.join('\n') + '\n';
   }
@@ -198,6 +237,7 @@
     const reqLines = [
       ['Client', project.name || ''], ['Site', project.site || '-'], ['Date', project.date || '-'],
       ['Address block', result.parent.cidr],
+      ['IPv6 site prefix', result.v6 ? `${result.v6.cidr} (${result.v6.kind === 'ULA' ? 'ULA, private' : 'global'})` : 'Not planned'],
       ['Devices', counts.length ? counts.join(', ') : 'Not recorded'],
       ['Separation requested', sep.length ? sep.join(', ') : 'None'],
       ['Expected growth', `${EXP_LABEL[expKey] || EXP_LABEL.none} (${growth}% growth buffer)`],
@@ -216,10 +256,14 @@
     growthLines.push(`Unallocated space: ${s.free.toLocaleString('en-GB')} of ${s.parentSize.toLocaleString('en-GB')} addresses remain in ${result.parent.cidr}` +
       (s.largestFree ? `; the largest free block is ${s.largestFree.cidr}.` : '.'));
     if (s.reserved) growthLines.push(`${s.reserved.toLocaleString('en-GB')} addresses inside this block belong to existing ranges and were left untouched.`);
+    if (result.v6) growthLines.push(`IPv6: each network has its own /64 from ${result.v6.cidr}, with the subnet number matching the VLAN. A /64 holds far more addresses than will ever be used, so IPv6 needs no growth buffer. Devices on client networks self-configure from router advertisements.`);
     result.gaps.forEach(g => growthLines.push(`Free: ${g.cidrs.map(x => x.cidr).join(', ')} (${g.size.toLocaleString('en-GB')} addresses)${g.between ? ' - a gap between allocations' : ''}.`));
     return {
       title: `Network addressing handover: ${project.name || 'Client'}`,
-      reqLines, table: { head: HANDOVER_HEAD, rows: handoverRows(result).map(handoverCells) }, why, matrix,
+      reqLines, why, matrix,
+      table: result.v6
+        ? { head: HANDOVER_HEAD.concat(['IPv6 subnet', 'IPv6 gateway']), rows: handoverRows(result).map(r => handoverCells(r).concat([r.subnet6, r.gateway6])) }
+        : { head: HANDOVER_HEAD, rows: handoverRows(result).map(handoverCells) },
       matrixNote: 'Based on the starter firewall policies. Guest and DMZ networks have no route to internal networks, and only the Management network can reach other internal networks to administer them. Final rules to be agreed with the client.',
       growthLines, wan: (it.wanNote || '').trim() || 'None provided.',
     };

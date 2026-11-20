@@ -35,7 +35,7 @@
     const colorOf = o.color || (() => '#4aa3ff');
     const names = ((project && project.networks) || []).map(n => String(n.name).trim());
     const cols = Math.max(1, Math.min(3, o.cols || 1));
-    const cardW = cols === 1 ? 320 : 270, cardH = 88, gap = 16, pad = 16, spineGap = 26;
+    const cardW = cols === 1 ? 320 : 270, cardH = result.v6 ? 106 : 88, gap = 16, pad = 16, spineGap = 26;
     const x0 = pad + spineGap, gridW = cols * cardW + (cols - 1) * gap, W = x0 + gridW + pad;
     const cx = x0 + gridW / 2;
     const lo = result.allocations.find(a => Access.kindOf(a) === 'loopback');
@@ -74,12 +74,13 @@
           const max = Math.floor((cardW - 34) / 7.6);
           const sub = a.prefix === 31 ? 'Point-to-point /31' : `GW ${a.gateway || '-'} · ${a.hosts} planned`;
           const tag = `${a.vlan !== '' ? 'VLAN ' + a.vlan : 'No VLAN'}${a.role ? ' · ' + a.role : ''}`;
-          nodes.push(`<g><title>${esc(a.name)} ${esc(a.cidr)}</title><rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="10" fill="${T.card}" stroke="${zc}" stroke-width="1.5"/>` +
+          nodes.push(`<g><title>${esc(a.name)} ${esc(a.cidr)}${a.v6 ? ' ' + esc(a.v6.cidr) : ''}</title><rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="10" fill="${T.card}" stroke="${zc}" stroke-width="1.5"/>` +
             `<rect x="${x}" y="${y}" width="9" height="${cardH}" rx="4" fill="${colorOf(ci)}"/>` +
             `<text x="${x + 22}" y="${y + 23}" font-size="14" font-weight="700" fill="${T.text}">${esc(clip(a.name, max))}</text>` +
             `<text x="${x + 22}" y="${y + 41}" font-size="11.5" fill="${T.mute}">${esc(clip(tag, max + 4))}</text>` +
             `<text x="${x + 22}" y="${y + 60}" font-size="14" font-weight="700" font-family="monospace" fill="${T.text}">${esc(a.cidr)}</text>` +
-            `<text x="${x + 22}" y="${y + 78}" font-size="11" font-family="monospace" fill="${T.mute}">${esc(clip(sub, max + 6))}</text></g>`);
+            `<text x="${x + 22}" y="${y + 78}" font-size="11" font-family="monospace" fill="${T.mute}">${esc(clip(sub, max + 6))}</text>` +
+            (a.v6 ? `<text x="${x + 22}" y="${y + 96}" font-size="11" font-family="monospace" fill="${T.mute}">${esc(clip('v6 ' + a.v6.cidr, max + 6))}</text>` : '') + '</g>');
         });
         y += cardH + 14;
       }

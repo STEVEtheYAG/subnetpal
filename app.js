@@ -101,7 +101,15 @@
     COUNTS.forEach(([k]) => { $(`[data-count="${k}"]`).value = it.counts[k] || 0; });
     REQS.forEach(([k]) => { $(`[data-req="${k}"]`).checked = !!it.req[k]; });
     $('#i-existing').value = it.existing; $('#i-wan').value = it.wanNote;
+    const v6 = c.v6 || { enabled: false, prefix: '' };
+    $('#v6-on').checked = !!v6.enabled; $('#v6-prefix').value = v6.prefix || ''; $('#v6-prefix').disabled = !v6.enabled; $('#v6-new').disabled = !v6.enabled; renderV6Msg();
     $$('#expansion .opt').forEach(b => { const on = b.dataset.exp === it.expansion; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+  }
+  function renderV6Msg() {
+    const el = $('#v6-msg'); if (!el) return;
+    const c = cur(), r = result;
+    el.textContent = !c.v6 || !c.v6.enabled ? 'IPv6 is off. Outputs stay IPv4 only.' : r && r.v6Error ? r.v6Error : r && r.v6 ? `${r.v6.kind === 'ULA' ? 'Private (ULA)' : 'Global'} site prefix. Each network gets a /64, numbered from its VLAN.` : '';
+    el.className = 'hint' + (r && r.v6Error ? ' bad' : '');
   }
   function touch() { cur().updated = Date.now(); save(); }
   function bindIntake() {
@@ -122,6 +130,13 @@
       const c = cur(); c.intake.expansion = b.dataset.exp; c.opts.growth = Intake.GROWTH[b.dataset.exp];
       touch(); renderIntake();
     });
+    $('#v6-on').addEventListener('change', e => {
+      const c = cur(); c.v6 = c.v6 || { enabled: false, prefix: '' }; c.v6.enabled = e.target.checked;
+      if (c.v6.enabled && !String(c.v6.prefix).trim()) c.v6.prefix = Calc6.generateUla();
+      touch(); renderIntake(); recalc();
+    });
+    on('#v6-prefix', e => { const c = cur(); c.v6 = c.v6 || { enabled: true, prefix: '' }; c.v6.prefix = e.target.value; touch(); recalc(); });
+    $('#v6-new').addEventListener('click', () => { const c = cur(); c.v6.prefix = Calc6.generateUla(); touch(); renderIntake(); recalc(); });
     $('#btnGenerate').addEventListener('click', () => generate());
   }
   function generate() {
@@ -208,9 +223,11 @@
         <td class="mono" data-label="Broadcast">${esc(a.broadcast || '-')}</td>
         <td data-label="Total / usable">${a.totalAddresses.toLocaleString()} / ${a.usableHosts.toLocaleString()}</td>
         <td class="mono" data-label="Static">${esc(rng(a.staticStart, a.staticEnd) || '-')}</td>
-        <td class="mono" data-label="DHCP">${esc(rng(a.dhcpStart, a.dhcpEnd) || '-')}</td></tr>`;
+        <td class="mono" data-label="DHCP">${esc(rng(a.dhcpStart, a.dhcpEnd) || '-')}</td>${result.v6 ? `
+        <td class="mono" data-label="IPv6 subnet">${esc(a.v6 ? a.v6.cidr : '-')}</td>
+        <td class="mono" data-label="IPv6 gateway">${esc(a.v6 ? a.v6.address : '-')}</td>` : ''}</tr>`;
     }).join('');
-    box.innerHTML = `<div class="tablewrap"><table class="cards"><thead><tr><th>Name</th><th>VLAN</th><th>Role</th><th>CIDR</th><th>Netmask</th><th>Wildcard</th><th>Network</th><th>Gateway</th><th>Usable range</th><th>Broadcast</th><th>Total / usable</th><th>Static</th><th>DHCP</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    box.innerHTML = `<div class="tablewrap"><table class="cards"><thead><tr><th>Name</th><th>VLAN</th><th>Role</th><th>CIDR</th><th>Netmask</th><th>Wildcard</th><th>Network</th><th>Gateway</th><th>Usable range</th><th>Broadcast</th><th>Total / usable</th><th>Static</th><th>DHCP</th>${result.v6 ? '<th>IPv6 subnet</th><th>IPv6 gateway</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`;
     gapBox.innerHTML = `<div class="card"><h2>Unused space</h2>${result.gaps.length ? result.gaps.map(g =>
       `<p class="mono">${esc(Calc.intToIp(g.start))} - ${esc(Calc.intToIp(g.end))} · ${g.size.toLocaleString()} addresses · ${esc(g.cidrs.map(c => c.cidr).join(', '))}${g.between ? ' · <b>gap between allocations</b>' : ' · free at end of block'}</p>`).join('')
       : '<p class="hint">None. The parent block is completely allocated.</p>'}</div>`;
@@ -242,6 +259,8 @@
   function recalc() {
     if (!cur()) return;
     result = Calc.plan(project());
+    Calc6.annotate(result, cur().v6).forEach(w => result.warnings.push(w));
+    renderV6Msg();
     if (view === 'plan' || view === 'outputs' || view === 'intake') renderStatus();
     if (view === 'plan') { renderResults(); renderMap(); }
     if (view === 'outputs') renderOutputs();

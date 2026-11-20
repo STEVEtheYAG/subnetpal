@@ -1,8 +1,8 @@
 /* SubnetPal - client intake -> suggested plan. Pure, no DOM. window.Intake / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./calc.js'));
-  else root.Intake = factory(root.Calc);
-}(typeof self !== 'undefined' ? self : this, function (Calc) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./calc.js'), require('./calc6.js'));
+  else root.Intake = factory(root.Calc, root.Calc6);
+}(typeof self !== 'undefined' ? self : this, function (Calc, Calc6) {
   'use strict';
 
   const GROWTH = { none: 25, soon: 50, big: 100 };
@@ -27,7 +27,7 @@
   function newClient(name) {
     return {
       id: uid(), name: name || 'New client', site: '', date: new Date().toISOString().slice(0, 10),
-      intake: newIntake(), parent: '', parentAuto: true, networks: [],
+      intake: newIntake(), parent: '', parentAuto: true, networks: [], v6: { enabled: true, prefix: Calc6.generateUla() },
       opts: Object.assign({}, Calc.DEFAULT_OPTS), ifName: 'PORT_CHANGE_ME', planEdited: false, genNotes: [],
     };
   }
@@ -88,6 +88,8 @@
       client.parentAuto = true;
       if (!p) client.genNotes.push('No free private /16 was found. Enter a parent block manually.');
     }
+    if (!client.v6) client.v6 = { enabled: false, prefix: '' };
+    if (client.v6.enabled && !String(client.v6.prefix || '').trim()) client.v6.prefix = Calc6.generateUla();
     client.planEdited = false;
     return client;
   }

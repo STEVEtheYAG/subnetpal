@@ -477,5 +477,81 @@ test('topology SVG: one card per network, loopback in firewall box, escaped, val
   assert.ok(!/<b>x<\/b>/.test(T.build(re, evil, { cols: 1 })) && /&lt;b&gt;x&lt;\/b&gt;&amp;/.test(T.build(re, evil, { cols: 1 })));
 });
 
+console.log('IPv6');
+const C6 = require('./calc6.js');
+const v6sample = (prefix) => { const { c, p, r } = sample(); C6.annotate(r, { enabled: true, prefix: prefix || '2001:db8:abcd::/48' }); return { c, p, r }; };
+test('IPv6 parse/format round trip and compression', () => {
+  assert.strictEqual(C6.formatIp6(C6.parseIp6('2001:0db8:0000:0000:0000:0000:0000:0001')), '2001:db8::1');
+  assert.strictEqual(C6.formatIp6(C6.parseIp6('::')), '::');
+  assert.strictEqual(C6.formatIp6(C6.parseIp6('fe80::1:0:0:1')), 'fe80::1:0:0:1');
+  assert.strictEqual(C6.formatIp6(C6.parseIp6('1:0:2:3:4:5:6:7')), '1:0:2:3:4:5:6:7'); // single zero group is not compressed
+  ['', 'g::1', '1:2:3', '1::2::3', ':::', '12345::1'].forEach(b => assert.strictEqual(C6.parseIp6(b), null, b));
+});
+test('IPv6 prefix validation', () => {
+  assert.strictEqual(C6.validatePrefix('2001:db8:1:ff::/48').cidr, '2001:db8:1::/48');
+  assert.ok(C6.validatePrefix('2001:db8::/64').error, '/64 has no room for subnets');
+  assert.ok(C6.validatePrefix('nonsense').error);
+  assert.ok(C6.validatePrefix('2001:db8::').error);
+  assert.ok(C6.validatePrefix('xyz::/48').error);
+});
+test('generated ULA is a valid fd00::/8 /48 and differs between calls', () => {
+  const a = C6.generateUla(), b = C6.generateUla();
+  assert.ok(/^fd[0-9a-f]{2}:/.test(a) && a.endsWith('::/48'));
+  assert.ok(!C6.validatePrefix(a).error);
+  assert.notStrictEqual(a, b);
+  assert.strictEqual(C6.annotate({ allocations: [] }, { enabled: true, prefix: a }).length, 0);
+});
+test('IPv6 plan: /64 per network, VLAN digits as subnet, transit /127, loopback /128, no overlaps', () => {
+  const { r } = v6sample();
+  const g = n => r.allocations.find(a => a.name === n);
+  assert.strictEqual(g('Management').v6.cidr, '2001:db8:abcd:10::/64');
+  assert.strictEqual(g('Staff LAN').v6.cidr, '2001:db8:abcd:20::/64');
+  assert.strictEqual(g('Staff LAN').v6.address, '2001:db8:abcd:20::1');
+  assert.strictEqual(g('Transit').v6.prefix, 127);
+  assert.strictEqual(g('Loopback').v6.prefix, 128);
+  assert.strictEqual(new Set(r.allocations.map(a => a.v6.cidr)).size, r.allocations.length);
+  assert.strictEqual(r.v6.kind, 'GUA');
+  assert.ok(r.allocations.every(a => a.v6.cidr.startsWith('2001:db8:abcd:')));
+});
+test('IPv6 disabled or invalid: no v6 data, IPv4 results untouched', () => {
+  const { r } = sample();
+  const before = JSON.stringify(r.allocations);
+  C6.annotate(r, { enabled: false, prefix: '2001:db8::/48' });
+  assert.ok(!r.v6 && r.allocations.every(a => !a.v6));
+  assert.strictEqual(C6.annotate(r, { enabled: true, prefix: 'bad' }).length, 1);
+  assert.ok(r.v6Error && r.allocations.every(a => !a.v6));
+  assert.strictEqual(JSON.stringify(r.allocations), before);
+});
+test('IPv6 subnet ids never collide (duplicate and missing VLANs)', () => {
+  const r = { allocations: [
+    { name: 'A', vlan: 20, role: 'LAN' }, { name: 'B', vlan: 20, role: 'LAN' }, { name: 'C', vlan: '', role: 'LAN' }, { name: 'D', vlan: 500, role: 'LAN' }, { name: 'T', vlan: '', role: 'Transit' },
+  ] };
+  const warns = C6.annotate(r, { enabled: true, prefix: 'fd00:1:2::/48' });
+  assert.strictEqual(new Set(r.allocations.map(a => a.v6.cidr)).size, 5);
+  assert.ok(warns.length >= 1);
+});
+test('IPv6 in outputs: CSV, text, FortiOS address6 / policy6, handover doc; v4-only output unchanged', () => {
+  const { p, r } = v6sample();
+  const csv = F.toCSV(r).split('\n');
+  assert.ok(/IPv6 subnet,IPv6 gateway$/.test(csv[0]) && csv[1].includes('2001:db8:abcd:'));
+  assert.ok(F.toText(r, p).includes('IPv6 site prefix: 2001:db8:abcd::/48'));
+  const fo = F.toFortiOS(r, p, 'port5');
+  assert.ok(fo.includes('config ipv6') && fo.includes('set ip6-address 2001:db8:abcd:20::1/64') && fo.includes('ip6-send-adv enable'));
+  assert.ok(fo.includes('config firewall address6') && fo.includes('config firewall policy6') && fo.includes('SP6_INTERNAL'));
+  assert.ok(fo.includes(F.FORTI_NOTE) && fo.indexOf('config firewall policy6') > fo.indexOf('config firewall policy\n'));
+  const md = F.toHandoverDoc(r, p);
+  assert.ok(md.includes('IPv6 subnet') && md.includes('IPv6 site prefix') && !md.includes('undefined'));
+  assert.ok(F.toHandoverHTML(r, p).includes('2001:db8:abcd:10::/64'));
+  const v4 = sample();
+  assert.ok(!F.toFortiOS(v4.r, v4.p, 'port5').includes('ipv6') && !F.toCSV(v4.r).includes('IPv6') && F.toHandoverDoc(v4.r, v4.p).includes('Not planned'));
+});
+test('new clients default to dual stack with a ULA; map shows IPv6', () => {
+  const c = I.newClient('x');
+  assert.ok(c.v6.enabled && !C6.validatePrefix(c.v6.prefix).error);
+  const { p, r } = v6sample();
+  const svg = require('./topology.js').build(r, p, { cols: 1, theme: 'light', standalone: true });
+  assert.ok(svg.includes('v6 2001:db8:abcd:20::/64'));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

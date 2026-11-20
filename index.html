@@ -85,6 +85,16 @@
       </label>
     </div>
 
+    <div class="card">
+      <h2>IPv6</h2>
+      <label class="check"><input type="checkbox" id="v6-on"> Plan IPv6 alongside IPv4 (dual stack)</label>
+      <label class="fld">Site prefix. A /48 is typical. Leave a random private (ULA) one, or paste the prefix the ISP delegated.
+        <input id="v6-prefix" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="fd12:3456:789a::/48">
+      </label>
+      <button id="v6-new" class="btn" type="button">New random private prefix</button>
+      <p id="v6-msg" class="hint"></p>
+    </div>
+
     <button id="btnGenerate" class="btn block primary big">Generate plan →</button>
     <p class="hint">Generating replaces the network list on the Plan screen. Existing ranges and the growth setting also update the plan live.</p>
   </section>
@@ -210,6 +220,7 @@
 </nav>
 
 <script src="calc.js"></script>
+<script src="calc6.js"></script>
 <script src="access.js"></script>
 <script src="intake.js"></script>
 <script src="format.js"></script>
