@@ -6,7 +6,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const color = i => `hsl(${(i * 47 + 205) % 360} 62% 58%)`;
   const rng = Fmt.rng;
-  const SECTIONS = ['plan', 'diagram', 'handover', 'export'];
+  const SECTIONS = ['plan', 'diagram', 'export'];
   const isPhone = () => matchMedia('(max-width: 899px)').matches;
 
   // ---------- storage ----------
@@ -167,8 +167,7 @@
     const c = cur(), ok = result.ok, n = ok ? result.allocations.length : 0;
     $('#sum-plan').textContent = ok ? `${n} networks · ${result.parent.cidr} · ${result.style === 'vlan24' ? 'one /24 per VLAN' : 'packed'}` : 'Cannot build the plan yet';
     $('#sum-diagram').textContent = ok ? `Internet, firewall and ${n} networks` : 'Waiting for a valid plan';
-    $('#sum-handover').textContent = ok ? `For ${c.name || 'the client'}${c.site ? ' · ' + c.site : ''}` : 'Waiting for a valid plan';
-    $('#sum-export').textContent = 'FortiOS CLI · CSV · text';
+    $('#sum-export').textContent = 'Client report · FortiOS CLI · CSV · text';
   }
 
   const typeOf = a => (a.role === 'Transit' ? 'Transit' : a.role === 'Loopback' ? 'Loopback' : a.vlan !== '' ? `VLAN ${a.vlan}` : 'Port');
@@ -254,13 +253,8 @@
       case 'csv': return Fmt.toCSV(result);
       case 'forti': return Fmt.toFortiOS(result, p, p.ifName);
       case 'text': return Fmt.toText(result, p);
-      case 'md': return Fmt.toHandoverDoc(result, p);
-      case 'html': return Fmt.toHandoverHTML(result, p);
     }
     return '';
-  }
-  function renderHandover() {
-    $('#docbox').innerHTML = result.ok ? text('html') : '<p class="hint">Fix the problem at the top to build the handover document.</p>';
   }
   function renderExport() {
     $$('.subtabs button').forEach(b => b.classList.toggle('on', b.dataset.out === outView));
@@ -289,7 +283,14 @@
       const old = b.textContent; b.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(() => { b.textContent = old; }, 1500);
     }));
     $('#ifName').addEventListener('input', e => { cur().ifName = e.target.value; touch(); renderExport(); });
-    $('#btnPrint').addEventListener('click', () => { setOpen('handover', false); window.print(); });
+    $('#btnReport').addEventListener('click', () => {
+      if (!result || !result.ok) { toast('Fix the problem at the top first, then generate the report.'); return; }
+      const html = ClientReport.build(result, project(), Topology.build(result, project(), { cols: 2, theme: 'light', color, standalone: true, plain: true }));
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      const w = window.open(url, '_blank');
+      if (!w) { toast('The report was blocked as a pop-up. Allow pop-ups for this site and try again.'); URL.revokeObjectURL(url); return; }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    });
   }
 
   // ---------- accordion + jump bar ----------
@@ -297,7 +298,6 @@
     if (!result) return;
     if (name === 'plan') { renderMap(); renderCards(); renderGaps(); }
     else if (name === 'diagram') renderTopo();
-    else if (name === 'handover') renderHandover();
     else if (name === 'export') renderExport();
   }
   // Only one section is open at a time; name = null closes all.

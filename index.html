@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>SubnetPal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Client-intake IP planner for firewall builds. FortiGate CLI export and client handover document.">
+<meta name="description" content="Client-intake IP planner for firewall builds. FortiGate CLI export and a plain-language client report.">
 <meta name="theme-color" content="#0f1419">
 <meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
@@ -72,7 +72,7 @@
         <label class="fld">Existing IP ranges in use (one per line, optional)
           <textarea id="i-existing" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16&#10;192.168.1.0/24"></textarea>
         </label>
-        <label class="fld">WAN / VPN note (handover document only)
+        <label class="fld">WAN / VPN note (client report only)
           <textarea id="i-wan" rows="3" placeholder="e.g. Fibre 500/500 plus 4G backup. IPsec to HQ."></textarea>
         </label>
         <label class="fld">Addressing style
@@ -128,25 +128,15 @@
       </div>
     </section>
 
-    <section class="acc" id="sec-handover">
-      <button class="acc-head" type="button" data-sec="handover" aria-expanded="false" aria-controls="body-handover">
-        <span class="t">Handover</span><span class="s" id="sum-handover"></span><span class="chev" aria-hidden="true">▾</span>
-      </button>
-      <div class="acc-body" id="body-handover" hidden>
-        <div class="btnrow noprint">
-          <button class="btn sm" type="button" data-copy="md">Copy Markdown</button>
-          <button class="btn sm" type="button" data-copy="html">Copy HTML</button>
-          <button class="btn sm" type="button" id="btnPrint">Print / PDF</button>
-        </div>
-        <div id="docbox"></div>
-      </div>
-    </section>
-
     <section class="acc" id="sec-export">
       <button class="acc-head" type="button" data-sec="export" aria-expanded="false" aria-controls="body-export">
         <span class="t">Export</span><span class="s" id="sum-export"></span><span class="chev" aria-hidden="true">▾</span>
       </button>
       <div class="acc-body" id="body-export" hidden>
+        <div class="reportbox">
+          <button class="btn" type="button" id="btnReport">Generate client documentation</button>
+          <p class="hint">Opens a plain-language report for the client. Use Print, then Save as PDF.</p>
+        </div>
         <div class="subtabs">
           <button type="button" data-out="forti">FortiOS CLI</button>
           <button type="button" data-out="csv">CSV</button>
@@ -178,7 +168,6 @@
   <span class="jumplabel">Jump to:</span>
   <button type="button" data-tab="plan">Plan</button>
   <button type="button" data-tab="diagram">Diagram</button>
-  <button type="button" data-tab="handover">Handover</button>
   <button type="button" data-tab="export">Export</button>
 </nav>
 
@@ -187,6 +176,7 @@
 <script src="access.js"></script>
 <script src="intake.js"></script>
 <script src="format.js"></script>
+<script src="report.js"></script>
 <script src="topology.js"></script>
 <script src="app.js"></script>
 </body>

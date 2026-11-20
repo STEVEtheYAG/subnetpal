@@ -613,5 +613,40 @@ test('migrating an older client: Servers stays on only if it had a count', () =>
   I.migrate(none); assert.strictEqual(none.intake.req.servers, false);
 });
 
+console.log('Client report');
+const CR = require('./report.js');
+test('client report: sections, cover, map, plain wording, no CLI', () => {
+  const { p, r } = sample();
+  p.name = 'Acme Dental'; p.site = 'Perth'; p.date = '2026-11-20';
+  const h = CR.build(r, p, '<svg id="themap"></svg>');
+  ['What you asked for', 'Your network map', 'Your networks', 'Who can reach what', 'Room to grow', 'Internet connection and remote access'].forEach(s => assert.ok(h.includes(s), s));
+  assert.ok(h.includes('Acme Dental') && h.includes('Perth') && h.includes('2026-11-20'));
+  assert.ok(h.includes('<svg id="themap">'));
+  assert.ok(h.includes('@media print') && h.includes('@page'));
+  assert.ok(h.includes('exit point'));                               // gateway explained plainly
+  assert.ok(h.includes('IPsec tunnel to HQ'));                       // WAN note shown
+  assert.ok(/Internet only/.test(h));                                 // e.g. guests
+  const body = h.slice(h.indexOf('<body>')).replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ');
+  ['VLAN', 'CIDR', 'gateway', 'subnet', 'DHCP', 'config ', 'FortiOS', 'netmask'].forEach(w => assert.ok(!new RegExp(w, 'i').test(body), 'jargon: ' + w));
+  r.allocations.filter(a => a.prefix !== 32).forEach(a => assert.ok(h.includes(a.firstUsable), a.name));
+});
+test('plain map for the client report: names and ranges only, no technical labels', () => {
+  const T = require('./topology.js');
+  const { p, r } = v6sample();
+  const svg = T.build(r, p, { cols: 2, theme: 'light', standalone: true, plain: true });
+  r.allocations.filter(a => a.prefix !== 32 && a.prefix !== 31).forEach(a => assert.ok(svg.includes(a.name) && svg.includes(a.firstUsable), a.name));
+  ['VLAN', 'GW ', 'v6 ', '/31', '/32', '/24', 'WAN', 'Loopback'].forEach(w => assert.ok(!svg.includes(w), 'jargon: ' + w));
+  assert.ok(T.build(r, p, { theme: 'light' }).includes('VLAN'));      // normal diagram unchanged
+});
+test('client report: escapes client text and handles a missing map or WAN note', () => {
+  const { p, r } = sample();
+  p.name = '<script>x</script>'; p.site = '<img onerror=x>'; p.intake = Object.assign({}, p.intake, { wanNote: '<b>hi</b>' });
+  const h = CR.build(r, p);
+  assert.ok(!/<script>x/.test(h) && !/<img onerror/.test(h) && !h.includes('<b>hi</b>'));
+  assert.ok(h.includes('The map is not available'));
+  p.intake.wanNote = '';
+  assert.ok(CR.build(r, p).includes('No details about your internet connection'));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

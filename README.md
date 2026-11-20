@@ -1,14 +1,14 @@
 # SubnetPal
 
-Offline-first installable PWA for client-intake-driven IP planning (VLSM) on firewall builds. It turns a client intake into a network plan, a client handover document and a FortiOS CLI snippet. Vanilla HTML/CSS/JS, no framework, no build step, no dependencies.
+Offline-first installable PWA for client-intake-driven IP planning (VLSM) on firewall builds. It turns a client intake into a network plan, a plain-language client report and a FortiOS CLI snippet. Vanilla HTML/CSS/JS, no framework, no build step, no dependencies.
 
 ## How to use
 
 SubnetPal is one page. On a tablet or desktop the intake is a fixed left panel and the results scroll on the right, updating live as you type. On a phone the intake is a top section that collapses to a one-line summary ("Client: Acme · 5 networks") once you tap **Done**; tap the line to reopen it.
 
-1. **Intake (left):** client name, site, staff count and expected growth (None 25% / Soon 50% / Big growth 100% buffer). Tick **Guest wifi, Servers, DMZ, Voice / phones, Cameras or IoT** to add that network; a count box appears only when the box is ticked. Staff LAN, Management and Transit/loopback are always planned. **More detail** holds existing IP ranges, the WAN/VPN note (handover only), the addressing style, an address block override and IPv6.
-2. **Results (right)** are four collapsed sections, one open at a time: **Plan** (address map plus one card per network; tap a card for DHCP, static, broadcast, wildcard and host counts), **Diagram** (the network diagram, SVG download or copy), **Handover** (document for the client, Copy Markdown or HTML, Print / PDF) and **Export** (FortiOS CLI, CSV, text, each with a Copy button).
-3. The floating **Jump to:** bar at the bottom (Plan, Diagram, Handover, Export) opens a section and smooth-scrolls to it.
+1. **Intake (left):** client name, site, staff count and expected growth (None 25% / Soon 50% / Big growth 100% buffer). Tick **Guest wifi, Servers, DMZ, Voice / phones, Cameras or IoT** to add that network; a count box appears only when the box is ticked. Staff LAN, Management and Transit/loopback are always planned. **More detail** holds existing IP ranges, the WAN/VPN note (client report only), the addressing style, an address block override and IPv6.
+2. **Results (right)** are three collapsed sections, one open at a time: **Plan** (address map plus one card per network; tap a card for DHCP, static, broadcast, wildcard and host counts), **Diagram** (the network diagram, SVG download or copy), and **Export** (the **Generate client documentation** button, plus FortiOS CLI, CSV and text, each with a Copy button).
+3. The floating **Jump to:** bar at the bottom (Plan, Diagram, Export) opens a section and smooth-scrolls to it.
 4. The client menu at the top of the intake switches clients. Duplicate, delete and sample clients are under it. Everything saves on the device automatically and works offline after the first load.
 5. One warning banner appears at the top of the results only when something is wrong (an overlap with an existing range, the plan does not fit, or the addressing style had to fall back).
 
@@ -38,13 +38,13 @@ Installed copies update on their next online open (cache-first with background r
 
 ## Files
 
-`topology.js` network map SVG · `calc.js` subnet maths (no DOM) · `calc6.js` IPv6 layer (BigInt, no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS, handover doc · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
+`topology.js` network map SVG · `calc.js` subnet maths (no DOM) · `calc6.js` IPv6 layer (BigInt, no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS · `report.js` plain-language client report (printable HTML, no DOM) · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
 
 ## Assumptions
 
 **Planning**
 - **Sizing:** needed = hosts + ceil(hosts x growth%) + network + broadcast + gateway, rounded up to a power of two; smallest block /30. Growth is not applied to /31 or /32.
-- **Expansion:** None = 25%, Soon = 50%, Big growth = 100% (sets the growth buffer; it is used for sizing in packed style and for the spare-host notes in the handover).
+- **Expansion:** None = 25%, Soon = 50%, Big growth = 100% (sets the growth buffer; it is used for sizing in packed style and for the "room to grow" figures in the client report).
 - **Allocation:** largest first, each block aligned to its own size, placed in the lowest free spot that avoids existing ranges. Results display in address order.
 - **/31 and /32:** role Transit with 2 or fewer hosts is a /31 (no gateway, no broadcast). Role Loopback (1 host) is a /32.
 - **Existing ranges:** they are reserved wherever they fall inside the parent block. If the parent overlaps one (only possible when you override the parent), the plan still avoids it and shows a red warning. Existing ranges that overlap each other give a warning.
@@ -59,7 +59,7 @@ Installed copies update on their next online open (cache-first with background r
 - **Static and DHCP:** static reserve is the first N addresses after the gateway (default 10, clamped on small networks with a warning). DHCP follows the static reserve plus the offset. DHCP is offered on Staff LAN, Voice, Cameras, IoT and Guest, and not on Management, Servers, DMZ, Transit or Loopback.
 - **No row editing:** the plan is always generated from the intake, live, so the Plan section has no editable rows (VLAN IDs, names and per-network options are not editable). Changing the intake replaces the plan. The only manual override is the address block under More detail. Clients saved earlier are regenerated from their intake when opened, so hand-edited rows from the previous version are not kept.
 
-**Access rules (handover matrix and FortiOS starter policies)**
+**Access rules (client report grid and FortiOS starter policies)**
 - Staff: internet, Servers, DMZ. Servers: internet only. Voice: internet and Servers. Cameras: Servers only (no internet). IoT and Guest: internet only (Guest limited to DNS/HTTP/HTTPS). DMZ: internet only, explicitly blocked from internal networks. Guest is also explicitly blocked from internal networks.
 - **Management restricted** is interpreted as: nothing else can reach Management; Management can reach internet and all other internal networks to administer them. Add an admin-workstation rule if admins connect from elsewhere.
 - No inbound internet-to-DMZ policy is generated (it needs a VIP/port-forward decision). Transit and Loopback get no policies.
@@ -72,7 +72,7 @@ Installed copies update on their next online open (cache-first with background r
 **App**
 - **Storage:** clients live in `localStorage` (key `subnetpal.v2`) on the device. Nothing is sent anywhere. Clearing Safari website data deletes them, so copy outputs you need. The earlier "named projects" data (key `subnetpal.v1`) is not migrated.
 - **Validation:** hosts at least 1, VLAN 1-4094, names required and unique (case-insensitive), growth 0-500%, CIDRs strict (host bits set is an error). Duplicate VLAN IDs and non-RFC1918 parents are warnings. The IPv4 plan is the source of truth; IPv6 is added on top (see below).
-- **Handover doc:** Markdown for pasting, printable HTML for PDF via Print. The WAN/VPN note appears there only and is never planned.
+- **Client report:** the Handover section was removed. **Generate client documentation** (Export section) opens a separate printable page in a new tab (a blob page, so it works offline); use its Print / Save as PDF button. It is written for a non-technical reader: cover, what was asked for, the map, networks table (who it is for, address range, "exit point" = the gateway), a Yes/No grid of who can reach what, room to grow, and the WAN/VPN note. It has no VLAN IDs, masks, DHCP ranges or CLI; those stay in the Copy exports. The WAN/VPN note appears there only and is never planned. Purpose wording per network type is fixed text in `report.js`. If the browser blocks the new tab as a pop-up, allow pop-ups for the site. The old Markdown/HTML handover functions remain in `format.js` (tested) but have no button.
 - **IPv6 (dual stack):** on by default for new clients; untick it on Intake for IPv4 only. Older saved clients without the setting stay IPv4 only until you tick it.
 - **IPv6 site prefix:** a random private ULA `/48` (`fdxx:xxxx:xxxx::/48`, RFC 4193) is generated and kept with the client. Paste an ISP-delegated prefix to replace it. It must be `/56` or shorter. There is no existing-range avoidance for IPv6, because a random ULA does not clash in practice.
 - **IPv6 numbering:** every network gets one `/64`, the standard size, so there is no IPv6 sizing or growth buffer. The subnet number is the VLAN written as hex digits, so VLAN 20 is `...:20::/64` and VLAN 70 is `...:70::/64`. Networks without a usable VLAN take the first free number and a warning says so. Transit is a `/127` in subnet `fe` and Loopback is a `/128` in subnet `ff`. The firewall takes `::1` on each network.

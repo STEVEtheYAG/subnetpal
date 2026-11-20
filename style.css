@@ -272,10 +272,10 @@ body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
   #toast { left: calc(50% + 200px); }
 }
 @media print {
-  .side, .sumline, #warn, .acc:not(#sec-handover), #sec-handover .acc-head, #toast { display: none !important; }
+  .side, .sumline, #warn, nav.tabs, #toast { display: none !important; }
   body { height: auto !important; overflow: visible !important; display: block !important; background: #fff; }
   .app { display: block !important; }
   .results { overflow: visible !important; padding: 0 !important; }
-  #sec-handover { border: 0; background: #fff; }
-  #sec-handover .acc-body { display: block !important; padding: 0; }
 }
+.reportbox { margin: 0 0 14px; }
+.reportbox .btn { width: 100%; }
