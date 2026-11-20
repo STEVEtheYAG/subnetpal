@@ -2,13 +2,14 @@
 
 Offline-first installable PWA for client-intake-driven IP planning (VLSM) on firewall builds. It turns a client intake into a network plan, a client handover document and a FortiOS CLI snippet. Vanilla HTML/CSS/JS, no framework, no build step, no dependencies.
 
-## How to use (5 lines)
+## How to use
 
 1. **Clients** (home): tap **New client**, or add a sample client to see how it works. Open, duplicate or delete saved clients here.
 2. **Intake:** client name, site, date, device counts per segment, existing ranges in use (one CIDR per line), expansion (None / Soon / Big growth) and requirement ticks. Add a WAN/VPN note (handover only).
 3. **Generate plan:** picks a free private /16, then suggests Management, Staff LAN, Servers, Transit and Loopback plus any ticked networks with a count above 0. On the **Plan** screen, edit rows, VLANs and options; it recalculates live. Overlap with existing ranges shows as a red warning.
-4. **Outputs:** Handover (Markdown, HTML or Print), FortiOS CLI, CSV, generic text. Each has a Copy button. Set the interface name placeholder once on the FortiOS tab.
-5. Everything saves on the device automatically and works offline after the first load.
+4. **Map:** a graphical network map (Internet, firewall, every network with VLAN, CIDR and gateway; Guest and DMZ shown as isolated). Download or copy it as SVG for documents.
+5. **Outputs:** Handover (Markdown, HTML or Print), FortiOS CLI, CSV, generic text. Each has a Copy button. Set the interface name placeholder once on the FortiOS tab.
+6. Everything saves on the device automatically and works offline after the first load.
 
 ## Install on iPhone
 
@@ -19,7 +20,7 @@ Offline-first installable PWA for client-intake-driven IP planning (VLSM) on fir
 ## Run locally
 
 ```
-node calc.test.js          # unit tests (52)
+node calc.test.js          # unit tests (53)
 node tools/serve.js 8080   # http://localhost:8080
 node tools/make-icons.js   # regenerate icons (only if you change the design)
 ```
@@ -32,11 +33,11 @@ git add .; git commit -m "Client intake flow"; git push
 
 First-time setup (once): install GitHub CLI (`winget install GitHub.cli`, reopen PowerShell, `gh auth login`), then `gh repo create subnetpal --public --source=. --push` and `gh api -X POST "repos/{owner}/subnetpal/pages" -f "source[branch]=main" -f "source[path]=/"`. Live at `https://<your-github-username>.github.io/subnetpal/`. Netlify alternative: drag this folder onto https://app.netlify.com/drop.
 
-Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v2`).
+Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v3`).
 
 ## Files
 
-`calc.js` subnet maths (no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS, handover doc · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
+`topology.js` network map SVG · `calc.js` subnet maths (no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS, handover doc · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
 
 ## Assumptions
 

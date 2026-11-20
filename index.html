@@ -141,6 +141,25 @@
     </div>
   </section>
 
+  <!-- NETWORK MAP -->
+  <section id="tab-map" class="panel" hidden>
+    <div class="card">
+      <h2>Network map</h2>
+      <div id="topo"></div>
+      <div class="legend topolegend">
+        <div><span class="swatch" style="background:#4aa3ff"></span>Internal</div>
+        <div><span class="swatch" style="background:#f5b942"></span>Guest (internet only)</div>
+        <div><span class="swatch" style="background:#ff6b6b"></span>DMZ (isolated)</div>
+        <div><span class="swatch" style="background:#93a1b0"></span>Link (dashed)</div>
+      </div>
+      <div class="btnrow mt">
+        <button class="btn primary" id="btnSvg">Download SVG</button>
+        <button class="btn" id="btnSvgCopy">Copy SVG</button>
+      </div>
+      <div id="topomsg" class="hint" aria-live="polite"></div>
+    </div>
+  </section>
+
   <!-- 4. OUTPUTS -->
   <section id="tab-outputs" class="panel" hidden>
     <div class="subtabs noprint" role="tablist">
@@ -186,6 +205,7 @@
   <button data-tab="clients" class="on">Clients</button>
   <button data-tab="intake">Intake</button>
   <button data-tab="plan">Plan</button>
+  <button data-tab="map">Map</button>
   <button data-tab="outputs">Outputs</button>
 </nav>
 
@@ -193,6 +213,7 @@
 <script src="access.js"></script>
 <script src="intake.js"></script>
 <script src="format.js"></script>
+<script src="topology.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

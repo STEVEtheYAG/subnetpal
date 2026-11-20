@@ -175,7 +175,8 @@ h2.sect { margin: 18px 2px 10px; }
 .subtabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
 .subtabs button { min-height: 48px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); font-weight: 600; cursor: pointer; color: var(--mute); }
 .subtabs button.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
-nav.tabs { grid-template-columns: repeat(4, 1fr); }
+nav.tabs { grid-template-columns: repeat(5, 1fr); }
+.topolegend { margin-top: 12px; }
 nav.tabs button:disabled { opacity: .35; }
 #out-forti pre, #out-csv pre, #out-text pre { margin-top: 12px; }
 #docbox { margin-top: 14px; }

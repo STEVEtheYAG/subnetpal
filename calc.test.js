@@ -460,5 +460,22 @@ test('WAN note is not planned (no network created from it)', () => {
   assert.ok(!c.networks.some(n => /wan|vpn/i.test(n.name)));
 });
 
+console.log('Network map');
+test('topology SVG: one card per network, loopback in firewall box, escaped, valid for 1-3 columns', () => {
+  const { p, r } = sample();
+  const T = require('./topology.js');
+  [1, 2, 3].forEach(cols => {
+    const svg = T.build(r, p, { cols, theme: 'light', standalone: true });
+    assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>') && svg.includes('xmlns='));
+    r.allocations.filter(a => a.role !== 'Loopback').forEach(a => assert.ok(svg.includes(a.cidr) && svg.includes('>' + a.name + '<'), a.name));
+    assert.ok(svg.includes('Loopback ' + r.allocations.find(a => a.role === 'Loopback').network + '/32'));
+    assert.strictEqual((svg.match(/<title>/g) || []).length, r.allocations.length - 1);
+    assert.strictEqual(svg.split('<svg').length, 2);
+  });
+  const evil = Object.assign({}, p, { networks: p.networks.map((n, i) => (i === 1 ? Object.assign({}, n, { name: '<b>x</b>&' }) : n)) });
+  const re = C.plan(evil);
+  assert.ok(!/<b>x<\/b>/.test(T.build(re, evil, { cols: 1 })) && /&lt;b&gt;x&lt;\/b&gt;&amp;/.test(T.build(re, evil, { cols: 1 })));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

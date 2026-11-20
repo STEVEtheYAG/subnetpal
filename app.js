@@ -38,8 +38,29 @@
     if (v === 'clients') renderClients();
     if (v === 'intake') renderIntake();
     if (v === 'plan') { renderPlanInputs(); recalc(); }
+    if (v === 'map') { recalc(); renderTopo(); }
     if (v === 'outputs') { recalc(); renderOutputs(); }
     window.scrollTo(0, 0);
+  }
+
+  // ---------- network map ----------
+  function topoCols() { const w = ($('#topo').clientWidth || window.innerWidth); return w >= 860 ? 3 : w >= 600 ? 2 : 1; }
+  function topoSvg(theme) { return Topology.build(result, project(), { cols: topoCols(), theme, color, standalone: theme === 'light' }); }
+  function renderTopo() {
+    $('#topomsg').textContent = '';
+    $('#topo').innerHTML = result && result.ok ? topoSvg('dark') : '<p class="hint">Fix the problems on the Plan screen to draw the map.</p>';
+    $('#btnSvg').disabled = $('#btnSvgCopy').disabled = !(result && result.ok);
+  }
+  function bindTopo() {
+    $('#btnSvg').addEventListener('click', () => {
+      const blob = new Blob([topoSvg('light')], { type: 'image/svg+xml' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = (cur().name || 'network').replace(/[^\w-]+/g, '_') + '-network-map.svg';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      $('#topomsg').textContent = 'SVG downloaded (light theme, for documents).';
+    });
+    $('#btnSvgCopy').addEventListener('click', async () => { $('#topomsg').textContent = (await copy(topoSvg('light'))) ? 'SVG copied.' : 'Copy was blocked. Use Download SVG instead.'; });
+    let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => { if (view === 'map') renderTopo(); }, 150); });
   }
 
   // ---------- 1. clients ----------
@@ -319,7 +340,7 @@
   load();
   buildIntakeForm();
   $$('nav.tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
-  bindClients(); bindIntake(); bindPlan(); bindOutputs();
+  bindClients(); bindIntake(); bindPlan(); bindTopo(); bindOutputs();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   show('clients');
