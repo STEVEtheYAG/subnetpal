@@ -2,89 +2,122 @@
   'use strict';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-  const KEY = 'subnetpal.v1';
+  const KEY = 'subnetpal.v2';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9);
   const color = i => `hsl(${(i * 47 + 205) % 360} 62% 58%)`;
-
-  const PRESETS = {
-    'Office 20 staff + guest': {
-      parent: '192.168.10.0/24',
-      networks: [
-        { name: 'Staff', hosts: 20, vlan: 10, role: 'LAN' },
-        { name: 'Guest', hosts: 20, vlan: 20, role: 'Guest' },
-        { name: 'Mgmt', hosts: 5, vlan: 99, role: 'Mgmt' },
-      ],
-    },
-    'Small branch with DMZ': {
-      parent: '10.30.0.0/24',
-      networks: [
-        { name: 'Branch LAN', hosts: 40, vlan: 10, role: 'LAN' },
-        { name: 'Guest', hosts: 15, vlan: 20, role: 'Guest' },
-        { name: 'DMZ', hosts: 6, vlan: 30, role: 'DMZ' },
-        { name: 'Mgmt', hosts: 4, vlan: 99, role: 'Mgmt' },
-        { name: 'Transit to HQ', hosts: 2, vlan: '', role: 'Transit' },
-        { name: 'Loopback', hosts: 1, vlan: '', role: 'Loopback' },
-      ],
-    },
-    'HQ with 5 VLANs': {
-      parent: '10.20.0.0/22',
-      networks: [
-        { name: 'Staff', hosts: 200, vlan: 10, role: 'LAN' },
-        { name: 'Servers', hosts: 60, vlan: 20, role: 'LAN' },
-        { name: 'Voice', hosts: 80, vlan: 30, role: 'LAN' },
-        { name: 'Guest', hosts: 100, vlan: 40, role: 'Guest' },
-        { name: 'Mgmt', hosts: 20, vlan: 99, role: 'Mgmt' },
-        { name: 'DMZ', hosts: 12, vlan: 50, role: 'DMZ' },
-        { name: 'Transit to ISP router', hosts: 2, vlan: '', role: 'Transit' },
-      ],
-    },
-  };
-
-  function newProject(name, preset) {
-    const p = preset || {};
-    return {
-      id: uid(), name: name || 'New project', parent: p.parent || '10.20.0.0/16',
-      networks: (p.networks || []).map(n => Object.assign({ id: uid() }, n)),
-      opts: Object.assign({}, Calc.DEFAULT_OPTS), ifName: p.ifName || 'PORT_CHANGE_ME',
-    };
-  }
+  const COUNTS = [['staff', 'Staff'], ['wired', 'Wired devices'], ['wifi', 'Wi-Fi devices'], ['voice', 'Voice / phones'], ['cameras', 'Cameras'], ['iot', 'IoT'], ['servers', 'Servers'], ['guest', 'Guest users'], ['dmz', 'Public servers (DMZ)']];
+  const REQS = [['guest', 'Guest Wi-Fi separation'], ['dmz', 'DMZ / public servers'], ['voice', 'Voice VLAN'], ['cameras', 'Cameras VLAN'], ['iot', 'IoT VLAN']];
 
   // ---------- storage ----------
-  let store = { current: null, projects: {} };
+  let store = { current: null, clients: {} };
   function load() {
     try {
       const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (raw && raw.projects && Object.keys(raw.projects).length) {
-        store = raw;
-        if (!store.projects[store.current]) store.current = Object.keys(store.projects)[0];
-        return;
-      }
+      if (raw && raw.clients) { store = raw; if (!store.clients[store.current]) store.current = null; }
     } catch (e) { /* ignore */ }
-    const p = newProject('Office 20 staff + guest', PRESETS['Office 20 staff + guest']);
-    store = { current: p.id, projects: { [p.id]: p } };
   }
   let saveT;
-  function save() {
-    clearTimeout(saveT);
-    saveT = setTimeout(saveNow, 250);
-  }
+  function save() { clearTimeout(saveT); saveT = setTimeout(saveNow, 250); }
   function saveNow() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* private mode / full */ } }
-  const proj = () => store.projects[store.current];
+  const cur = () => store.clients[store.current];
 
   // ---------- state ----------
+  let view = 'clients';
+  let outView = 'handover';
   let result = null;
-  let activeEx = 'forti';
+  const project = () => Intake.toProject(cur());
 
-  // ---------- rendering: project bar ----------
-  function renderProjects() {
-    const sel = $('#projSel');
-    sel.innerHTML = Object.values(store.projects).map(p => `<option value="${esc(p.id)}"${p.id === store.current ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
-    const ps = $('#presetSel');
-    ps.innerHTML = '<option value="">Choose a preset…</option>' + Object.keys(PRESETS).map(k => `<option>${esc(k)}</option>`).join('');
+  // ---------- navigation ----------
+  function show(v) {
+    if (v !== 'clients' && !cur()) v = 'clients';
+    view = v;
+    $$('nav.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === v); b.disabled = b.dataset.tab !== 'clients' && !cur(); });
+    $$('.panel').forEach(p => { p.hidden = p.id !== 'tab-' + v; });
+    $('#crumb').textContent = cur() && v !== 'clients' ? cur().name + (cur().site ? ' · ' + cur().site : '') : '';
+    if (v === 'clients') renderClients();
+    if (v === 'intake') renderIntake();
+    if (v === 'plan') { renderPlanInputs(); recalc(); }
+    if (v === 'outputs') { recalc(); renderOutputs(); }
+    window.scrollTo(0, 0);
   }
 
-  // ---------- rendering: inputs ----------
+  // ---------- 1. clients ----------
+  function renderClients() {
+    const list = Object.values(store.clients).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    $('#clientList').innerHTML = list.length ? list.map(c => `<div class="client" data-id="${esc(c.id)}">
+      <div class="cinfo"><b>${esc(c.name)}</b><span class="dim">${esc(c.site || 'No site')} · ${esc(c.date || '')}</span>
+      <span class="dim mono">${esc(c.parent || 'no parent block')} · ${c.networks.length} networks</span></div>
+      <div class="btnrow"><button class="btn sm primary" data-act="open">Open</button><button class="btn sm" data-act="dup">Duplicate</button><button class="btn sm danger" data-act="del">Delete</button></div></div>`).join('')
+      : '<p class="hint">No clients yet. Create one or add a sample below.</p>';
+    $('#samples').innerHTML = Object.keys(Intake.SAMPLES).map(k => `<button class="btn" data-sample="${esc(k)}">+ ${esc(k)}</button>`).join('');
+  }
+  function addClient(c) { c.updated = Date.now(); store.clients[c.id] = c; store.current = c.id; save(); }
+  function bindClients() {
+    $('#btnNewClient').addEventListener('click', () => { addClient(Intake.newClient('New client')); show('intake'); });
+    $('#samples').addEventListener('click', e => { const b = e.target.closest('[data-sample]'); if (!b) return; addClient(Intake.sampleClient(b.dataset.sample)); show('plan'); });
+    $('#clientList').addEventListener('click', e => {
+      const b = e.target.closest('button[data-act]'); if (!b) return;
+      const id = b.closest('.client').dataset.id, c = store.clients[id];
+      if (b.dataset.act === 'open') { store.current = id; save(); show(c.networks.length ? 'plan' : 'intake'); }
+      else if (b.dataset.act === 'dup') {
+        const d = JSON.parse(JSON.stringify(c)); d.id = uid(); d.name = c.name + ' copy'; addClient(d); renderClients();
+      } else if (b.dataset.act === 'del') {
+        if (!confirm(`Delete client "${c.name}"? This cannot be undone.`)) return;
+        delete store.clients[id]; if (store.current === id) store.current = null; save(); renderClients(); show('clients');
+      }
+    });
+  }
+
+  // ---------- 2. intake ----------
+  function buildIntakeForm() {
+    $('#counts').innerHTML = COUNTS.map(([k, l]) => `<label class="fld">${l}<input data-count="${k}" inputmode="numeric" autocomplete="off"></label>`).join('');
+    $('#reqs').innerHTML = REQS.map(([k, l]) => `<label class="check"><input type="checkbox" data-req="${k}"> ${l}</label>`).join('');
+  }
+  function renderIntake() {
+    const c = cur(), it = c.intake;
+    $('#i-name').value = c.name; $('#i-site').value = c.site; $('#i-date').value = c.date;
+    COUNTS.forEach(([k]) => { $(`[data-count="${k}"]`).value = it.counts[k] || 0; });
+    REQS.forEach(([k]) => { $(`[data-req="${k}"]`).checked = !!it.req[k]; });
+    $('#i-existing').value = it.existing; $('#i-wan').value = it.wanNote;
+    $$('#expansion .opt').forEach(b => { const on = b.dataset.exp === it.expansion; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+  }
+  function touch() { cur().updated = Date.now(); save(); }
+  function bindIntake() {
+    const on = (sel, fn) => $(sel).addEventListener('input', fn);
+    on('#i-name', e => { cur().name = e.target.value; touch(); });
+    on('#i-site', e => { cur().site = e.target.value; touch(); });
+    on('#i-date', e => { cur().date = e.target.value; touch(); });
+    $('#counts').addEventListener('input', e => { if (e.target.dataset.count) { cur().intake.counts[e.target.dataset.count] = e.target.value; touch(); } });
+    $('#reqs').addEventListener('change', e => { if (e.target.dataset.req) { cur().intake.req[e.target.dataset.req] = e.target.checked; touch(); } });
+    on('#i-wan', e => { cur().intake.wanNote = e.target.value; touch(); });
+    on('#i-existing', e => { // live: re-pick an auto parent so the plan always avoids existing ranges
+      const c = cur(); c.intake.existing = e.target.value;
+      if (c.parentAuto) { const p = Intake.pickParent(Intake.parseExisting(c.intake.existing)); c.parent = p ? p.cidr : ''; }
+      touch();
+    });
+    $('#expansion').addEventListener('click', e => {
+      const b = e.target.closest('.opt'); if (!b) return;
+      const c = cur(); c.intake.expansion = b.dataset.exp; c.opts.growth = Intake.GROWTH[b.dataset.exp];
+      touch(); renderIntake();
+    });
+    $('#btnGenerate').addEventListener('click', () => generate());
+  }
+  function generate() {
+    const c = cur();
+    if (c.planEdited && c.networks.length && !confirm('This replaces the networks you edited on the Plan screen. Continue?')) return;
+    Intake.applyIntake(c); touch(); show('plan');
+  }
+
+  // ---------- 3. plan ----------
+  function renderPlanInputs() {
+    const c = cur();
+    $('#parent').value = c.parent;
+    $('#parentAutoTag').textContent = c.parentAuto ? '(auto-picked)' : '(manual)';
+    $('#o-gwPos').value = c.opts.gwPos; $('#o-growth').value = c.opts.growth;
+    $('#o-staticReserve').value = c.opts.staticReserve; $('#o-dhcpOffset').value = c.opts.dhcpOffset;
+    renderRows();
+  }
   function rowHtml(n, i, total) {
     const roles = '<option value="">(none)</option>' + Calc.ROLES.map(r => `<option${n.role === r ? ' selected' : ''}>${r}</option>`).join('');
     return `<div class="row" data-i="${i}">
@@ -94,46 +127,33 @@
         <button class="ibtn del" data-act="del" aria-label="Remove network">✕</button></div>
       <label class="fld name">Name<input data-f="name" value="${esc(n.name)}" autocomplete="off" placeholder="e.g. Staff"></label>
       <label class="fld">Hosts needed<input data-f="hosts" value="${esc(n.hosts)}" inputmode="numeric" autocomplete="off"></label>
-      <label class="fld">VLAN ID (optional)<input data-f="vlan" value="${esc(n.vlan)}" inputmode="numeric" autocomplete="off"></label>
+      <label class="fld">VLAN ID<input data-f="vlan" value="${esc(n.vlan)}" inputmode="numeric" autocomplete="off"></label>
       <label class="fld">Role<select data-f="role">${roles}</select></label>
     </div>`;
   }
   function renderRows() {
-    const p = proj();
-    $('#rows').innerHTML = p.networks.length ? p.networks.map((n, i) => rowHtml(n, i, p.networks.length)).join('') : '<p class="hint">No networks yet. Add one below or pick a preset.</p>';
-  }
-  function renderInputs() {
-    const p = proj();
-    $('#parent').value = p.parent;
-    $('#o-gwPos').value = p.opts.gwPos;
-    $('#o-growth').value = p.opts.growth;
-    $('#o-staticReserve').value = p.opts.staticReserve;
-    $('#o-dhcpOffset').value = p.opts.dhcpOffset;
-    $('#ifName').value = p.ifName || '';
-    renderRows();
+    const nets = cur().networks;
+    $('#rows').innerHTML = nets.length ? nets.map((n, i) => rowHtml(n, i, nets.length)).join('') : '<p class="hint">No networks yet. Add one below, or go to Intake and generate a plan.</p>';
   }
 
-  // ---------- outputs ----------
   const rng = Fmt.rng;
   function renderStatus() {
-    const el = $('#status'), sum = $('#summary');
-    const p = proj();
+    const el = $('#status');
     const list = (arr, cls) => arr.length ? `<ul>${arr.map(m => `<li class="${cls}">${esc(m)}</li>`).join('')}</ul>` : '';
-    let html;
-    if (!result.ok) {
-      html = `<b class="e">Cannot build the plan</b>${list(result.errors.map(e => e.msg), 'e')}${list(result.warnings, 'w')}`;
-      el.className = 'status bad';
-    } else {
+    let html = '';
+    if (result.conflicts && result.conflicts.length) html += `<div class="redbox"><b>⚠ Overlap with existing ranges</b>${list(result.conflicts, 'e')}</div>`;
+    if (!result.ok) html += `<b class="e">Cannot build the plan</b>${list(result.errors.map(e => e.msg), 'e')}${list(result.warnings, 'w')}`;
+    else {
       const s = result.summary;
-      html = `<b>${esc(result.parent.cidr)}</b>: ${s.used.toLocaleString()} of ${s.parentSize.toLocaleString()} addresses used (${s.percentUsed}%).<br>` +
-        `Free: <b>${s.free.toLocaleString()}</b> addresses${s.largestFree ? `, largest free block <b>${esc(s.largestFree.cidr)}</b> (${s.largestFree.size.toLocaleString()})` : ''}.` +
+      html += `<b>${esc(result.parent.cidr)}</b>: ${s.used.toLocaleString()} of ${s.parentSize.toLocaleString()} addresses used (${s.percentUsed}%).<br>` +
+        `Space left: <b>${s.free.toLocaleString()}</b> addresses${s.largestFree ? `, largest free block <b>${esc(s.largestFree.cidr)}</b> (${s.largestFree.size.toLocaleString()})` : ''}.` +
+        (s.reserved ? `<br><span class="dim">${s.reserved.toLocaleString()} addresses are existing ranges and were skipped.</span>` : '') +
         list(result.warnings, 'w');
-      el.className = 'status good';
     }
+    el.className = 'status ' + (!result.ok || (result.conflicts && result.conflicts.length) ? 'bad' : 'good');
     el.innerHTML = html;
-    sum.className = el.className;
-    sum.innerHTML = html;
-    // mark invalid inputs
+    const gn = cur().genNotes || [];
+    $('#notes').innerHTML = gn.length ? `<div class="status"><b>Generated from intake</b>${list(gn, 'w')}</div>` : '';
     $$('.invalid').forEach(x => x.classList.remove('invalid'));
     result.errors.forEach(e => {
       let t = null;
@@ -142,17 +162,16 @@
       else if (e.field === 'growth') t = $('#o-growth');
       else if (e.field === 'staticReserve') t = $('#o-staticReserve');
       else if (e.field === 'dhcpOffset') t = $('#o-dhcpOffset');
+      else if (e.field === 'existing' && view === 'intake') t = $('#i-existing');
       if (t) t.classList.add('invalid');
     });
-    const idx = {};
-    result.allocations.forEach(a => { idx[a.name] = a; });
-    $$('.swatch').forEach(s => { const i = Number(s.dataset.sw); s.style.background = color(i); });
+    $$('.swatch[data-sw]').forEach(s => { s.style.background = color(Number(s.dataset.sw)); });
   }
 
   function renderResults() {
     const box = $('#results'), gapBox = $('#gaps');
-    if (!result.allocations.length) { box.innerHTML = '<p class="hint">Nothing to show yet. Fix the problems on the Plan tab.</p>'; gapBox.innerHTML = ''; return; }
-    const names = proj().networks.map(n => String(n.name).trim());
+    if (!result.allocations.length) { box.innerHTML = '<p class="hint">Nothing to show yet. Fix the problems above.</p>'; gapBox.innerHTML = ''; return; }
+    const names = cur().networks.map(n => String(n.name).trim());
     const rows = result.allocations.map(a => {
       const ci = Math.max(0, names.indexOf(a.name));
       return `<tr>
@@ -171,177 +190,118 @@
         <td class="mono" data-label="DHCP">${esc(rng(a.dhcpStart, a.dhcpEnd) || '-')}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="tablewrap"><table class="cards"><thead><tr><th>Name</th><th>VLAN</th><th>Role</th><th>CIDR</th><th>Netmask</th><th>Wildcard</th><th>Network</th><th>Gateway</th><th>Usable range</th><th>Broadcast</th><th>Total / usable</th><th>Static</th><th>DHCP</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-    if (result.gaps.length) {
-      gapBox.innerHTML = `<div class="card"><h2>Unused space</h2>${result.gaps.map(g =>
-        `<p class="mono">${esc(Calc.intToIp(g.start))} - ${esc(Calc.intToIp(g.end))} · ${g.size.toLocaleString()} addresses · ${esc(g.cidrs.map(c => c.cidr).join(', '))}${g.between ? ' · <b>gap between allocations</b>' : ' · free at end of block'}</p>`).join('')}</div>`;
-    } else gapBox.innerHTML = '<div class="card"><h2>Unused space</h2><p class="hint">None. The parent block is completely allocated.</p></div>';
+    gapBox.innerHTML = `<div class="card"><h2>Unused space</h2>${result.gaps.length ? result.gaps.map(g =>
+      `<p class="mono">${esc(Calc.intToIp(g.start))} - ${esc(Calc.intToIp(g.end))} · ${g.size.toLocaleString()} addresses · ${esc(g.cidrs.map(c => c.cidr).join(', '))}${g.between ? ' · <b>gap between allocations</b>' : ' · free at end of block'}</p>`).join('')
+      : '<p class="hint">None. The parent block is completely allocated.</p>'}</div>`;
   }
 
   function renderMap() {
     const map = $('#map'), legend = $('#legend');
     if (!result.parent || !result.allocations.length) { map.innerHTML = '<p class="hint">Nothing to draw yet.</p>'; legend.innerHTML = ''; return; }
-    const par = result.parent;
-    const fit = $('#fitUsed').checked;
-    const names = proj().networks.map(n => String(n.name).trim());
+    const par = result.parent, fit = $('#fitUsed').checked;
+    const names = cur().networks.map(n => String(n.name).trim());
+    const project_ = project();
+    const ex = result.conflicts && result.conflicts.length ? Calc.mergeRanges(project_.existing.map(Calc.parseCidr).filter(e => !e.error && e.start <= par.end && e.end >= par.start).map(e => ({ start: Math.max(e.start, par.start), end: Math.min(e.end, par.end) }))) : [];
     let span = par.size;
-    if (fit) { const maxEnd = Math.max.apply(null, result.allocations.map(a => a.end)); span = maxEnd + 1 - par.start; }
+    if (fit) { const maxEnd = Math.max.apply(null, result.allocations.map(a => a.end).concat(ex.map(e => e.end))); span = maxEnd + 1 - par.start; }
     const segs = result.allocations.map(a => {
       const ci = Math.max(0, names.indexOf(a.name));
       const left = (a.start - par.start) / span * 100, w = a.size / span * 100;
       return `<div class="seg" style="left:${left}%;width:${w}%;background:${color(ci)}" title="${esc(a.name)} ${esc(a.cidr)}">${w > 9 ? `<span>${esc(a.name)}</span>` : ''}</div>`;
-    }).join('');
+    }).join('') + ex.map(e => `<div class="seg existing" style="left:${(e.start - par.start) / span * 100}%;width:${(e.end - e.start + 1) / span * 100}%" title="Existing range"></div>`).join('');
     map.innerHTML = `<div class="bar" role="img" aria-label="Address map of ${esc(par.cidr)}">${segs}</div>
       <div class="axis"><span class="mono">${esc(par.network)}</span><span class="mono">${esc(Calc.intToIp(par.start + span - 1))}</span></div>`;
     legend.innerHTML = result.allocations.map(a => {
       const ci = Math.max(0, names.indexOf(a.name));
       return `<div><span class="swatch" style="background:${color(ci)}"></span><span><b>${esc(a.name)}</b> <span class="mono dim">${esc(a.cidr)}</span></span></div>`;
-    }).join('') + (result.gaps.length ? '<div><span class="swatch hatch"></span><span>Free space (hatched)</span></div>' : '');
-  }
-
-  function renderExport() {
-    $('#fortinote').textContent = Fmt.FORTI_NOTE;
-    const out = exportText(activeEx);
-    $('#expreview').textContent = out || 'Fix the problems on the Plan tab to enable exports.';
-  }
-  function exportText(kind) {
-    if (!result.ok) return '';
-    const p = proj();
-    switch (kind) {
-      case 'csv': return Fmt.toCSV(result);
-      case 'md': return Fmt.toMarkdown(result, p);
-      case 'forti': return Fmt.toFortiOS(result, p, p.ifName);
-      case 'text': return Fmt.toText(result, p);
-      case 'handover': return Fmt.toHandoverMarkdown(result, p);
-    }
-    return '';
-  }
-
-  function renderHandover() {
-    const p = proj();
-    $('#hoTitle').textContent = 'Network addressing: ' + p.name;
-    if (!result.ok) { $('#hoMeta').textContent = ''; $('#handover').innerHTML = '<p class="hint">Fix the problems on the Plan tab first.</p>'; return; }
-    $('#hoMeta').textContent = `Address block ${result.parent.cidr} · prepared ${new Date().toISOString().slice(0, 10)}`;
-    const rows = Fmt.handoverRows(result).map(r => `<tr>${Fmt.handoverCells(r).map((c, i) => `<td class="${i >= 3 && i !== 2 ? 'mono' : ''}" data-label="${esc(Fmt.HANDOVER_HEAD[i])}">${esc(c || '-')}</td>`).join('')}</tr>`).join('');
-    $('#handover').innerHTML = `<div class="tablewrap"><table class="cards"><thead><tr>${Fmt.HANDOVER_HEAD.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    }).join('') + (ex.length ? '<div><span class="swatch existing"></span><span>Existing range (in use)</span></div>' : '') +
+      (result.gaps.length ? '<div><span class="swatch hatch"></span><span>Free space (hatched)</span></div>' : '');
   }
 
   function recalc() {
-    const p = proj();
-    result = Calc.plan(p);
-    renderStatus(); renderResults(); renderMap(); renderExport(); renderHandover();
+    if (!cur()) return;
+    result = Calc.plan(project());
+    if (view === 'plan' || view === 'outputs' || view === 'intake') renderStatus();
+    if (view === 'plan') { renderResults(); renderMap(); }
+    if (view === 'outputs') renderOutputs();
     save();
   }
 
-  // ---------- events ----------
-  function bind() {
-    // tabs
-    $$('nav.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
-
-    // parent / options
-    $$('[data-o]').forEach(el => el.addEventListener('input', () => {
-      const p = proj(), k = el.dataset.o;
-      if (k === 'parent') p.parent = el.value; else p.opts[k] = el.value;
-      recalc();
-    }));
-    $('#ifName').addEventListener('input', e => { proj().ifName = e.target.value; recalc(); });
+  function bindPlan() {
+    $('#parent').addEventListener('input', e => { const c = cur(); c.parent = e.target.value; c.parentAuto = false; $('#parentAutoTag').textContent = '(manual)'; recalc(); });
+    $$('[data-o]').forEach(el => el.addEventListener('input', () => { cur().opts[el.dataset.o] = el.value; recalc(); }));
     $('#fitUsed').addEventListener('change', renderMap);
-
-    // network rows (delegated)
+    $('#btnAutoParent').addEventListener('click', () => {
+      const c = cur(), p = Intake.pickParent(Intake.parseExisting(c.intake.existing));
+      c.parent = p ? p.cidr : c.parent; c.parentAuto = true; renderPlanInputs(); recalc();
+    });
+    $('#btnRegen').addEventListener('click', generate);
     $('#rows').addEventListener('input', e => {
       const row = e.target.closest('.row'); if (!row || !e.target.dataset.f) return;
-      proj().networks[Number(row.dataset.i)][e.target.dataset.f] = e.target.value;
-      recalc();
+      const c = cur(); c.networks[Number(row.dataset.i)][e.target.dataset.f] = e.target.value; c.planEdited = true; recalc();
     });
     $('#rows').addEventListener('click', e => {
       const b = e.target.closest('button[data-act]'); if (!b) return;
-      const i = Number(b.closest('.row').dataset.i), nets = proj().networks;
+      const i = Number(b.closest('.row').dataset.i), nets = cur().networks;
       if (b.dataset.act === 'del') nets.splice(i, 1);
       else if (b.dataset.act === 'up' && i > 0) nets.splice(i - 1, 0, nets.splice(i, 1)[0]);
       else if (b.dataset.act === 'down' && i < nets.length - 1) nets.splice(i + 1, 0, nets.splice(i, 1)[0]);
-      renderRows(); recalc();
+      cur().planEdited = true; renderRows(); recalc();
     });
     $('#btnAdd').addEventListener('click', () => {
-      proj().networks.push({ id: uid(), name: '', hosts: '', vlan: '', role: 'LAN' });
+      cur().networks.push({ name: '', hosts: '', vlan: '', role: 'LAN' }); cur().planEdited = true;
       renderRows(); recalc();
       const last = $$('#rows .row').pop(); if (last) last.querySelector('[data-f="name"]').focus();
     });
-
-    // projects
-    $('#projSel').addEventListener('change', e => { store.current = e.target.value; renderInputs(); recalc(); });
-    $('#btnNew').addEventListener('click', () => {
-      const name = prompt('Name for the new project:', 'New project'); if (!name || !name.trim()) return;
-      const p = newProject(uniqueName(name.trim())); store.projects[p.id] = p; store.current = p.id;
-      renderProjects(); renderInputs(); recalc();
-    });
-    $('#btnRename').addEventListener('click', () => {
-      const name = prompt('Rename project:', proj().name); if (!name || !name.trim()) return;
-      proj().name = name.trim(); renderProjects(); recalc();
-    });
-    $('#btnDup').addEventListener('click', () => {
-      const c = JSON.parse(JSON.stringify(proj())); c.id = uid(); c.name = uniqueName(c.name + ' copy');
-      c.networks.forEach(n => { n.id = uid(); });
-      store.projects[c.id] = c; store.current = c.id; renderProjects(); renderInputs(); recalc();
-    });
-    $('#btnDel').addEventListener('click', () => {
-      if (!confirm(`Delete project "${proj().name}"? This cannot be undone.`)) return;
-      delete store.projects[store.current];
-      if (!Object.keys(store.projects).length) { const p = newProject('New project'); store.projects[p.id] = p; }
-      store.current = Object.keys(store.projects)[0];
-      renderProjects(); renderInputs(); recalc();
-    });
-    $('#presetSel').addEventListener('change', e => {
-      const k = e.target.value; if (!k) return;
-      const p = newProject(uniqueName(k), PRESETS[k]); store.projects[p.id] = p; store.current = p.id;
-      renderProjects(); renderInputs(); recalc(); e.target.value = '';
-    });
-
-    // export
-    $$('[data-ex]').forEach(b => b.addEventListener('click', async () => {
-      activeEx = b.dataset.ex;
-      const text = exportText(activeEx);
-      renderExport();
-      const msg = $('#exmsg');
-      if (!text) { msg.textContent = 'Nothing to copy: fix the problems on the Plan tab first.'; return; }
-      msg.textContent = (await copy(text)) ? `Copied ${b.textContent.replace('Copy ', '')} to the clipboard.` : 'Copy was blocked. Press and hold the preview below and choose Select All, then Copy.';
-    }));
-    $('#hoCopy').addEventListener('click', async () => {
-      const t = exportText('handover'); if (!t) return;
-      const ok = await copy(t); $('#hoCopy').textContent = ok ? 'Copied!' : 'Copy failed';
-      setTimeout(() => { $('#hoCopy').textContent = 'Copy Markdown'; }, 1500);
-    });
-    $('#hoPrint').addEventListener('click', () => window.print());
-
-    window.addEventListener('pagehide', saveNow);
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   }
 
-  function uniqueName(base) {
-    const have = Object.values(store.projects).map(p => p.name.toLowerCase());
-    let n = base, i = 2;
-    while (have.indexOf(n.toLowerCase()) >= 0) n = `${base} ${i++}`;
-    return n;
+  // ---------- 4. outputs ----------
+  function text(kind) {
+    if (!result || !result.ok) return '';
+    const p = project();
+    switch (kind) {
+      case 'csv': return Fmt.toCSV(result);
+      case 'forti': return Fmt.toFortiOS(result, p, p.ifName);
+      case 'text': return Fmt.toText(result, p);
+      case 'md': return Fmt.toHandoverDoc(result, p);
+      case 'html': return Fmt.toHandoverHTML(result, p);
+    }
+    return '';
   }
-
-  async function copy(text) {
-    try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall back */ }
+  function renderOutputs() {
+    $$('.subtabs button').forEach(b => b.classList.toggle('on', b.dataset.out === outView));
+    ['handover', 'forti', 'csv', 'text'].forEach(k => { $('#out-' + k).hidden = k !== outView; });
+    $('#ifName').value = cur().ifName || '';
+    $('#fortinote').textContent = Fmt.FORTI_NOTE;
+    const none = 'Fix the problems on the Plan screen to enable this output.';
+    $('#docbox').innerHTML = result.ok ? text('html') : `<p class="hint">${none}</p>`;
+    ['forti', 'csv', 'text'].forEach(k => { $('#pre-' + k).textContent = text(k) || none; });
+  }
+  async function copy(t) {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) { /* fall back */ }
     try {
       const ta = document.createElement('textarea');
-      ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+      ta.value = t; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length);
       const ok = document.execCommand('copy'); ta.remove(); return ok;
     } catch (e) { return false; }
   }
-
-  function showTab(t) {
-    $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-    $$('.panel').forEach(p => { p.hidden = p.id !== 'tab-' + t; });
-    window.scrollTo(0, 0);
+  function bindOutputs() {
+    $('.subtabs').addEventListener('click', e => { const b = e.target.closest('button[data-out]'); if (!b) return; outView = b.dataset.out; renderOutputs(); });
+    $$('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+      const t = text(b.dataset.copy), msg = $('#exmsg');
+      if (!t) { msg.textContent = 'Nothing to copy: fix the problems on the Plan screen first.'; return; }
+      const ok = await copy(t);
+      msg.textContent = ok ? 'Copied to the clipboard.' : 'Copy was blocked. Press and hold the text, choose Select All, then Copy.';
+      const old = b.textContent; b.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(() => { b.textContent = old; }, 1500);
+    }));
+    $('#ifName').addEventListener('input', e => { cur().ifName = e.target.value; recalc(); });
+    $('#btnPrint').addEventListener('click', () => window.print());
   }
 
   // ---------- offline / service worker ----------
   function netState() {
-    const pill = $('#netpill');
-    const sw = pill.dataset.sw === '1';
+    const pill = $('#netpill'), sw = pill.dataset.sw === '1';
     if (!navigator.onLine) { pill.textContent = 'Offline' + (sw ? ' · works' : ''); pill.className = 'pill off'; }
     else if (sw) { pill.textContent = 'Offline ready'; pill.className = 'pill ok'; }
     else { pill.textContent = 'Online'; pill.className = 'pill'; }
@@ -357,6 +317,12 @@
 
   // ---------- init ----------
   load();
-  renderProjects(); renderInputs(); bind(); recalc(); registerSW();
-  window.SubnetPal = { get state() { return store; }, get result() { return result; }, recalc, showTab };
+  buildIntakeForm();
+  $$('nav.tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+  bindClients(); bindIntake(); bindPlan(); bindOutputs();
+  window.addEventListener('pagehide', saveNow);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+  show('clients');
+  registerSW();
+  window.SubnetPal = { get state() { return store; }, get result() { return result; }, show, recalc };
 }());

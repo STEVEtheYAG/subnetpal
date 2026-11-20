@@ -1,55 +1,70 @@
 # SubnetPal
 
-Offline-first installable PWA that plans IP address ranges (VLSM) for firewall builds. FortiGate CLI export first, generic text otherwise. Vanilla HTML/CSS/JS, no framework, no build step, no dependencies.
+Offline-first installable PWA for client-intake-driven IP planning (VLSM) on firewall builds. It turns a client intake into a network plan, a client handover document and a FortiOS CLI snippet. Vanilla HTML/CSS/JS, no framework, no build step, no dependencies.
 
 ## How to use (5 lines)
 
-1. **Plan tab:** enter the parent block (e.g. `10.20.0.0/16`), or pick a preset to start a new project.
-2. Add networks (name, hosts needed, optional VLAN and role); reorder with the arrows. Set gateway position, growth %, static reserve and DHCP offset.
-3. The plan recalculates as you type. Errors (bad CIDR, 0 hosts, duplicate names, doesn't fit) show at the top with the offending field in red.
-4. **Results / Map / Handover tabs:** per-network detail (cards on phones), the colour-coded address bar with free space hatched, and a client-ready table (Copy Markdown or Print).
-5. **Export tab:** set the interface name placeholder once, then copy CSV, Markdown, FortiOS CLI or generic text. Projects save automatically on this device; use the project bar for multiple named projects.
+1. **Clients** (home): tap **New client**, or add a sample client to see how it works. Open, duplicate or delete saved clients here.
+2. **Intake:** client name, site, date, device counts per segment, existing ranges in use (one CIDR per line), expansion (None / Soon / Big growth) and requirement ticks. Add a WAN/VPN note (handover only).
+3. **Generate plan:** picks a free private /16, then suggests Management, Staff LAN, Servers, Transit and Loopback plus any ticked networks with a count above 0. On the **Plan** screen, edit rows, VLANs and options; it recalculates live. Overlap with existing ranges shows as a red warning.
+4. **Outputs:** Handover (Markdown, HTML or Print), FortiOS CLI, CSV, generic text. Each has a Copy button. Set the interface name placeholder once on the FortiOS tab.
+5. Everything saves on the device automatically and works offline after the first load.
 
 ## Install on iPhone
 
-1. Deploy it (below) and open the `https://<you>.github.io/subnetpal/` URL **in Safari** (not Chrome).
-2. Wait for the green **Offline ready** pill at the top.
-3. Tap Share, then **Add to Home Screen**, then Add. Launch it from the icon; it runs full-screen and works in airplane mode.
+1. Open the deployed `https://<you>.github.io/subnetpal/` URL **in Safari** (not Chrome).
+2. Wait for the green **Offline ready** pill.
+3. Tap Share, then **Add to Home Screen**, then Add. It opens full-screen and works in airplane mode.
 
 ## Run locally
 
 ```
-node calc.test.js          # unit tests
+node calc.test.js          # unit tests (52)
 node tools/serve.js 8080   # http://localhost:8080
 node tools/make-icons.js   # regenerate icons (only if you change the design)
 ```
 
 ## Deploy to GitHub Pages
 
-From this folder in PowerShell (needs [GitHub CLI](https://cli.github.com): `winget install GitHub.cli`, then `gh auth login` once):
-
 ```powershell
-git init -b main; git add .; git commit -m "SubnetPal"
-gh repo create subnetpal --public --source=. --push
-gh api -X POST "repos/{owner}/subnetpal/pages" -f "source[branch]=main" -f "source[path]=/"
+git add .; git commit -m "Client intake flow"; git push
 ```
 
-The site is live at `https://<your-github-username>.github.io/subnetpal/` after about a minute. Without `gh`: create an empty repo named `subnetpal` on github.com, `git remote add origin https://github.com/<you>/subnetpal.git`, `git push -u origin main`, then Settings, Pages, Deploy from branch `main` / root.
+First-time setup (once): install GitHub CLI (`winget install GitHub.cli`, reopen PowerShell, `gh auth login`), then `gh repo create subnetpal --public --source=. --push` and `gh api -X POST "repos/{owner}/subnetpal/pages" -f "source[branch]=main" -f "source[path]=/"`. Live at `https://<your-github-username>.github.io/subnetpal/`. Netlify alternative: drag this folder onto https://app.netlify.com/drop.
 
-**Netlify alternative:** drag this folder onto https://app.netlify.com/drop and open the URL it gives you.
+Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v2`).
 
-**Shipping changes:** bump `CACHE` in `sw.js` (e.g. `subnetpal-v2`), commit and push. Installed copies update on their next online open (cache-first with background refresh, so the new version appears on the launch after).
+## Files
+
+`calc.js` subnet maths (no DOM) · `intake.js` intake to networks, parent auto-pick, sample clients · `access.js` network kinds, access rules, "why" lines · `format.js` CSV, text, FortiOS, handover doc · `app.js` UI · `sw.js` offline · `calc.test.js` tests.
 
 ## Assumptions
 
-- **Sizing:** needed = hosts + ceil(hosts x growth%) + network + broadcast + gateway; round up to a power of two; smallest block is /30. Growth buffer is not applied to /31 or /32.
-- **/31 and /32:** role **Transit** with 2 or fewer hosts gets a /31 (RFC 3021: both addresses usable, no gateway, no broadcast). I added a **Loopback** role (1 host) that gets a /32. Transit with more than 2 hosts is sized as a normal subnet, with a warning.
-- **Allocation:** largest first, ties keep list order, each block aligned to its own size. Results are shown in address order. Because blocks are placed largest-first, free space ends up at the end of the parent block, so "gaps between allocations" only appear when allocations leave a hole (the gap detector handles that generally and is unit-tested directly).
-- **"Parent block overlaps itself"** is interpreted as: a parent with host bits set (e.g. `10.20.0.5/16`) is rejected with the corrected network suggested, and an internal overlap check runs over every plan. Overlap detection (`findOverlaps`) is unit-tested.
-- **Static range:** the first N addresses of the host range after the gateway (default 10). With gateway *last*, the static range starts at the first usable address. Clamped to the network size with a warning.
-- **DHCP range:** starts after the static reserve plus the DHCP offset and runs to the last host address (excluding a last-position gateway). Only **LAN, Guest and un-roled** networks get DHCP. DMZ, Mgmt, WAN, Transit and Loopback get static addressing only. Small networks (/29 and under) can end up with no DHCP room; a warning says so.
-- **Usable hosts** = total - 2 (the gateway counts as usable); /31 = 2; /32 = 1.
-- **FortiOS snippet:** one placeholder (`PORT_CHANGE_ME` by default) is the parent port for VLAN sub-interfaces (named `vlan<ID>`), or the interface name for non-VLAN networks (numbered if there are several). Roles map as LAN/Guest/Mgmt to `lan`, DMZ to `dmz`, WAN to `wan`, Transit/Loopback to `undefined`. `allowaccess` is `ping https ssh` for LAN/Mgmt, `ping` for the rest. Always verify against the FortiOS 8.0 docs; the snippet is a planning aid and has not been tested on a device.
-- **Validation:** hosts must be a whole number of at least 1; VLAN 1-4094; names required and unique (case-insensitive); growth 0-500%. Duplicate VLAN IDs and non-RFC1918 parents are warnings, not errors. IPv4 only.
-- **Storage:** projects live in `localStorage` on the device (nothing is sent anywhere). Clearing Safari website data deletes them; use Export to keep copies. The last-edited project reopens on launch.
-- **Offline:** service worker precaches all 11 files; cache-first with background refresh. iOS may evict site data for PWAs unused for a long time.
+**Planning**
+- **Sizing:** needed = hosts + ceil(hosts x growth%) + network + broadcast + gateway, rounded up to a power of two; smallest block /30. Growth is not applied to /31 or /32.
+- **Expansion:** None = 25%, Soon = 50%, Big growth = 100% (sets the Growth buffer option; you can still change it on the Plan screen).
+- **Allocation:** largest first, each block aligned to its own size, placed in the lowest free spot that avoids existing ranges. Results display in address order.
+- **/31 and /32:** role Transit with 2 or fewer hosts is a /31 (no gateway, no broadcast). Role Loopback (1 host) is a /32.
+- **Existing ranges:** they are reserved wherever they fall inside the parent block. If the parent overlaps one (only possible when you override the parent), the plan still avoids it and shows a red warning. Existing ranges that overlap each other give a warning.
+- **Parent auto-pick:** first free `10.x.0.0/16`, trying 10.20 upward then 10.2 to 10.19, then 10.0 and 10.1, then 172.16 to 172.31, then 192.168.0.0/16. If every option clashes, enter one manually. Typing a parent switches to manual; **Auto-pick parent** switches back. Changing existing ranges on Intake re-picks an auto parent live.
+- **Intake to networks:** Management, Staff LAN, Servers, Transit (/31) and Loopback (/32) are always suggested. Voice, Cameras, IoT, Guest and DMZ are added only if ticked and the count is above 0.
+  - Staff LAN = staff + wired + Wi-Fi devices. Servers = servers (minimum 2). Management = 10 + 1 per 30 Wi-Fi devices (access points). DMZ has its own count field ("Public servers (DMZ)"), which I added.
+  - A count for something that is not ticked is added to the Staff LAN (to Servers for DMZ) and noted on the Plan screen, so nothing is silently dropped. A ticked box with a count of 0 adds nothing and says so.
+- **VLAN IDs:** Mgmt 10, Staff 20, Servers 30, Voice 40, Cameras 50, IoT 60, Guest 70, DMZ 80; Transit and Loopback none. All editable. Generating again resets them.
+- **Static and DHCP:** static reserve is the first N addresses after the gateway (default 10, clamped on small networks with a warning). DHCP follows the static reserve plus the offset. DHCP is offered on Staff LAN, Voice, Cameras, IoT and Guest, and not on Management, Servers, DMZ, Transit or Loopback.
+- **Editing:** editing any row marks the plan as edited, and Generate or Regenerate then asks before replacing it.
+
+**Access rules (handover matrix and FortiOS starter policies)**
+- Staff: internet, Servers, DMZ. Servers: internet only. Voice: internet and Servers. Cameras: Servers only (no internet). IoT and Guest: internet only (Guest limited to DNS/HTTP/HTTPS). DMZ: internet only, explicitly blocked from internal networks. Guest is also explicitly blocked from internal networks.
+- **Management restricted** is interpreted as: nothing else can reach Management; Management can reach internet and all other internal networks to administer them. Add an admin-workstation rule if admins connect from elsewhere.
+- No inbound internet-to-DMZ policy is generated (it needs a VIP/port-forward decision). Transit and Loopback get no policies.
+
+**FortiOS output (generated, untested)**
+- Includes interfaces, DHCP servers, one firewall address object per subnet (`SP_<name>`), an `SP_INTERNAL` address group and starter policies, with the note "Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules." at the top and bottom.
+- One placeholder field (`PORT_CHANGE_ME` by default) is the parent port for VLAN interfaces (named `vlan<ID>`) or the interface name for non-VLAN networks. The internet interface in policies is assumed to be `wan1`.
+- `allowaccess` is `ping https ssh` for LAN and Mgmt and `ping` for the rest. Roles map to `lan`, `dmz`, `wan` or `undefined`. Deny policies come first; allow policies use NAT toward the internet and `logtraffic all`.
+
+**App**
+- **Storage:** clients live in `localStorage` (key `subnetpal.v2`) on the device. Nothing is sent anywhere. Clearing Safari website data deletes them, so copy outputs you need. The earlier "named projects" data (key `subnetpal.v1`) is not migrated.
+- **Validation:** hosts at least 1, VLAN 1-4094, names required and unique (case-insensitive), growth 0-500%, CIDRs strict (host bits set is an error). Duplicate VLAN IDs and non-RFC1918 parents are warnings. IPv4 only.
+- **Handover doc:** Markdown for pasting, printable HTML for PDF via Print. The WAN/VPN note appears there only and is never planned.

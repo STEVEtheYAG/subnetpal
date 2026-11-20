@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>SubnetPal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Offline IP address planner (VLSM) for firewall builds. FortiGate CLI export.">
+<meta name="description" content="Client-intake IP planner (VLSM) for firewall builds. FortiGate CLI export and client handover document.">
 <meta name="theme-color" content="#0f1419">
 <meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
@@ -22,31 +22,86 @@
     <h1>SubnetPal</h1>
     <span id="netpill" class="pill" title="Offline status">…</span>
   </div>
-  <div class="projbar">
-    <select id="projSel" aria-label="Project"></select>
-    <div class="btnrow">
-      <button id="btnNew" class="btn sm">New</button>
-      <button id="btnRename" class="btn sm">Rename</button>
-      <button id="btnDup" class="btn sm">Copy</button>
-      <button id="btnDel" class="btn sm danger">Delete</button>
-    </div>
-  </div>
+  <div id="crumb" class="crumb"></div>
 </header>
 
 <main>
-  <!-- PLAN -->
-  <section id="tab-plan" class="panel">
+  <!-- 1. CLIENT LIST -->
+  <section id="tab-clients" class="panel">
+    <div class="card">
+      <h2>Clients</h2>
+      <button id="btnNewClient" class="btn block primary">+ New client</button>
+      <div id="clientList"></div>
+    </div>
+    <div class="card">
+      <h2>Sample clients</h2>
+      <p class="hint">Add a ready-made client to see how the app works.</p>
+      <div id="samples" class="btnrow"></div>
+    </div>
+  </section>
+
+  <!-- 2. INTAKE -->
+  <section id="tab-intake" class="panel" hidden>
+    <div class="card">
+      <h2>Client</h2>
+      <div class="grid2">
+        <label class="fld span2">Client name<input id="i-name" autocomplete="off" placeholder="e.g. Acme Ltd"></label>
+        <label class="fld">Site / location<input id="i-site" autocomplete="off" placeholder="e.g. Head office"></label>
+        <label class="fld">Date<input id="i-date" type="date"></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Device counts per segment</h2>
+      <div class="grid3" id="counts"></div>
+      <p class="hint">Staff LAN = staff + wired + Wi-Fi devices. Counts for a segment that is not ticked below are added to the Staff LAN (or Servers for DMZ), so nothing is dropped.</p>
+    </div>
+
+    <div class="card">
+      <h2>Requirements</h2>
+      <div id="reqs"></div>
+    </div>
+
+    <div class="card">
+      <h2>Existing IP ranges in use</h2>
+      <label class="fld">One CIDR per line (leave empty if none)
+        <textarea id="i-existing" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16&#10;192.168.1.0/24"></textarea>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>Expected expansion</h2>
+      <div id="expansion" class="seg3" role="radiogroup" aria-label="Expected expansion">
+        <button class="opt" data-exp="none" role="radio">None<small>25% buffer</small></button>
+        <button class="opt" data-exp="soon" role="radio">Soon<small>50% buffer</small></button>
+        <button class="opt" data-exp="big" role="radio">Big growth<small>100% buffer</small></button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>WAN / VPN note</h2>
+      <label class="fld">Shown in the handover document only. Not planned.
+        <textarea id="i-wan" rows="3" placeholder="e.g. Fibre 500/500 plus 4G backup. IPsec to HQ."></textarea>
+      </label>
+    </div>
+
+    <button id="btnGenerate" class="btn block primary big">Generate plan →</button>
+    <p class="hint">Generating replaces the network list on the Plan screen. Existing ranges and the growth setting also update the plan live.</p>
+  </section>
+
+  <!-- 3. PLAN -->
+  <section id="tab-plan" class="panel" hidden>
     <div id="status" class="status" role="status"></div>
+    <div id="notes"></div>
 
     <div class="card">
       <h2>Parent block</h2>
-      <label class="fld">CIDR
-        <input id="parent" data-o="parent" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16">
+      <label class="fld">CIDR <span id="parentAutoTag" class="tag"></span>
+        <input id="parent" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.20.0.0/16">
       </label>
-      <div class="presetrow">
-        <label class="fld grow">Start from preset
-          <select id="presetSel"><option value="">Choose a preset…</option></select>
-        </label>
+      <div class="btnrow mt">
+        <button id="btnAutoParent" class="btn sm">Auto-pick parent</button>
+        <button id="btnRegen" class="btn sm">Regenerate from intake</button>
       </div>
     </div>
 
@@ -59,10 +114,10 @@
         <label class="fld">Growth buffer %
           <input id="o-growth" data-o="growth" inputmode="numeric" autocomplete="off">
         </label>
-        <label class="fld">Static reserve (addresses after gateway)
+        <label class="fld">Static reserve (after gateway)
           <input id="o-staticReserve" data-o="staticReserve" inputmode="numeric" autocomplete="off">
         </label>
-        <label class="fld">DHCP start offset (after static)
+        <label class="fld">DHCP start offset
           <input id="o-dhcpOffset" data-o="dhcpOffset" inputmode="numeric" autocomplete="off">
         </label>
       </div>
@@ -71,19 +126,13 @@
     <div class="card">
       <h2>Networks</h2>
       <div id="rows"></div>
-      <button id="btnAdd" class="btn block primary">+ Add network</button>
+      <button id="btnAdd" class="btn block">+ Add network</button>
     </div>
-  </section>
 
-  <!-- RESULTS -->
-  <section id="tab-results" class="panel" hidden>
-    <div id="summary" class="status"></div>
+    <h2 class="sect">Results</h2>
     <div id="results"></div>
     <div id="gaps"></div>
-  </section>
 
-  <!-- MAP -->
-  <section id="tab-map" class="panel" hidden>
     <div class="card">
       <h2>Address map</h2>
       <label class="check"><input type="checkbox" id="fitUsed"> Zoom to used space</label>
@@ -92,51 +141,57 @@
     </div>
   </section>
 
-  <!-- EXPORT -->
-  <section id="tab-export" class="panel" hidden>
-    <div class="card">
-      <h2>Export</h2>
-      <label class="fld">FortiOS interface name placeholder
+  <!-- 4. OUTPUTS -->
+  <section id="tab-outputs" class="panel" hidden>
+    <div class="subtabs noprint" role="tablist">
+      <button data-out="handover" class="on">Handover</button>
+      <button data-out="forti">FortiOS</button>
+      <button data-out="csv">CSV</button>
+      <button data-out="text">Text</button>
+    </div>
+
+    <div id="out-handover" class="card">
+      <div class="noprint btnrow">
+        <button class="btn primary" data-copy="md">Copy Markdown</button>
+        <button class="btn" data-copy="html">Copy HTML</button>
+        <button class="btn" id="btnPrint">Print</button>
+      </div>
+      <div id="docbox"></div>
+    </div>
+
+    <div id="out-forti" class="card" hidden>
+      <label class="fld noprint">Interface name placeholder
         <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
       </label>
-      <p class="hint">Used as the parent port for VLAN interfaces (or the interface name for non-VLAN networks) in the FortiOS snippet. Change it once here.</p>
-      <div class="exgrid">
-        <button class="btn primary" data-ex="csv">Copy CSV</button>
-        <button class="btn primary" data-ex="md">Copy Markdown</button>
-        <button class="btn primary" data-ex="forti">Copy FortiOS CLI</button>
-        <button class="btn primary" data-ex="text">Copy generic text</button>
-      </div>
-      <div id="exmsg" class="hint" aria-live="polite"></div>
+      <p class="hint noprint">One field: used as the parent port for VLAN interfaces (or the interface name for non-VLAN networks). Policies assume the internet interface is <b>wan1</b>.</p>
       <div class="warnbox">⚠ <span id="fortinote"></span></div>
-      <pre id="expreview" class="code" tabindex="0"></pre>
+      <button class="btn primary block" data-copy="forti">Copy FortiOS CLI</button>
+      <pre id="pre-forti" class="code" tabindex="0"></pre>
     </div>
-  </section>
 
-  <!-- HANDOVER -->
-  <section id="tab-handover" class="panel" hidden>
-    <div class="card handover" id="handoverCard">
-      <div class="handover-head">
-        <h2 id="hoTitle">Network addressing</h2>
-        <div class="noprint btnrow">
-          <button id="hoCopy" class="btn sm">Copy Markdown</button>
-          <button id="hoPrint" class="btn sm">Print</button>
-        </div>
-      </div>
-      <div id="hoMeta" class="hint"></div>
-      <div id="handover"></div>
+    <div id="out-csv" class="card" hidden>
+      <button class="btn primary block" data-copy="csv">Copy CSV</button>
+      <pre id="pre-csv" class="code" tabindex="0"></pre>
     </div>
+
+    <div id="out-text" class="card" hidden>
+      <button class="btn primary block" data-copy="text">Copy generic text</button>
+      <pre id="pre-text" class="code" tabindex="0"></pre>
+    </div>
+    <div id="exmsg" class="hint noprint" aria-live="polite"></div>
   </section>
 </main>
 
-<nav class="tabs" aria-label="Sections">
-  <button data-tab="plan" class="on">Plan</button>
-  <button data-tab="results">Results</button>
-  <button data-tab="map">Map</button>
-  <button data-tab="export">Export</button>
-  <button data-tab="handover">Handover</button>
+<nav class="tabs" aria-label="Screens">
+  <button data-tab="clients" class="on">Clients</button>
+  <button data-tab="intake">Intake</button>
+  <button data-tab="plan">Plan</button>
+  <button data-tab="outputs">Outputs</button>
 </nav>
 
 <script src="calc.js"></script>
+<script src="access.js"></script>
+<script src="intake.js"></script>
 <script src="format.js"></script>
 <script src="app.js"></script>
 </body>

@@ -1,8 +1,8 @@
 /* SubnetPal service worker: precache everything, serve cache-first, refresh in the background.
    Bump CACHE when you deploy changes so installed copies pick them up. */
-const CACHE = 'subnetpal-v1';
+const CACHE = 'subnetpal-v2';
 const ASSETS = [
-  './', './index.html', './style.css', './app.js', './calc.js', './format.js', './manifest.json',
+  './', './index.html', './style.css', './app.js', './calc.js', './access.js', './intake.js', './format.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
 ];
 

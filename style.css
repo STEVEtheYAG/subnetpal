@@ -110,8 +110,8 @@ pre.code {
 }
 
 /* handover */
-.handover-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-.handover table th, .handover table td { white-space: normal; }
+
+
 
 nav.tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, 1fr);
@@ -143,9 +143,54 @@ nav.tabs button.on { color: var(--accent); box-shadow: inset 0 3px 0 var(--accen
 
 @media print {
   body { background: #fff; color: #000; padding: 0; }
-  .top, nav.tabs, .noprint, .panel:not(#tab-handover) { display: none !important; }
-  #tab-handover { display: block !important; }
+  .top, nav.tabs, .noprint, .panel:not(#tab-outputs) { display: none !important; }
+  #tab-outputs { display: block !important; }
   .card { border: 0; background: #fff; padding: 0; }
   h2, .hint, th, td { color: #000 !important; background: #fff !important; }
   th, td { border: 1px solid #999; font-size: 11px; }
 }
+
+/* ---- v2: client / intake / outputs ---- */
+.crumb { color: var(--mute); font-size: 14px; flex: 1 1 100%; order: 3; }
+@media (min-width: 761px) { .crumb { flex: 1; order: 0; text-align: right; } }
+textarea { width: 100%; padding: 10px 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; font-size: 16px; margin-top: 4px; resize: vertical; }
+textarea.invalid { border-color: var(--bad); background: #2a1a1d; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.span2 { grid-column: 1 / -1; }
+@media (min-width: 761px) { .grid3 { grid-template-columns: repeat(3, 1fr); } .span2 { grid-column: span 2; } }
+.mt { margin-top: 12px; }
+.tag { color: var(--accent); font-size: 12px; }
+.btn.big { min-height: 56px; font-size: 18px; }
+h2.sect { margin: 18px 2px 10px; }
+.client { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.client:last-child { border-bottom: 0; }
+.cinfo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.opt { min-height: 64px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel2); cursor: pointer; font-weight: 700; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.opt small { font-weight: 400; color: var(--mute); }
+.opt.on { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.redbox { background: #2d1519; border: 1px solid #a33a45; color: #ffb3b8; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.redbox ul { margin: 6px 0 0; padding-left: 20px; }
+.seg.existing, .swatch.existing { background: repeating-linear-gradient(135deg, #6b2c33 0 5px, #8f3a44 5px 9px); border-color: #a33a45; }
+.subtabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+.subtabs button { min-height: 48px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); font-weight: 600; cursor: pointer; color: var(--mute); }
+.subtabs button.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+nav.tabs { grid-template-columns: repeat(4, 1fr); }
+nav.tabs button:disabled { opacity: .35; }
+#out-forti pre, #out-csv pre, #out-text pre { margin-top: 12px; }
+#docbox { margin-top: 14px; }
+.doc h1 { font-size: 22px; margin: 0 0 6px; }
+.doc h2 { margin-top: 22px; }
+.doc ul { padding-left: 20px; } .doc li { margin: 6px 0; }
+dl.req { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+dl.req dt { color: var(--mute); } dl.req dd { margin: 0; }
+@media (max-width: 760px) { dl.req { grid-template-columns: 1fr; gap: 0; } dl.req dd { margin-bottom: 8px; } }
+table.plain th, table.plain td { white-space: normal; }
+@media print {
+  #tab-outputs { display: block !important; }
+  .doc h1, .doc h2, .doc li, .doc dt, .doc dd, .doc p { color: #000 !important; }
+  .tablewrap { border: 0; overflow: visible; }
+  table.plain { font-size: 10px; }
+}
+.tablewrap.scroll { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); }
+@media print { .tablewrap.scroll { border: 0; overflow: visible; background: #fff; } }

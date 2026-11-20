@@ -249,5 +249,216 @@ test('CSV, Markdown, text, FortiOS, handover', () => {
   assert.strictEqual((f.match(/edit \d+\n\s+set dns-service/g) || []).length, 2); // Staff + Guest only
 });
 
+// ================= Client-intake tests =================
+const I = require('./intake.js');
+const A = require('./access.js');
+const eproj = (parent, networks, existing, opts) => ({ parent, networks, existing, opts });
+
+console.log('Existing ranges');
+test('networks are placed around an existing range in the middle', () => {
+  const r = C.plan(eproj('10.0.0.0/24', [{ name: 'A', hosts: 60 }, { name: 'B', hosts: 60 }], ['10.0.0.64/26'], { growth: 0 }));
+  assert.ok(r.ok, JSON.stringify(r.errors));
+  assert.strictEqual(by(r, 'A').cidr, '10.0.0.0/26');
+  assert.strictEqual(by(r, 'B').cidr, '10.0.0.128/26');
+  assert.strictEqual(r.summary.reserved, 64);
+  assert.strictEqual(r.summary.free, 256 - 128 - 64);
+  assert.deepStrictEqual(r.conflicts.length, 1); // parent overlaps an existing range: red warning
+  assert.ok(/overlaps existing range 10\.0\.0\.64\/26/.test(r.conflicts[0]));
+  assert.strictEqual(r.gaps.map(g => g.size).join(), '64'); // only the tail, existing range is not "free"
+});
+test('no allocation ever overlaps any existing range (fuzz)', () => {
+  let seed = 777;
+  const rnd = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  for (let k = 0; k < 200; k++) {
+    const ex = [];
+    for (let i = 0, n = rnd(4); i < n; i++) ex.push(`10.0.${rnd(16)}.0/${24 + rnd(3) - 0}`.replace(/\/(\d+)$/, (m, p) => '/' + Math.min(24, Number(p))));
+    const nets = [];
+    for (let i = 0, n = 1 + rnd(6); i < n; i++) nets.push({ name: 'n' + i, hosts: 1 + rnd(120) });
+    const r = C.plan(eproj('10.0.0.0/20', nets, ex, { growth: 25 }));
+    const exr = ex.map(C.parseCidr);
+    r.allocations.forEach(a => exr.forEach(e => assert.ok(a.end < e.start || a.start > e.end, `${a.cidr} hits ${ex}`)));
+    r.allocations.forEach(a => assert.strictEqual((a.start - r.parent.start) % a.size, 0));
+  }
+});
+test('existing range covering the whole parent => no fit, clear message', () => {
+  const r = C.plan(eproj('10.0.0.0/24', [{ name: 'a', hosts: 10 }], ['10.0.0.0/16']));
+  assert.strictEqual(r.ok, false);
+  assert.ok(/does not fit/i.test(r.errors[0].msg) && /existing/.test(r.errors[0].msg));
+  assert.strictEqual(r.conflicts.length, 1);
+});
+test('existing range outside the parent is ignored, no conflict', () => {
+  const r = C.plan(eproj('10.20.0.0/24', [{ name: 'a', hosts: 10 }], ['192.168.1.0/24']));
+  assert.ok(r.ok); assert.strictEqual(r.conflicts.length, 0); assert.strictEqual(r.summary.reserved, 0);
+});
+test('bad existing ranges are rejected; overlapping existing ranges warn', () => {
+  assert.ok(/Existing range "10\.0\.0\/8"/.test(errs(eproj('10.0.0.0/24', [{ name: 'a', hosts: 1 }], ['10.0.0/8']))));
+  assert.ok(/host bits/.test(errs(eproj('10.0.0.0/24', [{ name: 'a', hosts: 1 }], ['10.1.1.1/16']))));
+  const r = C.plan(eproj('10.20.0.0/24', [{ name: 'a', hosts: 1 }], ['172.16.0.0/16', '172.16.5.0/24']));
+  assert.ok(r.warnings.some(w => /overlap each other/.test(w)));
+});
+
+console.log('Parent auto-pick');
+test('prefers a 10.x.0.0/16 and skips existing ranges', () => {
+  assert.strictEqual(I.pickParent([]).cidr, '10.20.0.0/16');
+  assert.strictEqual(I.pickParent(['10.20.0.0/16']).cidr, '10.21.0.0/16');
+  assert.strictEqual(I.pickParent(['10.20.5.0/24', '10.21.0.0/24']).cidr, '10.22.0.0/16');
+  assert.strictEqual(I.pickParent(['10.20.0.0/14']).cidr, '10.24.0.0/16'); // /14 covers 10.20-10.23
+});
+test('falls back to 172.16/12 then 192.168/16, then null', () => {
+  assert.strictEqual(I.pickParent(['10.0.0.0/8']).cidr, '172.16.0.0/16');
+  assert.strictEqual(I.pickParent(['10.0.0.0/8', '172.16.0.0/12']).cidr, '192.168.0.0/16');
+  assert.strictEqual(I.pickParent(['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']), null);
+});
+test('invalid existing entries are ignored by the picker; parsing accepts lines, commas, spaces', () => {
+  assert.strictEqual(I.pickParent(['nonsense']).cidr, '10.20.0.0/16');
+  assert.deepStrictEqual(I.parseExisting('10.0.0.0/8, 192.168.1.0/24\n172.16.0.0/12;  '), ['10.0.0.0/8', '192.168.1.0/24', '172.16.0.0/12']);
+  assert.deepStrictEqual(I.parseExisting(''), []);
+});
+test('picked parent never overlaps an existing range (fuzz)', () => {
+  let seed = 4242;
+  const rnd = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  for (let k = 0; k < 200; k++) {
+    const ex = []; for (let i = 0, n = rnd(6); i < n; i++) ex.push(`10.${rnd(60)}.0.0/${12 + rnd(12)}`.replace(/10\.(\d+)\.0\.0\/(\d+)/, (m, x, p) => { const pre = Number(p); const size = Math.pow(2, 32 - pre); const net = Math.floor((10 * 16777216 + x * 65536) / size) * size; return C.intToIp(net) + '/' + pre; }));
+    const p = I.pickParent(ex);
+    if (!p) continue;
+    ex.map(C.parseCidr).forEach(e => assert.ok(p.start + 65535 < e.start || p.start > e.end, p.cidr + ' vs ' + ex));
+  }
+});
+
+console.log('Intake -> suggested networks');
+const withCounts = (counts, req, expansion, existing) => {
+  const c = I.newClient('T'); Object.assign(c.intake.counts, counts); Object.assign(c.intake.req, req || {});
+  c.intake.expansion = expansion || 'none'; c.intake.existing = existing || ''; return I.applyIntake(c);
+};
+const names = c => c.networks.map(n => n.name);
+test('always suggests Management, Staff LAN, Servers, Transit, Loopback', () => {
+  assert.deepStrictEqual(names(withCounts({})), ['Management', 'Staff LAN', 'Servers', 'Transit', 'Loopback']);
+});
+test('optional networks need the box ticked AND a count > 0', () => {
+  const c = withCounts({ staff: 10, voice: 12, cameras: 4, iot: 3, guest: 8, dmz: 2 }, { voice: true, cameras: true, iot: true, guest: true, dmz: true });
+  assert.deepStrictEqual(names(c), ['Management', 'Staff LAN', 'Servers', 'Voice', 'Cameras', 'IoT', 'Guest', 'DMZ', 'Transit', 'Loopback']);
+  const ticked0 = withCounts({ staff: 10 }, { voice: true, guest: true });
+  assert.ok(!names(ticked0).includes('Voice') && !names(ticked0).includes('Guest'));
+  assert.ok(ticked0.genNotes.some(n => /Voice was ticked but the count is 0/.test(n)));
+});
+test('counts without a ticked box are folded in, not dropped', () => {
+  const c = withCounts({ staff: 10, wired: 2, wifi: 3, voice: 5, guest: 4, servers: 2, dmz: 3 });
+  const net = n => c.networks.find(x => x.name === n);
+  assert.strictEqual(net('Staff LAN').hosts, 10 + 2 + 3 + 5 + 4);
+  assert.strictEqual(net('Servers').hosts, 5); // 2 + 3 dmz
+  assert.ok(!names(c).includes('Voice') && !names(c).includes('DMZ'));
+  assert.ok(c.genNotes.length === 3);
+});
+test('host counts: staff = staff+wired+wifi, servers min 2, mgmt = 10 + APs', () => {
+  const c = withCounts({ staff: 20, wired: 5, wifi: 61, servers: 1 });
+  const net = n => c.networks.find(x => x.name === n);
+  assert.strictEqual(net('Staff LAN').hosts, 86);
+  assert.strictEqual(net('Servers').hosts, 2);
+  assert.strictEqual(net('Management').hosts, 13); // ceil(61/30)=3
+  assert.strictEqual(net('Transit').hosts, 2);
+  assert.strictEqual(net('Loopback').hosts, 1);
+});
+test('auto VLAN IDs by role, editable, Transit/Loopback none', () => {
+  const c = withCounts({ staff: 5, voice: 5, cameras: 5, iot: 5, guest: 5, dmz: 5 }, { voice: true, cameras: true, iot: true, guest: true, dmz: true });
+  const v = {}; c.networks.forEach(n => { v[n.name] = n.vlan; });
+  assert.deepStrictEqual(v, { Management: 10, 'Staff LAN': 20, Servers: 30, Voice: 40, Cameras: 50, IoT: 60, Guest: 70, DMZ: 80, Transit: '', Loopback: '' });
+  c.networks[1].vlan = 200; // editable
+  assert.strictEqual(C.plan(I.toProject(c)).allocations.find(a => a.name === 'Staff LAN').vlan, 200);
+});
+test('roles and DHCP defaults on suggested networks', () => {
+  const c = withCounts({ staff: 5, guest: 5, dmz: 2 }, { guest: true, dmz: true });
+  const r = C.plan(I.toProject(c));
+  assert.ok(r.ok, JSON.stringify(r.errors));
+  assert.ok(by(r, 'Staff LAN').dhcpStart && by(r, 'Guest').dhcpStart);
+  ['Management', 'Servers', 'DMZ', 'Transit', 'Loopback'].forEach(n => assert.strictEqual(by(r, n).dhcpStart, '', n));
+  assert.strictEqual(by(r, 'Management').role, 'Mgmt');
+});
+
+console.log('Expansion buffer');
+test('None / Soon / Big growth = 25 / 50 / 100 % and change the sizing', () => {
+  const pre = x => { const c = withCounts({ staff: 40 }, {}, x); const r = C.plan(I.toProject(c)); assert.ok(r.ok, JSON.stringify(r.errors)); return [c.opts.growth, by(r, 'Staff LAN').prefix, by(r, 'Staff LAN').buffer]; };
+  assert.deepStrictEqual(pre('none'), [25, 26, 10]); // 40+10+3=53 -> /26
+  assert.deepStrictEqual(pre('soon'), [50, 26, 20]); // 40+20+3=63 -> /26
+  assert.deepStrictEqual(pre('big'), [100, 25, 40]); // 40+40+3=83 -> /25
+});
+
+console.log('Applying intake');
+test('applyIntake avoids existing ranges and keeps a manual parent override', () => {
+  const c = withCounts({ staff: 10 }, {}, 'none', '10.20.0.0/16\n10.21.0.0/16');
+  assert.strictEqual(c.parent, '10.22.0.0/16');
+  c.parent = '10.99.0.0/16'; c.parentAuto = false;
+  I.applyIntake(c);
+  assert.strictEqual(c.parent, '10.99.0.0/16'); // override kept
+  c.parentAuto = true; I.applyIntake(c);
+  assert.strictEqual(c.parent, '10.22.0.0/16');
+});
+test('manual parent that overlaps an existing range raises a red conflict but still plans', () => {
+  const c = withCounts({ staff: 10 }, {}, 'none', '10.50.4.0/24');
+  c.parent = '10.50.0.0/16'; c.parentAuto = false;
+  const r = C.plan(I.toProject(c));
+  assert.ok(r.ok); assert.strictEqual(r.conflicts.length, 1);
+  r.allocations.forEach(a => assert.ok(a.end < C.ipToInt('10.50.4.0') || a.start > C.ipToInt('10.50.4.255')));
+});
+test('sample clients build valid plans', () => {
+  Object.keys(I.SAMPLES).forEach(k => {
+    const c = I.sampleClient(k), r = C.plan(I.toProject(c));
+    assert.ok(r.ok, k + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(C.findOverlaps(r.allocations).length, 0);
+  });
+  const b = I.sampleClient('Small branch with DMZ');
+  assert.strictEqual(b.parent, '10.21.0.0/16'); // HQ 10.20/16 avoided
+  assert.strictEqual(b.opts.growth, 50);
+  assert.deepStrictEqual(names(b), ['Management', 'Staff LAN', 'Servers', 'Voice', 'Cameras', 'Guest', 'DMZ', 'Transit', 'Loopback']);
+});
+
+console.log('Access rules and outputs');
+const sample = () => { const c = I.sampleClient('Small branch with DMZ'); const p = I.toProject(c); return { c, p, r: C.plan(p) }; };
+test('access matrix: guest and DMZ isolated, staff reaches servers, mgmt restricted', () => {
+  const { r } = sample();
+  const g = n => r.allocations.find(a => a.name === n);
+  assert.strictEqual(A.allowed(g('Staff LAN'), g('Servers')), true);
+  assert.strictEqual(A.allowed(g('Guest'), g('Staff LAN')), false);
+  assert.strictEqual(A.allowed(g('DMZ'), g('Servers')), false);
+  assert.strictEqual(A.allowed(g('Staff LAN'), g('Management')), false);
+  assert.strictEqual(A.allowed(g('Management'), g('Servers')), true);
+  assert.strictEqual(A.internetAllowed(g('Guest')), true);
+  assert.strictEqual(A.internetAllowed(g('Cameras')), false);
+  const m = A.matrix(r.allocations);
+  assert.ok(!m.cols.includes('Transit') && !m.cols.includes('Loopback'));
+});
+test('FortiOS: interfaces, DHCP, address objects, starter policies, note, placeholder', () => {
+  const { p, r } = sample();
+  const f = F.toFortiOS(r, p, 'port9');
+  ['config system interface', 'config system dhcp-server', 'config firewall address', 'config firewall addrgrp', 'config firewall policy'].forEach(s => assert.ok(f.includes(s), s));
+  assert.ok(/^# Generated, untested\. Verify against FortiOS 8\.0 docs and the lab VM before applying\. Starter policies are not production rules\./m.test(f));
+  assert.strictEqual(f.split('\n')[1].startsWith('# Generated, untested'), true); // note is at the top
+  assert.strictEqual((f.match(/edit "SP_/g) || []).length, r.allocations.length + 1); // one object per subnet + SP_INTERNAL
+  assert.ok(f.includes('set interface "port9"') && /PLACEHOLDER: "port9"/.test(f));
+  const pol = f.slice(f.indexOf('config firewall policy'));
+  assert.ok(pol.indexOf('Guest_to_internal_block') > -1 && pol.indexOf('Guest_to_internal_block') < pol.indexOf('Staff_LAN_to_internet')); // denies first
+  assert.ok(/set name "SP_Staff_LAN_to_internet"/.test(pol) && /set service "DNS" "HTTP" "HTTPS"/.test(pol));
+  assert.ok(/set name "SP_Staff_LAN_to_Servers"/.test(pol));
+  assert.ok(/set name "SP_DMZ_to_internal_block"[\s\S]*?set action deny/.test(pol));
+  assert.ok(!/SP_Cameras_to_internet/.test(pol) && !/SP_Transit_to/.test(pol));
+  pol.split('policy\n')[1].split('    edit 0').slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
+});
+test('handover doc: all required sections in Markdown and HTML', () => {
+  const { p, r } = sample();
+  const md = F.toHandoverDoc(r, p);
+  ['Requirements summary', 'IP address table', 'Why each network exists', 'Who can talk to who', 'Growth notes', 'WAN / VPN notes'].forEach(s => assert.ok(md.includes(s), s));
+  assert.ok(md.includes('IPsec tunnel to HQ'));            // WAN note shown in the doc
+  assert.ok(md.includes('10.20.0.0/16'));                    // existing ranges listed
+  assert.ok(md.includes('Soon (50% growth buffer)'));
+  assert.ok(/\*\*Staff LAN\*\*.*25 staff/.test(md));        // reason tied to the client need
+  assert.ok(/\| From \\ To \| Internet \|/.test(md));
+  const html = F.toHandoverHTML(r, p);
+  assert.ok(/<h2>4\. Who can talk to who<\/h2>/.test(html) && html.includes('<table'));
+  assert.ok(!/<script/i.test(F.toHandoverHTML(r, Object.assign({}, p, { name: '<script>x</script>', intake: Object.assign({}, p.intake, { wanNote: '<img onerror=x>' }) }))));
+});
+test('WAN note is not planned (no network created from it)', () => {
+  const { c } = sample();
+  assert.ok(!c.networks.some(n => /wan|vpn/i.test(n.name)));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

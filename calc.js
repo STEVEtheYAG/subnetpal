@@ -125,6 +125,15 @@
     if (!(o.growth >= 0 && o.growth <= 500)) err('Growth buffer must be between 0 and 500 %.', -1, 'growth');
     if (raw.gwPos && raw.gwPos !== 'first' && raw.gwPos !== 'last') err('Gateway position must be first or last.', -1, 'gwPos');
 
+    const existing = [];
+    (project.existing || []).forEach(s => {
+      const e = parseCidr(s);
+      if (e.error) err(`Existing range "${s}": ${e.error}`, -1, 'existing');
+      else if (e.hostBits) err(`Existing range ${s} has host bits set. Use ${intToIp(e.network)}/${e.prefix}.`, -1, 'existing');
+      else existing.push({ start: e.start, end: e.end, size: e.size, cidr: intToIp(e.network) + '/' + e.prefix, label: intToIp(e.network) + '/' + e.prefix });
+    });
+    findOverlaps(existing).forEach(o => warn(`Existing ranges ${o.a.cidr} and ${o.b.cidr} overlap each other.`));
+
     const nets = project.networks || [];
     if (!nets.length) err('Add at least one network.', -1, 'networks');
     const seen = new Map();
@@ -157,7 +166,17 @@
       if (vs !== '') (vlans[vs] = vlans[vs] || []).push(i + 1);
     });
     Object.keys(vlans).forEach(v => { if (vlans[v].length > 1) warn(`VLAN ${v} is used on rows ${vlans[v].join(', ')}.`); });
-    return { errors, warnings };
+    return { errors, warnings, existing };
+  }
+
+  function mergeRanges(list) {
+    const s = list.map(r => ({ start: r.start, end: r.end })).sort((a, b) => a.start - b.start);
+    const out = [];
+    for (const r of s) {
+      const last = out[out.length - 1];
+      if (last && r.start <= last.end + 1) last.end = Math.max(last.end, r.end); else out.push(r);
+    }
+    return out;
   }
 
   // ---------- sizing ----------
@@ -180,7 +199,7 @@
     const mask = prefixToMask(prefix);
     const vs = String(net.vlan == null ? '' : net.vlan).trim();
     const d = {
-      name: String(net.name).trim(), vlan: vs === '' ? '' : Number(vs), role,
+      name: String(net.name).trim(), vlan: vs === '' ? '' : Number(vs), role, kind: net.kind || '',
       hosts: Number(net.hosts), buffer: sizing.buffer, needed: sizing.needed,
       prefix, size, start, end,
       cidr: intToIp(start) + '/' + prefix,
@@ -212,7 +231,7 @@
       if (sEnd >= hostStart) { d.staticStart = intToIp(hostStart); d.staticEnd = intToIp(sEnd); }
       dhcpFrom = sEnd + 1;
     }
-    if (DHCP_ROLES.indexOf(role) >= 0) {
+    if (net.dhcp !== false && DHCP_ROLES.indexOf(role) >= 0) {
       const dStart = dhcpFrom + opts.dhcpOffset;
       if (dStart <= hostEnd) { d.dhcpStart = intToIp(dStart); d.dhcpEnd = intToIp(hostEnd); }
       else d.warnings.push('No room left for a DHCP range after the static reserve and offset.');
@@ -224,7 +243,7 @@
   // project: { parent, networks:[{name,hosts,vlan,role}], opts:{gwPos,dhcpOffset,staticReserve,growth} }
   function plan(project) {
     const v = validate(project);
-    const result = { ok: false, errors: v.errors, warnings: v.warnings.slice(), parent: null, allocations: [], gaps: [], unplaced: [], summary: null };
+    const result = { ok: false, errors: v.errors, warnings: v.warnings.slice(), conflicts: [], parent: null, allocations: [], gaps: [], unplaced: [], summary: null };
     if (v.errors.length) return result;
 
     const opts = normalizeOpts(project.opts);
@@ -235,14 +254,30 @@
     items.forEach(it => { it.size = sizeOf(it.sizing.prefix); });
     const order = items.slice().sort((a, b) => b.size - a.size || a.i - b.i); // largest first
 
-    let cursor = p.start;
+    // Existing ranges that touch the parent are reserved: networks are placed around them.
+    const touching = v.existing.filter(e => e.start <= p.end && e.end >= p.start);
+    result.conflicts = touching.map(e => `Parent block ${result.parent.cidr} overlaps existing range ${e.cidr} already in use. Those addresses are skipped; consider a different parent block.`);
+    const reservedRanges = mergeRanges(touching.map(e => ({ start: Math.max(e.start, p.start), end: Math.min(e.end, p.end) })));
+    const occupied = reservedRanges.map(r => ({ start: r.start, end: r.end, label: 'existing range' }));
+    const reserved = reservedRanges.reduce((s, r) => s + (r.end - r.start + 1), 0);
+
+    const findSpot = size => {
+      let pos = p.start;
+      while (pos + size - 1 <= p.end) {
+        const hit = occupied.find(o => o.start <= pos + size - 1 && o.end >= pos);
+        if (!hit) return pos;
+        pos = p.start + Math.ceil((hit.end + 1 - p.start) / size) * size;
+      }
+      return -1;
+    };
+
     const placed = [];
     const unplaced = [];
     for (const it of order) {
-      const aligned = p.start + Math.ceil((cursor - p.start) / it.size) * it.size;
-      if (aligned + it.size - 1 > p.end) { unplaced.push(it); continue; }
-      placed.push(describe(it.n, aligned, it.sizing.prefix, it.sizing, opts));
-      cursor = aligned + it.size;
+      const at = findSpot(it.size);
+      if (at < 0) { unplaced.push(it); continue; }
+      placed.push(describe(it.n, at, it.sizing.prefix, it.sizing, opts));
+      occupied.push({ start: at, end: at + it.size - 1, label: String(it.n.name).trim() });
     }
     placed.sort((a, b) => a.start - b.start);
     result.allocations = placed;
@@ -250,17 +285,18 @@
     placed.forEach(a => a.warnings.forEach(w => result.warnings.push(`${a.name}: ${w}`)));
 
     // Safety net: allocations must never overlap.
-    const ov = findOverlaps(placed.map(a => ({ start: a.start, end: a.end, label: a.name })));
+    const ov = findOverlaps(placed.map(a => ({ start: a.start, end: a.end, label: a.name }))
+      .concat(reservedRanges.map(r => ({ start: r.start, end: r.end, label: 'an existing range' }))));
     if (ov.length) {
       result.errors.push({ msg: `Internal error: ${ov[0].a.label} overlaps ${ov[0].b.label}.`, row: -1, field: '' });
       return result;
     }
 
-    result.gaps = computeGaps(p, placed);
+    result.gaps = computeGaps(p, placed.concat(reservedRanges));
     const used = placed.reduce((s, a) => s + a.size, 0);
     const largest = largestFreeBlock(result.gaps);
     result.summary = {
-      parentSize: p.size, used, free: p.size - used,
+      parentSize: p.size, used, reserved, free: p.size - used - reserved,
       percentUsed: Math.round(used / p.size * 1000) / 10,
       largestFree: largest ? { cidr: largest.cidr, size: largest.size } : null,
     };
@@ -269,7 +305,7 @@
       const needTotal = items.reduce((s, it) => s + it.size, 0);
       const list = unplaced.map(it => `${String(it.n.name).trim()} (/${it.sizing.prefix}, ${it.size} addresses)`).join(', ');
       result.errors.push({
-        msg: `Does not fit in ${result.parent.cidr}: ${list}. All networks need ${needTotal} addresses; the parent block has ${p.size}. Largest free block left: ${largest ? largest.cidr : 'none'}. Use a bigger parent block or reduce hosts/growth buffer.`,
+        msg: `Does not fit in ${result.parent.cidr}: ${list}. All networks need ${needTotal} addresses; the parent block has ${p.size - reserved} free${reserved ? ` (${reserved} already used by existing ranges)` : ''}. Largest free block left: ${largest ? largest.cidr : 'none'}. Use a bigger parent block or reduce hosts/growth buffer.`,
         row: -1, field: 'networks',
       });
       return result;
@@ -281,6 +317,6 @@
   return {
     ROLES, DHCP_ROLES, DEFAULT_OPTS,
     ipToInt, intToIp, prefixToMask, parseCidr, rangeToCidrs, findOverlaps, computeGaps, largestFreeBlock,
-    normalizeOpts, validate, sizeNetwork, plan,
+    normalizeOpts, validate, sizeNetwork, mergeRanges, plan,
   };
 }));
