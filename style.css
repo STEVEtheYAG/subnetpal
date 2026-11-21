@@ -141,6 +141,44 @@ pre.code {
 .polmore summary { cursor: pointer; color: var(--accent); font-size: 14px; }
 .polmore textarea { margin: 6px 0; }
 .catbox { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 10px; }
+/* policy cards: tier / risk badges, the client need, and the library list */
+.badge { display: inline-block; font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel2); color: var(--mute); white-space: nowrap; }
+.badge.tier-baseline { color: var(--accent); border-color: #1f4a73; }
+.badge.tier-recommended { color: var(--ok); border-color: #1f5c43; }
+.badge.tier-optional { color: var(--warn); border-color: #6b5320; }
+.badge.risk-medium { color: var(--warn); }
+.badge.risk-high { color: var(--bad); border-color: #6b2a2a; }
+.badge.advice { color: var(--accent); border-style: dashed; }
+.polcard { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 8px; }
+.polwhy { display: block; flex-basis: 100%; font-size: 13px; color: var(--mute); margin-top: 4px; }
+.polwhy i { color: var(--text); font-style: normal; }
+.polweb { font-size: 13px; color: var(--mute); margin: 0 0 8px; }
+.polweb b { color: var(--text); font-weight: 600; }
+.webf { margin-bottom: 10px; }
+.wgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 10px; margin-top: 8px; }
+.demorow { margin: 8px 0 4px; }
+/* contract import review */
+.contractbox textarea { width: 100%; min-width: 0; margin: 6px 0; }
+.filebtn { display: inline-flex; align-items: center; cursor: pointer; }
+.crow { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 0 0 10px; background: var(--panel2); }
+.crow.conf-low { border-style: dashed; }
+.crowhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cval { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.cval input, .cval select { flex: 1 1 160px; min-width: 0; }
+.cnow { font-size: 12px; color: var(--mute); }
+.csnip { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--line); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
+.csnip mark { background: #5b4a12; color: var(--text); border-radius: 3px; padding: 0 2px; }
+.cnote { font-size: 12px; color: var(--warn); margin: 6px 0 0; }
+.badge.cbadge-high { color: var(--ok); border-color: #1f5c43; }
+.badge.cbadge-medium { color: var(--warn); border-color: #6b5320; }
+.badge.cbadge-low { color: var(--bad); border-color: #6b2a2a; }
+.cardlib { margin: 10px 0; }
+.sugnotes { margin: 6px 0 10px; padding-left: 18px; font-size: 13px; color: var(--warn); }
+.cardgrp { font-size: 13px; color: var(--mute); text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 6px; }
+.cardrow { display: flex; gap: 10px; align-items: flex-start; padding: 8px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cardrow.off { opacity: .75; }
+.cardrow input[type=checkbox] { flex: 0 0 auto; width: 22px; height: 22px; margin-top: 2px; }
+.cardrow > span { min-width: 0; overflow-wrap: anywhere; }
 .polfinal { border: 1px dashed var(--line); border-radius: var(--r); padding: 10px 12px; margin: 0 0 12px; color: var(--mute); }
 #reachlist label.check { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 

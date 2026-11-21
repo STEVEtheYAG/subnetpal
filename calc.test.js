@@ -435,14 +435,16 @@ test('FortiOS: interfaces, DHCP, address objects, starter policies, note, placeh
   ['config system interface', 'config system dhcp-server', 'config firewall address', 'config firewall addrgrp', 'config firewall policy'].forEach(s => assert.ok(f.includes(s), s));
   assert.ok(/^# Generated, untested\. Verify against FortiOS 8\.0 docs and the lab VM before applying\. Starter policies are not production rules\./m.test(f));
   assert.strictEqual(f.split('\n')[1].startsWith('# Generated, untested'), true); // note is at the top
-  assert.strictEqual((f.match(/edit "SP_/g) || []).length, r.allocations.length + 1); // one object per subnet + SP_INTERNAL
+  const stop = Math.min(...['# Website filtering', '# Application control', 'config firewall policy\n'].map(s => f.indexOf(s)).filter(i => i > 0));
+  const objs = f.slice(f.indexOf('config firewall address\n'), stop);                                   // address objects and groups only (web filter profiles are counted elsewhere)
+  assert.strictEqual((objs.match(/edit "SP_/g) || []).length, r.allocations.length + 1); // one object per subnet + SP_INTERNAL
   assert.ok(f.includes('set interface "port9"') && /PLACEHOLDER: "port9"/.test(f));
   const pol = f.slice(f.indexOf('config firewall policy'));
   assert.ok(pol.indexOf('Guest_to_internal_block') > -1 && pol.indexOf('Guest_to_internal_block') < pol.indexOf('Staff_LAN_to_internet')); // denies first
   assert.ok(/set name "SP_Staff_LAN_to_internet"/.test(pol) && /set service "DNS" "HTTP" "HTTPS"/.test(pol));
   assert.ok(/set name "SP_Staff_LAN_to_Servers"/.test(pol));
   assert.ok(/set name "SP_DMZ_to_internal_block"[\s\S]*?set action deny/.test(pol));
-  assert.ok(!/SP_Cameras_to_internet/.test(pol) && !/SP_Transit_to/.test(pol));
+  assert.ok(!/set name "SP_Cameras_to_internet"/.test(pol) && !/SP_Transit_to/.test(pol)); // cameras get no internet allow (an explicit block rule is fine)
   pol.split('policy\n')[1].split('    edit 0').slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
 });
 test('handover doc: all required sections in Markdown and HTML', () => {
@@ -835,7 +837,7 @@ test('plan diagram and client report include the VPN pool in plain language', ()
   assert.ok(svg.includes('REMOTE STAFF (VPN)') && svg.includes('Remote staff (VPN)') && svg.includes(pool.cidr));
   assert.ok(!T.build(r, p, { theme: 'light' }).includes('Remote staff'));
   const h = CR.build(r, p, svg);
-  assert.ok(h.includes('Remote working') && h.includes(pool.first) && h.includes('Staff LAN, Servers') && h.includes('7. Internet connection'));
+  assert.ok(h.includes('Remote working') && h.includes(pool.first) && h.includes('Staff LAN, Servers') && h.includes('8. Web protection') && h.includes('9. Internet connection'))   // sections number on: rules 5, grow 6, remote 7, web 8, WAN 9
   const body = h.slice(h.indexOf('<body>')).replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ');
   ['VLAN', 'CIDR', 'gateway', 'subnet', 'DHCP', 'IPsec', 'FortiOS', 'netmask'].forEach(w => assert.ok(!new RegExp(w, 'i').test(body), 'jargon: ' + w));
   assert.ok(!CR.build(C.plan(sample().p), sample().p).includes('Remote working'));
@@ -844,7 +846,559 @@ test('plan diagram and client report include the VPN pool in plain language', ()
 });
 test('older clients migrate: remote, policies and tagline get defaults', () => {
   const old = I.newClient('old'); delete old.intake.remote; delete old.pol; delete old.tagline; I.migrate(old);
-  assert.deepStrictEqual(old.intake.remote, { on: false, count: '', reach: null }); assert.deepStrictEqual(old.pol, { edited: false, list: [] }); assert.strictEqual(old.tagline, '');
+  assert.deepStrictEqual(old.intake.remote, { on: false, count: '', reach: null }); assert.deepStrictEqual(old.pol, { edited: false, list: [], toggles: {} }); assert.strictEqual(old.tagline, '');
+});
+
+console.log('Policy cards (phase 1)');
+const Cards = require('./cards.js');
+// A client with every optional network ticked, so every card has something to attach to.
+const fullClient = (mod) => {
+  const c = I.newClient('Full'); const n = c.intake;
+  Object.assign(n.counts, { staff: 20, wifi: 10, servers: 2, guest: 10, dmz: 2, voice: 10, cameras: 4, iot: 5, printers: 3, pos: 3 });
+  Object.keys(n.req).forEach(k => { n.req[k] = true; });
+  n.others = [{ name: 'Lab', count: 3 }]; n.remote = { on: true, count: 3, reach: null };
+  if (mod) mod(c);
+  I.applyIntake(c); const p = I.toProject(c); return { c, p, r: C.plan(p) };
+};
+const polFlat = list => list.map(x => `${x.src}>${x.dst}:${x.service}:${x.action}`);
+test('library: unique ids, valid tier/risk, a reason and at least one scenario tag on every card', () => {
+  const ids = new Set();
+  Cards.LIBRARY.forEach(c => {
+    assert.ok(!ids.has(c.id), 'duplicate ' + c.id); ids.add(c.id);
+    assert.ok(Cards.TIERS.includes(c.tier) && Cards.RISKS.includes(c.risk), c.id);
+    assert.ok(c.name && c.why && c.tags.length, c.id);
+    assert.ok(c.tags.every(t => Cards.SCENARIOS.includes(t)), c.id + ' has an unknown scenario tag');
+    if (c.type === 'policy') assert.ok(Array.isArray(c.src) && c.src.length && c.dst && ['accept', 'deny'].includes(c.action) && c.service, c.id);
+    else assert.ok(c.text && typeof c.when === 'function', c.id);
+  });
+});
+test('library: every required scenario has at least one card', () => {
+  Cards.SCENARIOS.forEach(s => assert.ok(Cards.LIBRARY.some(c => c.tags.includes(s)), 'no card for ' + s));
+  ['staff-lan', 'guest', 'iot', 'servers-dmz', 'voip', 'printers', 'pos-pci', 'management', 'wifi-ap'].forEach(s => assert.ok(Cards.LIBRARY.some(c => c.type === 'policy' && c.tags.includes(s)), 'no policy card for ' + s));
+});
+test('cards only appear when their networks are in the plan', () => {
+  const { r } = polSample();                                       // Small branch: no printers, POS or IoT ticked
+  const ids = Cards.library(r.allocations, {}).map(e => e.card.id);
+  assert.ok(ids.includes('guest-deny-internal') && ids.includes('staff-servers') && ids.includes('voice-servers'));
+  ['staff-printers', 'pos-deny-internal', 'iot-deny-internal', 'advice-remote-vpn'].forEach(x => assert.ok(!ids.includes(x), x));
+  const full = fullClient().r;
+  const all = Cards.library(full.allocations, { intake: { remote: { on: true }, siteVpn: true, dualWan: true, counts: { wifi: 10 } } }).map(e => e.card.id);
+  ['staff-printers', 'pos-deny-internal', 'iot-deny-internal', 'printers-deny-internal', 'mgmt-lockdown', 'advice-remote-vpn', 'advice-site-vpn', 'advice-dual-wan', 'advice-guest-isolation', 'advice-ap-mgmt'].forEach(x => assert.ok(all.includes(x), x));
+});
+test('defaults: baseline + recommended on, optional off; explicit denies come before allows', () => {
+  const { r, al } = Object.assign(polSample(), {});
+  const d = Pol.defaults(al); const f = polFlat(d);
+  assert.ok(f.includes('Guest>internal:ALL:deny') && f.includes('Guest>internet:DNS,HTTP,HTTPS:accept'));
+  assert.ok(f.indexOf('Guest>internal:ALL:deny') < f.indexOf('Staff LAN>internet:ALL:accept'));
+  const lastDeny = Math.max(...d.map((x, i) => (x.action === 'deny' ? i : -1))), firstAllow = d.findIndex(x => x.action === 'accept');
+  assert.ok(lastDeny < firstAllow, 'denies are not all above the allows');
+  assert.ok(!d.some(x => x.card === 'pos-servers' || x.card === 'staff-mgmt-admin'));           // optional: off
+  assert.ok(d.every(x => x.card && Cards.byId(x.card)), 'every generated policy names its card');
+});
+test('defaults for the full scenario: the explicit denies and isolations are there', () => {
+  const { r } = fullClient(); const f = polFlat(Pol.defaults(r.allocations));
+  ['Guest>internal:ALL:deny', 'IoT>internal:ALL:deny', 'POS>internal:ALL:deny', 'Staff LAN>POS:ALL:deny', 'Printers>internal:ALL:deny', 'Cameras>internet:ALL:deny',
+    'Voice>Management:ALL:deny', 'Staff LAN>Printers:ALL:accept', 'POS>internet:DNS,HTTPS,NTP:accept', 'Management>Servers:ALL:accept', 'Lab>internal:ALL:deny']
+    .forEach(x => assert.ok(f.includes(x), 'missing ' + x));
+  assert.ok(!f.some(x => /^(Printers|Cameras)>internet:.*accept/.test(x)) && !f.some(x => /^Staff LAN>Management/.test(x)));  // printers/cameras get no internet allow; staff cannot reach management
+  assert.ok(!f.some(x => /^(Guest|POS|Printers)>(Staff LAN|Servers)/.test(x) && x.endsWith('accept')));                    // nobody isolated can reach staff or servers
+});
+test('default policies agree with the "who can talk to who" matrix', () => {
+  [polSample().r, fullClient().r].forEach(r => {
+    const m = A.matrix(r.allocations), d = Pol.defaults(r.allocations);
+    const first = (src, dst) => { const hit = d.find(x => x.src === src && (x.dst === dst || x.dst === 'internal' && (dst !== 'internet'))); return !!hit && hit.action === 'accept'; };
+    m.rows.forEach(row => {
+      const internetPol = d.find(x => x.src === row.name && x.dst === 'internet' && x.action === 'accept');
+      assert.strictEqual(!!internetPol, row.internet, `${row.name} internet`);
+      row.cells.forEach((cell, i) => { if (cell === 'self') return; assert.strictEqual(first(row.name, m.cols[i]), cell, `${row.name} > ${m.cols[i]}`); });
+    });
+  });
+});
+test('optional cards: toggled on before editing they join the defaults; the list still follows the plan', () => {
+  const { c, r } = fullClient();
+  c.pol = { edited: false, list: [], toggles: { 'pos-servers': true, 'printers-deny-internal': false } };
+  const d = Pol.effective(I.toProject(c), r.allocations);
+  assert.ok(d.some(x => x.card === 'pos-servers') && !d.some(x => x.card === 'printers-deny-internal'));
+  assert.strictEqual(d[0].card, 'pos-servers');                                                  // narrow exceptions sit above the denies
+  c.pol.toggles['guest-deny-internal'] = false;                                                  // baseline cannot be switched off
+  assert.ok(Pol.effective(I.toProject(c), r.allocations).some(x => x.card === 'guest-deny-internal'));
+});
+test('optional cards: switching one on or off in an edited (frozen) list adds or removes just its rules', () => {
+  const { r, al } = Object.assign(fullClient(), {}); const al2 = r.allocations;
+  let list = Pol.defaults(al2); const n0 = list.length;
+  list = Pol.setCardInList(list, 'dmz-backend', true, al2);
+  assert.strictEqual(list.length, n0 + 1); assert.strictEqual(list[0].card, 'dmz-backend');
+  list = Pol.setCardInList(list, 'staff-mgmt-admin', true, al2);
+  assert.ok(list.some(x => x.card === 'staff-mgmt-admin') && list.findIndex(x => x.card === 'staff-mgmt-admin') > list.findLastIndex(x => x.action === 'deny'));
+  list = Pol.setCardInList(list, 'dmz-backend', false, al2); list = Pol.setCardInList(list, 'staff-mgmt-admin', false, al2);
+  assert.strictEqual(list.length, n0);
+  const mine = Pol.mkPolicy({ src: 'Staff LAN', dst: 'Servers' });                              // the engineer's own policies are never touched
+  assert.ok(Pol.setCardInList([mine], 'iot-deny-internal', true, al2).includes(mine));
+});
+test('cardView: in a frozen list a card is "on" when its policies are present', () => {
+  const { c, r } = fullClient();
+  c.pol = { edited: true, list: Pol.defaults(r.allocations).filter(x => x.card !== 'iot-deny-internal'), toggles: {} };
+  const v = Pol.cardView(I.toProject(c), r.allocations);
+  assert.strictEqual(v.find(e => e.card.id === 'iot-deny-internal').on, false);
+  assert.strictEqual(v.find(e => e.card.id === 'staff-internet').on, true);
+});
+test('exports work with the card policies: FortiOS (names <= 35, no skipped), policy-only, and the policy parser', () => {
+  const { p, r } = fullClient();
+  const f = F.toFortiOS(r, p, 'port5'), pol = f.slice(f.indexOf('config firewall policy\n'));
+  assert.ok(!/# Skipped/.test(f));
+  assert.ok(/set name "SP_POS_to_internal_block"/.test(pol) && /set name "SP_Staff_LAN_to_Printers"/.test(pol) && /set name "SP_Staff_LAN_to_POS_block"/.test(pol));
+  pol.split('policy\n')[1].split('    edit 0').slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
+  assert.ok(/set name "SP_POS_to_internet"[\s\S]*?set service "DNS" "HTTPS" "NTP"[\s\S]*?set nat enable/.test(pol));
+  assert.ok(/set name "SP_Voice_to_Management_block"[\s\S]*?set action deny/.test(pol));
+  assert.ok(f.includes(F.FORTI_NOTE) && f.trim().split('\n').slice(-1)[0].includes('Generated, untested'));
+  const only = F.toPolicyFortiOS(r, p, 'port5'); assert.ok(only.includes('SP_Final_deny') && !only.includes('config system interface'));
+  const names = [...pol.matchAll(/set name "(SP_[^"]+)"/g)].map(m => m[1]); assert.strictEqual(new Set(names).size, names.length, 'duplicate policy names');
+  const al = r.allocations;
+  assert.deepStrictEqual(polFlat(Pol.parse('Printers cannot reach servers', al).policies), ['Printers>Servers:ALL:deny']);
+  assert.deepStrictEqual(polFlat(Pol.parse('Card terminals internet only', al).policies).length, 2);
+  const merged = Pol.apply(Pol.defaults(al), Pol.parse('Staff can reach printers on ssh', al));
+  assert.strictEqual(merged[merged.findIndex(x => x.src === 'Staff LAN' && x.dst === 'Printers')].service, 'SSH');
+  assert.strictEqual(merged.filter(x => x.src === 'Staff LAN' && x.dst === 'Printers').length, 1);
+  const txt = F.toText(r, p), csv = F.toCSV(r, p); assert.ok(txt.includes('Printers') && csv.includes('POS'));
+  const doc = F.toHandoverDoc(r, p); assert.ok(doc.includes('Printers VLAN') && doc.includes('Card payments (POS) isolated'));
+});
+test('report and diagram cope with the new network kinds', () => {
+  const { p, r } = fullClient();
+  const h = CR.build(r, p); assert.ok(h.includes('Your printers and copiers') && h.includes('card terminals'));
+  assert.ok(require('./topology.js').build(r, p, { cols: 1, theme: 'light', standalone: true }).includes('POS'));
+});
+test('older saved clients (no toggles, no card ids) still load and export', () => {
+  const { c, r } = fullClient(); const old = JSON.parse(JSON.stringify(c)); delete old.pol.toggles; old.pol = { edited: true, list: [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true })] };
+  I.migrate(old); assert.deepStrictEqual(old.pol.toggles, {});
+  const f = F.toFortiOS(r, I.toProject(old), 'port5'); assert.ok(/set name "SP_Staff_LAN_to_internet"/.test(f));
+  const ok = Pol.resolve(old.pol.list, r.allocations); assert.strictEqual(ok.pols[0].card, '');
+});
+
+console.log('Auto-suggest (phase 2)');
+const S = require('./suggest.js');
+const siteClient = (staff, req, extra, counts) => {
+  const c = I.newClient('Site'); c.intake.counts.staff = staff; Object.assign(c.intake.counts, counts || {});
+  Object.keys(req || {}).forEach(k => { c.intake.req[k] = !!req[k]; }); Object.assign(c.intake, extra || {});
+  I.applyIntake(c); const p = I.toProject(c); return { c, p, r: C.plan(p) };
+};
+const stateIn = (r, p, id) => Pol.cardView(p, r.allocations).find(e => e.card.id === id);
+test('size bands come from the staff count', () => {
+  assert.deepStrictEqual([0, 1, 15, 16, 75, 76, 400].map(S.sizeOf), ['small', 'small', 'small', 'medium', 'medium', 'large', 'large']);
+});
+test('every present card gets a tier and a "because" naming the input that triggered it', () => {
+  const { r, p } = siteClient(25, { guest: true, servers: true, printers: true, pos: true }, { remote: { on: true, count: 3, reach: null } }, { guest: 5, servers: 1, printers: 2, pos: 2 });
+  const view = Pol.cardView(p, r.allocations);
+  view.forEach(e => assert.ok(e.because, 'no reason for ' + e.card.id));
+  assert.ok(/Guest wifi ticked/.test(stateIn(r, p, 'guest-deny-internal').because));
+  assert.ok(/Printers ticked/.test(stateIn(r, p, 'staff-printers').because));
+  assert.ok(/Card payments \(POS\) ticked/.test(stateIn(r, p, 'pos-deny-internal').because));
+  assert.ok(/Remote staff ticked/.test(stateIn(r, p, 'advice-remote-vpn').because));
+});
+test('baseline is always on, whatever the answers', () => {
+  ['clinic', 'school', 'retail', 'office', ''].forEach(ind => {
+    const { r, p } = siteClient(10, { guest: true, servers: true, dmz: true, voice: true, cameras: true, iot: true }, { industry: ind, voip: 'hosted', serversWhere: 'cloud' });
+    Pol.cardView(p, r.allocations).filter(e => e.tier === 'baseline').forEach(e => assert.strictEqual(e.on, true, e.card.id));
+    assert.ok(Pol.effective(p, r.allocations).some(x => x.card === 'guest-deny-internal'));
+  });
+});
+test('size changes the suggestion: management lockdown is optional (off) for a small office, recommended (on) for a medium one', () => {
+  const small = siteClient(8, { voice: true }, {}, { voice: 4 }), med = siteClient(40, { voice: true }, {}, { voice: 20 });   // the card needs phones or cameras to attach to
+  assert.deepStrictEqual([stateIn(small.r, small.p, 'mgmt-lockdown').tier, stateIn(small.r, small.p, 'mgmt-lockdown').on], ['optional', false]);
+  assert.deepStrictEqual([stateIn(med.r, med.p, 'mgmt-lockdown').tier, stateIn(med.r, med.p, 'mgmt-lockdown').on], ['recommended', true]);
+  assert.ok(/small site \(8 staff/.test(stateIn(small.r, small.p, 'mgmt-lockdown').because) && /medium site \(40 staff\)/.test(stateIn(med.r, med.p, 'mgmt-lockdown').because));
+  assert.ok(!Pol.effective(small.p, small.r.allocations).some(y => y.card === 'mgmt-lockdown') && Pol.effective(med.p, med.r.allocations).some(y => y.card === 'mgmt-lockdown'));
+});
+test('industry changes the suggestion: a small clinic gets the management lockdown, and printers stay off the internet', () => {
+  const office = siteClient(8, { voice: true, printers: true }, {}, { voice: 8, printers: 1 }), clinic = siteClient(8, { voice: true, printers: true }, { industry: 'clinic' }, { voice: 8, printers: 1 });
+  assert.strictEqual(stateIn(office.r, office.p, 'mgmt-lockdown').on, false);
+  const cl = stateIn(clinic.r, clinic.p, 'mgmt-lockdown'); assert.ok(cl.on && /clinic/.test(cl.because));
+  assert.strictEqual(stateIn(clinic.r, clinic.p, 'printers-internet').on, false);
+  assert.ok(Pol.effective(clinic.p, clinic.r.allocations).some(x => x.card === 'mgmt-lockdown') && !Pol.effective(office.p, office.r.allocations).some(x => x.card === 'mgmt-lockdown'));
+});
+test('VoIP answer: hosted phones need no server rule, an on-site PBX keeps it', () => {
+  const mk = voip => siteClient(20, { voice: true, servers: true }, { voip }, { voice: 10, servers: 1 });
+  const h = mk('hosted'), o = mk('onprem'), n = mk('');
+  assert.strictEqual(stateIn(h.r, h.p, 'voice-servers').on, false);
+  assert.strictEqual(stateIn(o.r, o.p, 'voice-servers').on, true);
+  assert.strictEqual(stateIn(n.r, n.p, 'voice-servers').on, true);                                  // not stated: the old default
+  assert.ok(Pol.effective(h.p, h.r.allocations).some(x => x.src === 'Voice' && x.dst === 'internet') && !Pol.effective(h.p, h.r.allocations).some(x => x.src === 'Voice' && x.dst === 'Servers'));
+});
+test('answers that add cards: dual WAN, site-to-site VPN, FortiAP and cloud-only show their advice', () => {
+  const { r, p, c } = siteClient(20, { guest: true }, { dualWan: true, siteVpn: true, wifi: 'fortiap', serversWhere: 'cloud' });
+  const ids = Pol.cardView(p, r.allocations).map(e => e.card.id);
+  ['advice-dual-wan', 'advice-site-vpn', 'advice-ap-mgmt', 'advice-cloud-only'].forEach(x => assert.ok(ids.includes(x), x));
+  assert.ok(/FortiAP/.test(stateIn(r, p, 'advice-ap-mgmt').because));
+  const plain = siteClient(20, { guest: true }); assert.ok(!Pol.cardView(plain.p, plain.r.allocations).some(e => e.card.id === 'advice-dual-wan'));
+  assert.ok(c.intake.dualWan === true);
+});
+test('notes call out answers that contradict the ticks', () => {
+  const t = (req, extra) => { const x = siteClient(10, req, extra); return S.run(x.r.allocations, x.c.intake).notes.join(' | '); };
+  assert.ok(/Servers network is not ticked/.test(t({}, { serversWhere: 'onprem' })));
+  assert.ok(/cloud only, yet the Servers network is ticked/.test(t({ servers: true }, { serversWhere: 'cloud' })));
+  assert.ok(/Voice \/ phones is not ticked/.test(t({}, { voip: 'hosted' })));
+  assert.ok(/Tick Card payments/.test(t({}, { industry: 'retail' })) && !/Tick Card payments/.test(t({ pos: true }, { industry: 'retail' })));
+  assert.ok(/tick Guest wifi/.test(t({}, { wifi: 'thirdparty' })) && t({ guest: true }, { wifi: 'thirdparty' }) === '');
+  assert.strictEqual(t({}, {}), '');                                                              // no answers, no notes
+});
+test('suggestions only seed the list: once edited it is frozen, and Reset brings the suggestions back', () => {
+  const { c, r } = siteClient(40, { guest: true, servers: true });
+  c.pol = { edited: false, list: [], toggles: {} };
+  const before = Pol.effective(I.toProject(c), r.allocations).length;
+  c.pol.list = Pol.effective(I.toProject(c), r.allocations).slice(0, 3); c.pol.edited = true;
+  c.intake.industry = 'clinic'; c.intake.voip = 'hosted'; c.intake.dualWan = true;                // answers change after the edit
+  assert.strictEqual(Pol.effective(I.toProject(c), r.allocations).length, 3);                      // frozen
+  c.pol = { edited: false, list: [], toggles: {} };
+  assert.strictEqual(Pol.effective(I.toProject(c), r.allocations).length, before);                // 'clinic' adds nothing here, 'hosted' phones are not in this plan
+  const small = siteClient(5, { voice: true }, {}, { voice: 4 });
+  assert.ok(!Pol.effective(I.toProject(small.c), small.r.allocations).some(x => x.card === 'mgmt-lockdown'));
+  small.c.intake.industry = 'clinic';                                                              // an answer changes before any edit: the list follows
+  assert.ok(Pol.effective(I.toProject(small.c), small.r.allocations).some(x => x.card === 'mgmt-lockdown'));
+});
+test('older clients migrate: the new answers get blank defaults and the policies still export', () => {
+  const old = I.newClient('old'); ['industry', 'serversWhere', 'wifi', 'voip', 'dualWan', 'siteVpn'].forEach(k => delete old.intake[k]); I.migrate(old);
+  assert.deepStrictEqual([old.intake.industry, old.intake.serversWhere, old.intake.wifi, old.intake.voip, old.intake.dualWan, old.intake.siteVpn], ['', '', '', '', false, false]);
+  old.intake.counts.staff = 10; I.applyIntake(old); const p = I.toProject(old), r = C.plan(p);
+  assert.ok(F.toFortiOS(r, p, 'port5').includes('SP_Staff_LAN_to_internet'));
+  assert.ok(F.toHandoverDoc(r, p).indexOf('Site profile') < 0);                                    // nothing stated: no profile line
+  old.intake.industry = 'clinic'; old.intake.dualWan = true; assert.ok(/Site profile:\*\* Clinic, dual WAN/.test(F.toHandoverDoc(r, I.toProject(old))));
+});
+test('suggest.js, cards.js and calc.js stay free of DOM code', () => {
+  ['suggest.js', 'cards.js', 'calc.js', 'policy.js', 'access.js'].forEach(f => assert.ok(!/\b(document|window|localStorage|navigator)\b\./.test(require('fs').readFileSync(require('path').join(__dirname, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')), f));
+});
+
+console.log('Web filter categories (phase 3)');
+const W = require('./webcat.js');
+const webClient = (extra, req) => siteClient(20, Object.assign({ guest: true, servers: true, iot: true }, req || {}), extra, { guest: 5, servers: 1, iot: 3 });
+const webOf = (p, r, src) => Pol.effective(p, r.allocations).find(x => x.src === src && x.dst === 'internet' && x.action === 'accept');
+test('webcat: five groups with the required categories, unique ids, every group has an action control', () => {
+  assert.deepStrictEqual(W.GROUP_IDS, ['always', 'most', 'productivity', 'bandwidth', 'business']);
+  const names = g => W.groupOf(g).cats.map(c => c.name.toLowerCase()).join('|');
+  ['malicious', 'phishing', 'proxy avoidance', 'botnet'].forEach(x => assert.ok(names('always').includes(x), x));
+  ['adult', 'gambling', 'illegal'].forEach(x => assert.ok(names('most').includes(x), x));
+  ['social', 'games', 'shopping'].forEach(x => assert.ok(names('productivity').includes(x), x));
+  ['streaming', 'file sharing', 'peer-to-peer'].forEach(x => assert.ok(names('bandwidth').includes(x), x));
+  ['storage', 'email'].forEach(x => assert.ok(names('business').includes(x), x));
+  const ids = W.flat().map(c => c.id); assert.strictEqual(new Set(ids).size, ids.length, 'duplicate category id');
+  assert.deepStrictEqual(W.ACTIONS.map(a => a.v), ['allow', 'warn', 'block']);
+  W.PRESET_IDS.forEach(p => W.GROUP_IDS.forEach(g => assert.ok(['allow', 'warn', 'block'].includes(W.PRESETS[p].groups[g]), p + g)));
+  assert.deepStrictEqual(W.PRESET_IDS, ['staff', 'guest', 'iot', 'byod', 'servers']);
+});
+test('webcat: botnets are a note, not a made-up category id; allow adds nothing, warn becomes a warning', () => {
+  const e = W.entries({ always: 'block', most: 'allow', productivity: 'warn', bandwidth: 'allow', business: 'allow' });
+  assert.ok(e.every(x => Number.isInteger(x.id)) && e.filter(x => x.group === 'always').every(x => x.action === 'block') && e.filter(x => x.group === 'productivity').every(x => x.action === 'warning'));
+  assert.ok(!e.some(x => x.group === 'most') && W.notes({ always: 'block' }).some(n => /Botnets/.test(n)) && W.notes({ always: 'allow' }).length === 0);
+  assert.strictEqual(W.entries(W.normGroups(null)).length, 0);
+});
+test('webcat: presets per network type; the industry changes the defaults (school social media, clinic file sharing)', () => {
+  assert.deepStrictEqual(['staff', 'lan', 'guest', 'iot', 'servers', 'dmz', 'voice', 'cameras', 'pos', 'printers', 'mgmt'].map(k => W.presetForKind(k, 'x')), ['staff', 'staff', 'guest', 'iot', 'servers', 'servers', null, null, null, null, null]);
+  assert.strictEqual(W.presetForKind('other', 'BYOD'), 'byod'); assert.strictEqual(W.presetForKind('other', 'Lab'), 'iot');
+  assert.strictEqual(W.presetGroups('staff', 'office').productivity, 'warn');
+  assert.strictEqual(W.presetGroups('staff', 'school').productivity, 'block'); assert.strictEqual(W.presetGroups('guest', 'school').productivity, 'block');
+  assert.strictEqual(W.presetGroups('staff', 'clinic').bandwidth, 'block'); assert.strictEqual(W.presetGroups('guest', 'clinic').bandwidth, 'block');
+  assert.strictEqual(W.presetGroups('staff', 'office').bandwidth, 'warn');
+  assert.strictEqual(W.presetGroups('nope', 'office'), null);
+});
+test('default policies carry the preset profile for their network type, and only accept-to-internet policies do', () => {
+  const { r, p } = webClient({});
+  assert.strictEqual(webOf(p, r, 'Staff LAN').webf.preset, 'staff'); assert.strictEqual(webOf(p, r, 'Guest').webf.preset, 'guest');
+  assert.strictEqual(webOf(p, r, 'IoT').webf.preset, 'iot'); assert.strictEqual(webOf(p, r, 'Servers').webf.preset, 'servers');
+  Pol.effective(p, r.allocations).forEach(x => { if (x.webf) assert.ok(x.action === 'accept' && x.dst === 'internet', x.src + '>' + x.dst); });
+  assert.ok(!Pol.effective(p, r.allocations).some(x => x.webf && /Management|Voice|Cameras/.test(x.src)));
+  const off = webClient({ webFilter: false }); assert.ok(!Pol.effective(off.p, off.r.allocations).some(x => x.webf));
+});
+test('industry presets adjust the defaults: school blocks social media, clinic blocks file sharing', () => {
+  const school = webClient({ industry: 'school' }), clinic = webClient({ industry: 'clinic' }), office = webClient({ industry: 'office' });
+  assert.strictEqual(webOf(school.p, school.r, 'Staff LAN').webf.groups.productivity, 'block');
+  assert.strictEqual(webOf(office.p, office.r, 'Staff LAN').webf.groups.productivity, 'warn');
+  assert.strictEqual(webOf(clinic.p, clinic.r, 'Staff LAN').webf.groups.bandwidth, 'block');
+  assert.strictEqual(webOf(clinic.p, clinic.r, 'Guest').webf.groups.bandwidth, 'block');
+  assert.ok(/set category 37\s+set action block/.test(F.toFortiOS(school.r, school.p, 'port5')));                                   // school: social media blocked
+  const fo = F.toFortiOS(office.r, office.p, 'port5');
+  assert.ok(/set category 37\s+set action warning/.test(fo));                                                                       // office staff: social media only warns (IoT and servers still block it)
+});
+test('FortiOS: profiles are exported with every category id marked unverified, shared when identical, attached to accept policies only', () => {
+  const { r, p } = webClient({});
+  const f = F.toFortiOS(r, p, 'port5');
+  assert.ok(/config webfilter profile[\s\S]*edit "SP_Web_1"[\s\S]*config ftgd-wf[\s\S]*config filters[\s\S]*set category 26\s+set action block/.test(f));
+  assert.ok(/UNVERIFIED/.test(f) && /26 Malicious Websites/.test(f) && /Botnets: Not a web category/.test(f));
+  assert.ok(/set category 37\s+set action warning/.test(f));                                      // office staff: Productivity warns
+  const pol = f.slice(f.indexOf('config firewall policy\n'));
+  assert.ok(/set name "SP_Staff_LAN_to_internet"[\s\S]*?set utm-status enable[\s\S]*?set ssl-ssh-profile "certificate-inspection"[\s\S]*?set webfilter-profile "SP_Web_\d+"/.test(pol));
+  assert.ok(!/set name "SP_Guest_to_internal_block"[^]*?set webfilter-profile[^]*?set name/.test(pol.replace(/set name "SP_Staff_LAN_to_internet"[\s\S]*/, '')));  // deny policies get none
+  const names = [...f.matchAll(/edit "(SP_Web_\d+)"/g)].map(m => m[1]); assert.strictEqual(new Set(names).size, names.length);
+  assert.ok(/SP_Web_\d+ \(.*Used by: .*Staff LAN to internet/.test(f));
+  assert.ok(f.includes(F.FORTI_NOTE) && f.includes(Pol.NOTE));                                    // the required note and the placeholder stay
+  const same = webClient({ industry: 'school' }), g = F.toFortiOS(same.r, same.p, 'port5');          // school: Staff LAN and Guest end up identical, so one profile serves both
+  assert.ok(/Used by: Staff LAN to internet, Guest to internet/.test(g));
+});
+test('FortiOS: a profile that allows everything adds no profile; legacy site lists still work next to a preset', () => {
+  const { c, r } = webClient({});
+  c.pol = { edited: true, list: [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true, webf: { preset: 'custom', groups: W.normGroups(null) } })], toggles: {} };
+  const f = F.toFortiOS(r, I.toProject(c), 'port5'); assert.ok(!/config webfilter profile/.test(f) && !/webfilter-profile/.test(f));
+  c.pol.list = [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true, webf: W.profile('guest', 'office'), web: { mode: 'block', sites: 'bad.example.com', cats: [26] } })];
+  const g = F.toFortiOS(r, I.toProject(c), 'port5');
+  assert.ok(/config webfilter urlfilter[\s\S]*set url "bad.example.com"/.test(g) && /set urlfilter-table 101/.test(g));
+  assert.strictEqual((g.match(/set category 26\b/g) || []).length, 1);                             // the same id from the list and the preset is not repeated
+  c.pol.list = [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', action: 'deny', webf: W.profile('staff', 'office') })];
+  assert.ok(!/webfilter-profile|config webfilter profile/.test(F.toFortiOS(r, I.toProject(c), 'port5')));   // deny policies never get a profile
+});
+test('editing a policy profile: preset, one group (becomes custom) and off; the list freezes like any other edit', () => {
+  const p = Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet' });
+  Pol.setWebPreset(p, 'iot', 'office'); assert.strictEqual(p.webf.preset, 'iot'); assert.strictEqual(p.webf.groups.productivity, 'block');
+  Pol.setWebGroup(p, 'productivity', 'allow'); assert.strictEqual(p.webf.preset, 'custom'); assert.strictEqual(p.webf.groups.productivity, 'allow'); assert.strictEqual(p.webf.groups.bandwidth, 'block');
+  Pol.setWebGroup(p, 'nonsense', 'block'); Pol.setWebGroup(p, 'always', 'maybe'); assert.strictEqual(p.webf.groups.always, 'block');   // bad input ignored
+  Pol.setWebPreset(p, '', 'office'); assert.strictEqual(p.webf, null);
+  const q = Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet' }); Pol.setWebGroup(q, 'most', 'block'); assert.deepStrictEqual(q.webf.groups, { always: 'allow', most: 'block', productivity: 'allow', bandwidth: 'allow', business: 'allow' });
+});
+test('a card switched on in a frozen list also gets its web profile', () => {
+  const { r, p } = webClient({}); const ctx = Pol.cardCtx(p, r.allocations);
+  const list = Pol.setCardInList([], 'guest-internet', true, r.allocations, ctx); assert.strictEqual(list[0].webf.preset, 'guest');
+  assert.strictEqual(Pol.setCardInList([], 'guest-internet', true, r.allocations)[0].webf, null);   // no context, no profile
+});
+test('client report: a plain-language Web protection section per network, and it follows the industry', () => {
+  const { r, p } = webClient({ industry: 'school' }), h = CR.build(r, p);
+  assert.ok(/<h2>\d+\. Web protection<\/h2>/.test(h) && h.includes('Dangerous websites') && h.includes('Time-wasters') && h.includes('Business tools'));
+  assert.ok(/Staff LAN[\s\S]*?Blocked/.test(h.slice(h.indexOf('Web protection'))) && h.includes('Set for your type of site') && h.includes('School: social media'));
+  assert.ok(!/VLAN|FortiGuard|category \d|webfilter/i.test(h.slice(h.indexOf('Web protection'), h.indexOf('Internet connection'))));      // no jargon
+  const none = webClient({ webFilter: false }); assert.ok(!CR.build(none.r, none.p).includes('Web protection'));
+  const o = webClient({}), ho = CR.build(o.r, o.p); assert.ok(/Internet connection and remote access/.test(ho) && !ho.includes('Set for your type of site'));
+});
+test('older clients migrate with web filtering off, so their exports do not change; new clients start with it on', () => {
+  const old = I.newClient('old'); delete old.intake.webFilter; old.intake.counts.staff = 10; I.migrate(old); assert.strictEqual(old.intake.webFilter, false);
+  I.applyIntake(old); const p = I.toProject(old), r = C.plan(p); assert.ok(!/webfilter-profile|config webfilter/.test(F.toFortiOS(r, p, 'port5')));
+  assert.strictEqual(I.newClient('new').intake.webFilter, true);
+  old.intake.webFilter = true; assert.ok(/config webfilter profile/.test(F.toFortiOS(r, I.toProject(old), 'port5')));
+  const frozen = webClient({}); frozen.c.pol = { edited: true, list: Pol.effective(frozen.p, frozen.r.allocations).map(x => Object.assign({}, x)), toggles: {} };
+  frozen.c.intake.webFilter = false; assert.ok(Pol.effective(I.toProject(frozen.c), frozen.r.allocations).some(x => x.webf));         // a frozen list keeps its profiles
+});
+
+console.log('Demo clients (phase 4)');
+const demo = key => { const c = I.demoClient(key); const p = I.toProject(c); return { c, p, r: C.plan(p) }; };
+const onIds = (d) => Pol.cardView(d.p, d.r.allocations).filter(e => e.on).map(e => e.card.id);
+const stateOfCard = (d, id) => Pol.cardView(d.p, d.r.allocations).find(e => e.card.id === id);
+test('demos: two made-up clients, each with a name, blurb and every intake answer filled in', () => {
+  assert.deepStrictEqual(I.DEMO_KEYS, ['accountancy', 'clinic']);
+  I.DEMO_KEYS.forEach(k => { const d = I.DEMOS[k]; assert.ok(d.title && d.blurb && d.name && d.site && d.wanNote, k); ['industry', 'serversWhere', 'wifi', 'voip'].forEach(f => assert.ok(d.site_answers[f], k + ' ' + f)); });
+  assert.strictEqual(I.demoClient('nope'), null);
+  assert.notStrictEqual(I.demoClient('clinic').id, I.demoClient('clinic').id);                    // every load is a new client
+});
+test('demo accountancy: 25 staff, guest Wi-Fi, printer VLAN, remote staff, one IoT pool, card payments off', () => {
+  const d = demo('accountancy'), kinds = d.r.allocations.map(a => a.kind);
+  assert.ok(d.r.ok, JSON.stringify(d.r.errors));
+  ['staff', 'guest', 'printers', 'iot', 'servers', 'voice'].forEach(k => assert.ok(kinds.includes(k), k)); assert.ok(!kinds.includes('pos') && !kinds.includes('dmz') && !kinds.includes('cameras'));
+  assert.strictEqual(d.r.allocations.find(a => a.kind === 'iot').hosts, 6); assert.strictEqual(d.c.intake.counts.staff, 25);
+  const pool = R.plan(d.r, d.p); assert.ok(pool.ok && pool.staff === 5);                                // remote plan
+  assert.ok(R.warnings(d.r, d.p).some(w => /192\.168\.1\.0\/24/.test(w)));                              // the old router range clashes with home routers: the banner shows
+  assert.ok(d.r.allocations.every(a => !/^192\.168\.1\./.test(a.cidr)));
+  assert.strictEqual(S.run(d.r.allocations, d.c.intake).notes.length, 0);                              // the answers agree with the ticks
+});
+test('demo accountancy: the suggestion engine picks the expected cards', () => {
+  const d = demo('accountancy'), on = onIds(d);
+  assert.strictEqual(S.run(d.r.allocations, d.c.intake).size, 'medium');
+  ['guest-deny-internal', 'iot-deny-internal', 'printers-deny-internal', 'staff-printers', 'staff-servers', 'mgmt-lockdown', 'cameras-deny-internet', 'guest-internet'].filter(x => x !== 'cameras-deny-internet').forEach(x => assert.ok(on.includes(x), x + ' should be on'));
+  assert.ok(!on.includes('voice-servers'), 'hosted phones need no server rule');
+  ['staff-mgmt-admin', 'printers-internet', 'staff-voice', 'pos-deny-internal', 'dmz-deny-internal'].forEach(x => assert.ok(!on.includes(x), x + ' should be off or absent'));
+  assert.ok(/Printers ticked/.test(stateOfCard(d, 'staff-printers').because) && /hosted in the cloud/.test(stateOfCard(d, 'voice-servers').because) && /medium site \(25 staff\)/.test(stateOfCard(d, 'mgmt-lockdown').because));
+  ['advice-remote-vpn', 'advice-guest-isolation', 'advice-ap-mgmt', 'advice-voice-qos'].forEach(x => assert.ok(Pol.cardView(d.p, d.r.allocations).some(e => e.card.id === x), x));
+  ['advice-dual-wan', 'advice-site-vpn', 'advice-cloud-only', 'advice-pos-logging'].forEach(x => assert.ok(!Pol.cardView(d.p, d.r.allocations).some(e => e.card.id === x), x + ' should not show'));
+});
+test('demo clinic: POS isolation, dual WAN, site-to-site VPN, clinic web filters', () => {
+  const d = demo('clinic'), on = onIds(d), kinds = d.r.allocations.map(a => a.kind);
+  assert.ok(d.r.ok, JSON.stringify(d.r.errors)); ['pos', 'cameras', 'printers', 'guest', 'servers', 'voice'].forEach(k => assert.ok(kinds.includes(k), k));
+  assert.strictEqual(S.run(d.r.allocations, d.c.intake).size, 'small');
+  ['pos-deny-internal', 'staff-deny-pos', 'pos-internet', 'printers-deny-internal', 'staff-printers', 'cameras-deny-internet', 'voice-servers', 'mgmt-lockdown'].forEach(x => assert.ok(on.includes(x), x + ' should be on'));
+  ['pos-servers', 'printers-internet', 'staff-mgmt-admin'].forEach(x => assert.ok(!on.includes(x), x + ' should be off'));
+  assert.ok(/clinic/.test(stateOfCard(d, 'mgmt-lockdown').because) && /on-site phone system/.test(stateOfCard(d, 'voice-servers').because) && /clinic: keep printers off the internet/.test(stateOfCard(d, 'printers-internet').because));
+  ['advice-dual-wan', 'advice-site-vpn', 'advice-pos-logging', 'advice-ap-mgmt'].forEach(x => assert.ok(Pol.cardView(d.p, d.r.allocations).some(e => e.card.id === x), x));
+  assert.ok(!Pol.cardView(d.p, d.r.allocations).some(e => e.card.id === 'advice-remote-vpn') && !R.plan(d.r, d.p));        // no remote staff here
+  const staff = webOf(d.p, d.r, 'Staff LAN'), guest = webOf(d.p, d.r, 'Guest');
+  assert.strictEqual(staff.webf.groups.bandwidth, 'block'); assert.strictEqual(guest.webf.groups.bandwidth, 'block'); assert.ok(!webOf(d.p, d.r, 'POS').webf);
+  assert.strictEqual(S.run(d.r.allocations, d.c.intake).notes.length, 0);
+});
+test('the demos differ where the answers differ (same engine, different rules)', () => {
+  const a = onIds(demo('accountancy')), c = onIds(demo('clinic'));
+  assert.ok(a.includes('iot-deny-internal') && !c.includes('iot-deny-internal'));                    // clinic has no IoT network
+  assert.ok(c.includes('pos-deny-internal') && !a.includes('pos-deny-internal'));
+  assert.ok(c.includes('voice-servers') && !a.includes('voice-servers'));
+});
+test('demos run end to end: plan, diagram, policies, web filters, exports, report', () => {
+  I.DEMO_KEYS.forEach(k => {
+    const d = demo(k), { r, p } = d;
+    const f = F.toFortiOS(r, p, 'port5'); assert.ok(!/# Skipped/.test(f), k); assert.ok(f.includes(F.FORTI_NOTE) && /PLACEHOLDER: "port5"/.test(f));
+    assert.ok(/config webfilter profile/.test(f) && /UNVERIFIED/.test(f) && /set name "SP_Final_deny"/.test(f), k);
+    const names = [...f.matchAll(/set name "(SP_[^"]{1,35})"/g)].map(m => m[1]); assert.strictEqual(new Set(names).size, names.length, k + ' duplicate names');
+    assert.ok(F.toCSV(r, p).split('\n').length > r.allocations.length && F.toText(r, p).length > 100 && F.toHandoverDoc(r, p).includes('Site profile'), k);
+    assert.ok(F.toPolicyFortiOS(r, p, 'port5').includes('config firewall policy'));
+    assert.ok(require('./topology.js').build(r, p, { cols: 2, theme: 'light', standalone: true, vpn: R.plan(r, p) }).startsWith('<svg'), k);
+    const h = CR.build(r, p); ['What you asked for', 'Who can reach what', 'The firewall rules, in plain language', 'Web protection', 'Room to grow', 'Internet connection'].forEach(s => assert.ok(h.includes(s), k + ' ' + s));
+  });
+  const acc = demo('accountancy'); const rf = F.toRemoteFortiOS(acc.r, acc.p, 'port5'); assert.ok(rf.includes('SP_VPN_POOL') && rf.includes('PSK_CHANGE_ME'));
+  assert.strictEqual(F.toRemoteFortiOS(...(([x]) => [x.r, x.p, 'port5'])([demo('clinic')])), '');
+});
+test('client report explains every rule and every filter in plain language, with no jargon', () => {
+  I.DEMO_KEYS.forEach(k => {
+    const { r, p } = demo(k), h = CR.build(r, p), s0 = h.indexOf('The firewall rules, in plain language'), sec = h.slice(s0, h.indexOf('Room to grow', s0));
+    const pols = Pol.resolve(Pol.effective(p, r.allocations), r.allocations).pols;
+    assert.strictEqual((sec.match(/<tr>/g) || []).length - 1, pols.length, k + ' one row per rule');                         // minus the header row
+    assert.ok(/Blocked<\/span> · Guests cannot reach all your internal networks/.test(sec) && /Allowed<\/span> · Staff can reach the internet/.test(sec), k);
+    assert.ok(/Guests can reach the internet, for name lookups and web browsing only/.test(sec), k);                       // Guest service list in plain words
+    assert.ok(/Website checks: [^<]*blocked/.test(sec) && /shown with a warning/.test(sec), k);
+    assert.ok(!/VLAN|FortiGate|FortiOS|SP_|HTTPS|DNS|NAT|CLI|category \d/.test(sec.replace(/<[^>]+>/g, ' ')), k + ' jargon in the rules section');
+    const w0 = h.indexOf('Web protection'), web = h.slice(w0, h.indexOf('Internet connection', w0)); assert.ok(/Dangerous websites/.test(web) && !/FortiGuard|category \d|VLAN/.test(web), k);
+  });
+  const c = demo('clinic'), h = CR.build(c.r, c.p), c0 = h.indexOf('The firewall rules'), sec = h.slice(c0, h.indexOf('Room to grow', c0));
+  assert.ok(/Card payments cannot reach all your internal networks/.test(sec) && /Staff can reach Printers|Staff can reach Printers/.test(sec) && /Card payments can reach the internet, for name lookups, web browsing and clock synchronisation only/.test(sec));
+  assert.ok(/Set for your type of site[^]*Clinic: file sharing/.test(h));
+});
+test('report numbers its sections in order whatever applies (no gaps)', () => {
+  [demo('accountancy'), demo('clinic'), siteClient(5, {}, { webFilter: false })].forEach(d => {
+    const nums = [...CR.build(d.r, d.p).matchAll(/<h2>(\d+)\. /g)].map(m => Number(m[1]));
+    assert.deepStrictEqual(nums, nums.map((_, i) => i + 1));
+  });
+});
+test('demo clients survive being saved and loaded (JSON round trip + migrate) and editing', () => {
+  I.DEMO_KEYS.forEach(k => {
+    const d = demo(k), back = I.migrate(JSON.parse(JSON.stringify(d.c))), p2 = I.toProject(back);
+    assert.strictEqual(F.toFortiOS(C.plan(p2), p2, 'port5'), F.toFortiOS(d.r, d.p, 'port5'), k);
+    back.pol = { edited: true, list: Pol.effective(p2, d.r.allocations), toggles: {} }; back.intake.industry = 'school';               // freeze, then change an answer: list unchanged
+    assert.strictEqual(Pol.effective(I.toProject(back), d.r.allocations).length, Pol.effective(p2, d.r.allocations).length);
+  });
+});
+
+console.log('Contract import (phase 5)');
+const K = require('./contract.js');
+const ACC_TEXT = `MANAGED NETWORK SERVICES AGREEMENT
+
+This Agreement is made between Brightwell Accountants Ltd, a company registered in England (the "Client") and Netcraft Services Ltd (the "Supplier").
+
+Client: Brightwell Accountants Ltd
+Site address: 14 Station Road, Reading, RG1 4BE
+
+1. Scope
+The Supplier will design and install a new firewall and network for approximately 25 staff at the Site. The network shall include a separate guest Wi-Fi for visitors. The Client has 3 network printers and 6 smart displays and sensors. Around five staff will work from home and need VPN access.
+The Client uses hosted telephony (SIP trunks) with 25 IP phones. There are no on-site servers; all applications are cloud-only. The Client does not take card payments.
+Internet: a single fibre connection, 300/300 Mbps, with a 4G backup. The Client is an accountancy firm.`;
+const CLINIC_TEXT = `Customer: Harbour Road Dental Ltd
+Premises: 3 Harbour Road, Poole, BH15 1AA
+The Supplier shall provide a secure network for 12 staff at the dental clinic. A guest Wi-Fi is required for patients in the waiting room. There are 2 card terminals at reception and the Client must meet PCI DSS. The clinic has 4 CCTV cameras and 2 network printers. Telephony is an on-site PBX with 10 handsets. A local file server holds the patient records. Internet: dual WAN with a fibre primary and a 4G backup. A site-to-site VPN connects to the sister clinic.`;
+const xf = (text, key) => K.extract(text).fields.find(f => f.key === key);
+const vals = text => { const o = {}; K.extract(text).fields.forEach(f => { o[f.key] = f.value; }); return o; };
+test('contract: a realistic contract gives the right fields, each with its source sentence and a confidence', () => {
+  const r = K.extract(ACC_TEXT); assert.ok(r.ok);
+  const v = vals(ACC_TEXT);
+  assert.deepStrictEqual([v.name, v.site, v.staff, v.guest, v.iot, v.iotCount, v.printers, v.printersCount, v.remote, v.remoteCount, v.serversWhere, v.pos, v.voice, v.voip, v.voiceCount, v.industry, v.dualWan],
+    ['Brightwell Accountants Ltd', '14 Station Road, Reading, RG1 4BE', 25, true, true, 6, true, 3, true, 5, 'cloud', false, true, 'hosted', 25, 'office', true]);
+  assert.ok(/fibre/.test(v.internetType) && /300\/300 Mbps/.test(v.internetType));
+  r.fields.forEach(f => { assert.ok(['high', 'medium', 'low'].includes(f.conf), f.key); assert.ok(f.snippet && f.snippet.length <= 260, f.key + ' snippet'); assert.ok(f.snippet.includes(f.hit), f.key + ' hit inside snippet'); assert.strictEqual(f.checked, f.conf !== 'low', f.key); });
+  assert.strictEqual(xf(ACC_TEXT, 'name').conf, 'high'); assert.strictEqual(xf(ACC_TEXT, 'staff').conf, 'medium');    // "approximately 25" is flagged
+  assert.ok(/approximate/.test(xf(ACC_TEXT, 'staff').note) && /25 staff/.test(xf(ACC_TEXT, 'staff').snippet));
+  assert.ok(/no on-site servers/.test(xf(ACC_TEXT, 'serversWhere').snippet) && xf(ACC_TEXT, 'serversWhere').conf === 'high');
+});
+test('contract: "five staff will work from home" is remote staff, not the headcount', () => {
+  const t = 'The site has 25 staff. Around five staff will work from home. 3 guests visit daily.';
+  assert.strictEqual(xf(t, 'staff').value, 25); assert.strictEqual(xf(t, 'staff').conf, 'high'); assert.strictEqual(xf(t, 'remoteCount').value, 5);
+});
+test('contract: the clinic contract matches the clinic demo answers', () => {
+  const v = vals(CLINIC_TEXT), d = I.DEMOS.clinic;
+  assert.deepStrictEqual([v.name, v.site, v.staff, v.guest, v.pos, v.posCount, v.cameras, v.camerasCount, v.printers, v.printersCount, v.voip, v.voiceCount, v.serversWhere, v.dualWan, v.siteVpn, v.industry],
+    ['Harbour Road Dental Ltd', '3 Harbour Road, Poole, BH15 1AA', d.counts.staff, true, true, d.counts.pos, true, d.counts.cameras, true, d.counts.printers, d.site_answers.voip, d.counts.voice, d.site_answers.serversWhere, d.site_answers.dualWan, d.site_answers.siteVpn, d.site_answers.industry]);
+});
+test('contract: never guesses. Nothing relevant, nothing returned; unfound fields are listed as blank', () => {
+  const r = K.extract('This agreement is governed by the laws of England. Payment is due within 30 days. The term is 36 months.');
+  assert.ok(r.ok && r.fields.length === 0 && r.missing.length === K.FIELDS.length);
+  const part = K.extract('Client: Acme Ltd'); assert.deepStrictEqual(part.fields.map(f => f.key), ['name']); assert.ok(part.missing.some(m => m.key === 'staff'));
+  assert.strictEqual(K.extract('The firm has an excellent reputation and many people like it.').fields.length, 0);
+  assert.strictEqual(xf('Our team of 40 will visit the site.', 'staff'), undefined);           // 40 what? not staff
+  assert.strictEqual(xf('The contract value is 25 thousand pounds.', 'staff'), undefined);
+});
+test('contract: conflicting figures are low confidence and list the others; ranges and hedges are flagged', () => {
+  const c = xf('There are 25 staff in the office. The Client expects 40 staff after the move.', 'staff');
+  assert.strictEqual(c.conf, 'low'); assert.strictEqual(c.checked, false); assert.deepStrictEqual(c.alts, ['40']); assert.ok(/25, 40/.test(c.note));
+  const r = xf('Between 20-25 staff will use the network.', 'staff'); assert.strictEqual(r.value, 25); assert.strictEqual(r.conf, 'medium'); assert.ok(/range/i.test(r.note));
+  assert.strictEqual(xf('Number of staff: 32', 'staff').conf, 'high'); assert.strictEqual(xf('Headcount: 32', 'staff').value, 32);
+  assert.strictEqual(xf('We employ twenty-five employees.', 'staff').value, 25); assert.strictEqual(xf('We employ 1,200 employees.', 'staff').value, 1200);
+});
+test('contract: yes/no features read negatives and uncertainty (no guest Wi-Fi, optional cameras, contradictions)', () => {
+  assert.strictEqual(xf('Guest Wi-Fi is out of scope.', 'guest').value, false);
+  assert.strictEqual(xf('The network shall include guest Wi-Fi.', 'guest').value, true); assert.strictEqual(xf('The network shall include guest Wi-Fi.', 'guest').conf, 'high');
+  const opt = xf('CCTV cameras are optional and may be added in phase 2.', 'cameras'); assert.strictEqual(opt.value, true); assert.strictEqual(opt.conf, 'low'); assert.strictEqual(opt.checked, false);
+  const mix = xf('There will be no guest Wi-Fi. A separate guest network is required.', 'guest'); assert.strictEqual(mix.conf, 'low'); assert.ok(mix.alts.length === 1 && /opposite/.test(mix.note));
+  assert.strictEqual(xf('The Client does not take card payments.', 'pos').value, false); assert.strictEqual(xf('The Client takes card payments via 3 PDQ terminals.', 'pos').value, true);
+  assert.strictEqual(xf('The Client takes card payments via 3 PDQ terminals.', 'posCount').value, 3);
+});
+test('contract: servers, phones, internet and industry rules do not over-reach', () => {
+  assert.strictEqual(xf('A local file server will be retained.', 'serversWhere').value, 'onprem');
+  assert.strictEqual(xf('We have 2 servers.', 'serversCount').value, 2); assert.strictEqual(xf('We have 2 servers.', 'serversWhere'), undefined);      // where is not stated: left blank
+  assert.strictEqual(xf('The Client is cloud-only and also has an on-site file server.', 'serversWhere').conf, 'low');
+  assert.strictEqual(xf('The office uses IP phones.', 'voip'), undefined); assert.strictEqual(xf('The office uses IP phones.', 'voice').value, true);
+  assert.strictEqual(xf('A single internet line is provided.', 'dualWan').value, false); assert.strictEqual(xf('Firewall failover is required.', 'dualWan').conf, 'low');
+  assert.strictEqual(xf('Users can use remote access via the VPN.', 'remote').conf, 'low');                  // VPN alone is not "remote staff"
+  assert.strictEqual(xf('The shop sells to the public. The school next door is a neighbour.', 'industry'), undefined);   // a tie: not guessed
+  assert.strictEqual(xf('The patients attend the clinic and the dentist works with the surgery team.', 'industry').value, 'clinic');
+  assert.strictEqual(xf('The site is a primary school with 40 teachers and 600 pupils.', 'industry').value, 'school');
+});
+test('contract: empty, PDF, binary and oversized input are refused with a clear reason', () => {
+  assert.ok(!K.extract('').ok && /Paste/.test(K.extract('   ').error));
+  assert.ok(/PDF or Word/.test(K.extract('%PDF-1.7 ...binary...').error) && /PDF or Word/.test(K.extract('PK\u0003\u0004word/document.xml').error));
+  assert.ok(/PDF or Word/.test(K.extract('a\u0000\u0001\u0002' + '\u0000'.repeat(40)).error));
+  assert.ok(/very long/.test(K.extract('x'.repeat(K.MAX_CHARS + 1)).error));
+  assert.deepStrictEqual(K.extract(null).fields, []);
+});
+test('contract: values from the review screen are validated before they are used', () => {
+  assert.strictEqual(K.clean('staff', '25'), 25); assert.strictEqual(K.clean('staff', '1,200'), 1200); assert.strictEqual(K.clean('staff', '0'), null); assert.strictEqual(K.clean('staff', 'lots'), null); assert.strictEqual(K.clean('staff', '9999999'), null);
+  assert.strictEqual(K.clean('guest', 'true'), true); assert.strictEqual(K.clean('guest', false), false); assert.strictEqual(K.clean('guest', 'maybe'), null);
+  assert.strictEqual(K.clean('industry', 'clinic'), 'clinic'); assert.strictEqual(K.clean('industry', 'bank'), null); assert.strictEqual(K.clean('name', '  Acme   Ltd '), 'Acme Ltd'); assert.strictEqual(K.clean('name', ''), null); assert.strictEqual(K.clean('nope', 1), null);
+});
+test('contract: applying fills the intake from confirmed fields only, then the plan, policies and exports follow', () => {
+  const c = I.newClient('x'); c.intake.counts.staff = 7; c.intake.req.guest = false; c.name = 'Old name';
+  const items = K.extract(ACC_TEXT).fields.filter(f => f.checked).map(f => ({ key: f.key, value: f.value }));
+  const done = K.apply(c, items); I.applyIntake(c);
+  assert.ok(done.length === items.length && done.some(x => x === 'Staff: 25'));
+  assert.deepStrictEqual([c.name, c.site, c.intake.counts.staff, c.intake.req.guest, c.intake.req.printers, c.intake.counts.printers, c.intake.req.iot, c.intake.counts.iot, c.intake.remote.on, c.intake.remote.count, c.intake.serversWhere, c.intake.voip, c.intake.req.voice, c.intake.counts.voice, c.intake.industry, c.intake.dualWan, c.intake.req.pos],
+    ['Brightwell Accountants Ltd', '14 Station Road, Reading, RG1 4BE', 25, true, true, 3, true, 6, true, 5, 'cloud', 'hosted', true, 25, 'office', true, false]);
+  assert.ok(/Internet: fibre, 4g 300\/300 Mbps\./.test(c.intake.wanNote));
+  const p = I.toProject(c), r = C.plan(p); assert.ok(r.ok); assert.ok(r.allocations.some(a => a.kind === 'printers') && r.allocations.some(a => a.kind === 'guest') && !r.allocations.some(a => a.kind === 'pos'));
+  assert.ok(F.toFortiOS(r, p, 'port5').includes('SP_Staff_LAN_to_Printers') && R.plan(r, p).ok);
+  K.apply(c, items); assert.strictEqual(c.intake.wanNote.split('Internet:').length, 2);                      // applying twice does not repeat the note
+});
+test('contract: apply touches only the fields it is given, ignores bad values, and an explicit No beats a count', () => {
+  const c = I.newClient('x'); c.intake.counts.staff = 12; c.intake.req.servers = true; c.intake.counts.servers = 2; c.site = 'Kept';
+  K.apply(c, [{ key: 'guestCount', value: 8 }, { key: 'guest', value: false }, { key: 'staff', value: 'banana' }, { key: 'bogus', value: 1 }, { key: 'industry', value: 'bank' }]);
+  assert.strictEqual(c.intake.counts.staff, 12); assert.strictEqual(c.intake.counts.servers, 2); assert.strictEqual(c.intake.req.servers, true); assert.strictEqual(c.site, 'Kept');
+  assert.strictEqual(c.intake.counts.guest, 8); assert.strictEqual(c.intake.req.guest, false);               // No wins over the count that would have ticked it
+  assert.strictEqual(c.intake.industry, ''); assert.deepStrictEqual(K.apply(c, []), []); assert.deepStrictEqual(K.apply(c, null), []);
+  const d = I.newClient('y'); K.apply(d, [{ key: 'serversWhere', value: 'onprem' }, { key: 'remoteCount', value: 4 }]);
+  assert.strictEqual(d.intake.req.servers, true); assert.deepStrictEqual([d.intake.remote.on, d.intake.remote.count], [true, 4]);
+  const e = I.newClient('z'); K.apply(e, [{ key: 'serversWhere', value: 'cloud' }]); assert.strictEqual(e.intake.req.servers, false); assert.strictEqual(e.intake.serversWhere, 'cloud');   // cloud-only does not tick anything
+});
+test('contract: the "currently" column reports what the intake holds now', () => {
+  const c = I.demoClient('clinic');
+  assert.strictEqual(K.current(c, 'staff'), '12'); assert.strictEqual(K.current(c, 'guest'), 'Yes'); assert.strictEqual(K.current(c, 'dualWan'), 'Two lines (dual WAN)');
+  assert.strictEqual(K.current(c, 'industry'), 'Clinic'); assert.strictEqual(K.current(I.newClient('n'), 'staff'), ''); assert.strictEqual(K.current(I.newClient('n'), 'guest'), 'No');
+});
+test('contract text stays on the device: nothing returned or stored holds the text, and the module has no storage or network calls', () => {
+  const fs = require('fs'), path = require('path'), src = f => fs.readFileSync(path.join(__dirname, f), 'utf8');
+  const c = I.newClient('x'); K.apply(c, K.extract(ACC_TEXT).fields.map(f => ({ key: f.key, value: f.value })));
+  assert.ok(!/Netcraft|SIP trunks|MANAGED NETWORK|Supplier/.test(JSON.stringify(c)), 'contract words leaked into the client record');
+  const code = src('contract.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');          // comments are not code
+  assert.ok(!/\b(localStorage|sessionStorage|indexedDB|fetch|XMLHttpRequest|sendBeacon|WebSocket|document|window|navigator|console)\b/.test(code), 'contract.js touches storage, network or the DOM');
+  assert.ok(!/\(\?<[=!]/.test(code), 'regex lookbehind is not supported on older iPhones');
+  const app = src('app.js'); assert.ok(!/(localStorage|save\(|store\.)[^\n]*contract/i.test(app) && !/contract[^\n]*(localStorage|save\(\)|store\[)/i.test(app.replace(/contractReset|bindContract|renderContractReview|contractControl|contractFound|\$\('#contract-[a-z]+'\)/g, '')), 'app.js stores contract text');
+  assert.ok(/contractFound = null/.test(app) && /\$\('#contract-text'\)\.value = ''/.test(app));          // cleared on apply, cancel and clear
+  assert.ok(/not saved, not uploaded and not sent/.test(src('index.html')) && /PDF and Word files are not supported/.test(src('index.html')));
+  const fields = K.extract(ACC_TEXT).fields; assert.ok(fields.every(f => f.snippet.length <= 260));          // only short snippets leave extract()
+});
+test('PWA: every script and stylesheet the page loads is precached by the service worker, and the cache was bumped', () => {
+  const fs = require('fs'), path = require('path'), rd = f => fs.readFileSync(path.join(__dirname, f), 'utf8');
+  const html = rd('index.html'), sw = rd('sw.js');
+  const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
+  assert.ok(files.length >= 14);
+  files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
+  assert.ok(/const CACHE = 'subnetpal-v15'/.test(sw));
+});
+test('contract: a large contract is scanned quickly', () => {
+  const big = (ACC_TEXT + '\n').repeat(300).slice(0, 300000), t0 = Date.now(); const r = K.extract(big);
+  assert.ok(r.ok && Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

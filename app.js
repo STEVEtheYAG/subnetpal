@@ -72,6 +72,9 @@
       if (left.length) selectClient(left[0].id); else addClient(Intake.newClient('New client'));
       save();
     });
+    // Demo clients (made-up): a whole intake in one tap. Each adds a new client, so nothing you have is overwritten.
+    $('#btnDemo').addEventListener('click', () => { addClient(Intake.demoClient('accountancy')); toast(Intake.DEMOS.accountancy.blurb); });
+    $('#btnDemo2').addEventListener('click', () => { addClient(Intake.demoClient('clinic')); toast(Intake.DEMOS.clinic.blurb); });
     $('#samples').addEventListener('click', e => { const b = e.target.closest('[data-sample]'); if (b) addClient(Intake.sampleClient(b.dataset.sample)); });
   }
 
@@ -104,6 +107,8 @@
     });
     const rm = it.remote || {};
     $('#rem-on').checked = !!rm.on; $('#rem-count').hidden = !rm.on; $('#rem-count').value = rm.count || '';
+    $('#i-industry').value = it.industry || ''; $('#i-serverswhere').value = it.serversWhere || ''; $('#i-wifi').value = it.wifi || ''; $('#i-voip').value = it.voip || '';
+    $('#i-dualwan').checked = !!it.dualWan; $('#i-sitevpn').checked = !!it.siteVpn; $('#i-webfilter').checked = !!it.webFilter;
     $('#i-existing').value = it.existing || ''; $('#i-wan').value = it.wanNote || '';
     $('#i-style').value = c.opts.style === 'packed' ? 'packed' : 'vlan24';
     $('#i-parent').value = c.parentAuto === false ? c.parent : '';
@@ -123,6 +128,13 @@
     if (t.id === 'i-name') c.name = t.value;
     else if (t.id === 'i-site') c.site = t.value;
     else if (t.id === 'i-wan') it.wanNote = t.value;
+    else if (t.id === 'i-industry') it.industry = t.value;
+    else if (t.id === 'i-serverswhere') it.serversWhere = t.value;
+    else if (t.id === 'i-wifi') it.wifi = t.value;
+    else if (t.id === 'i-voip') it.voip = t.value;
+    else if (t.id === 'i-dualwan') it.dualWan = t.checked;
+    else if (t.id === 'i-sitevpn') it.siteVpn = t.checked;
+    else if (t.id === 'i-webfilter') it.webFilter = t.checked;
     else if (t.id === 'rem-on') {
       it.remote = it.remote || { on: false, count: '', reach: null }; it.remote.on = t.checked;
       $('#rem-count').hidden = !t.checked; if (t.checked) $('#rem-count').focus();
@@ -173,6 +185,64 @@
     $('#v6-new').addEventListener('click', () => { const c = cur(); c.v6.prefix = Calc6.generateUla(); $('#v6-prefix').value = c.v6.prefix; touch(); recalc(); });
     $('#sumBtn').addEventListener('click', () => { setSideCollapsed(!$('#side').classList.contains('collapsed')); if (!$('#side').classList.contains('collapsed')) window.scrollTo(0, 0); });
     $('#btnDone').addEventListener('click', () => { setSideCollapsed(true); window.scrollTo(0, 0); });
+  }
+  // ---------- import from contract (text stays on this device: nothing here is saved, uploaded or logged) ----------
+  const CONF_LABEL = { high: 'High confidence', medium: 'Check this', low: 'Low confidence' };
+  const markHit = (snip, hit) => { const i = hit ? snip.indexOf(hit) : -1; return i < 0 ? esc(snip) : esc(snip.slice(0, i)) + '<mark>' + esc(hit) + '</mark>' + esc(snip.slice(i + hit.length)); };
+  let contractFound = null;                                  // the last scan (field values and short snippets only, never the whole text)
+  const cmsg = (t, bad) => { const m = $('#contract-msg'); m.textContent = t; m.classList.toggle('warnbox', !!bad); };
+  function contractControl(f) {
+    const o = (v, l, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(l)}</option>`;
+    if (f.type === 'bool') return `<select data-cv="${f.key}" aria-label="${esc(f.label)}">${o('true', f.yes || 'Yes', f.value === true)}${o('false', f.no || 'No', f.value === false)}</select>`;
+    if (f.type === 'enum') return `<select data-cv="${f.key}" aria-label="${esc(f.label)}">${f.options.map(([v, l]) => o(v, l, f.value === v)).join('')}</select>`;
+    return `<input data-cv="${f.key}" aria-label="${esc(f.label)}" autocomplete="off"${f.type === 'number' ? ' inputmode="numeric"' : ''} value="${esc(f.value)}">`;
+  }
+  function renderContractReview() {
+    const box = $('#contract-review'), res = contractFound;
+    if (!res || !res.ok) { box.innerHTML = ''; return; }
+    const c = cur();
+    box.innerHTML = (res.fields.length ? `<p class="hint">Tick what to use, correct any value, then apply. Nothing changes until you press Apply. Low-confidence rows are unticked.</p>` : '<p class="hint">No intake fields were found in that text. Nothing is guessed, so the intake is unchanged.</p>') +
+      res.fields.map(f => { const now = Contract.current(c, f.key);
+        return `<div class="crow conf-${f.conf}"><div class="crowhead"><label class="check"><input type="checkbox" data-cf="${f.key}"${f.checked ? ' checked' : ''}> <b>${esc(f.label)}</b></label>${badge('cbadge-' + f.conf, CONF_LABEL[f.conf])}</div>
+          <div class="cval">${contractControl(f)}${now ? `<span class="cnow">Now: ${esc(now)}</span>` : ''}</div>
+          ${f.snippet ? `<blockquote class="csnip">${markHit(f.snippet, f.hit)}</blockquote>` : ''}
+          ${f.note ? `<p class="cnote">${esc(f.note)}${f.alts.length ? ' Also found: ' + esc(f.alts.join(' | ')) : ''}</p>` : ''}</div>`; }).join('') +
+      (res.fields.length ? '<div class="btnrow"><button id="btnContractApply" class="btn sm primary" type="button">Apply selected to the intake</button><button id="btnContractCancel" class="btn sm" type="button">Cancel</button></div>' : '') +
+      (res.missing.length ? `<details class="more2"><summary>Not found, left blank (${res.missing.length})</summary><p class="hint">${esc(res.missing.map(m => m.label).join(', '))}</p></details>` : '');
+  }
+  function contractReset(keepMsg) { contractFound = null; $('#contract-text').value = ''; $('#contract-file').value = ''; $('#contract-review').innerHTML = ''; if (!keepMsg) cmsg(''); }
+  function bindContract() {
+    $('#btnContractScan').addEventListener('click', () => {
+      const res = Contract.extract($('#contract-text').value);
+      if (!res.ok) { contractFound = null; renderContractReview(); cmsg(res.error, true); return; }
+      contractFound = res; renderContractReview();
+      cmsg(res.fields.length ? `Found ${res.fields.length} field${res.fields.length === 1 ? '' : 's'}. Review them below.` : 'Nothing found.', !res.fields.length);
+    });
+    $('#btnContractClear').addEventListener('click', () => contractReset());
+    $('#contract-file').addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      if (/\.(pdf|docx?|rtf|odt)$/i.test(f.name) || /pdf|word|officedocument|rtf/i.test(f.type)) { e.target.value = ''; cmsg('PDF and Word files are not supported yet. Copy the text out of the file and paste it into the box.', true); return; }
+      if (f.size > 2 * 1024 * 1024) { e.target.value = ''; cmsg('That file is over 2 MB. Paste just the relevant parts.', true); return; }
+      const rd = new FileReader();
+      rd.onload = () => { $('#contract-text').value = String(rd.result || ''); cmsg('File read on this device. Press Find intake fields.'); };
+      rd.onerror = () => cmsg('The file could not be read. Paste the text instead.', true);
+      rd.readAsText(f);
+    });
+    $('#contract-review').addEventListener('click', e => {
+      if (e.target.closest('#btnContractCancel')) { contractReset(); return; }
+      if (!e.target.closest('#btnContractApply')) return;
+      const items = [], bad = [];
+      $$('#contract-review .crow').forEach(row => {
+        const cf = row.querySelector('[data-cf]'); if (!cf || !cf.checked) return;
+        const key = cf.dataset.cf, v = Contract.clean(key, row.querySelector('[data-cv]').value);
+        if (v === null) bad.push(Contract.BY_KEY[key].label); else items.push({ key, value: v });
+      });
+      if (bad.length) { cmsg('Fix these values first: ' + bad.join(', ') + '.', true); return; }
+      if (!items.length) { cmsg('Nothing is ticked, so nothing was applied.', true); return; }
+      const done = Contract.apply(cur(), items);
+      Intake.applyIntake(cur()); touch(); renderIntake(); renderClientSel(); recalc();
+      contractReset(true); cmsg(`Applied ${done.length} field${done.length === 1 ? '' : 's'} to the intake. The contract text has been cleared from this page.`);
+    });
   }
   function setSideCollapsed(v) {
     $('#side').classList.toggle('collapsed', v);
@@ -375,11 +445,39 @@
   const polMsg = (t, bad) => { const m = $('#parsemsg'); m.textContent = t; m.classList.toggle('warnbox', !!bad); };
   function materialize() {
     const c = cur();
-    if (!c.pol || !Array.isArray(c.pol.list)) c.pol = { edited: false, list: [] };
-    if (!c.pol.edited) { c.pol.list = Policy.defaults(result.allocations); c.pol.edited = true; }
+    if (!c.pol || !Array.isArray(c.pol.list)) c.pol = { edited: false, list: [], toggles: {} };
+    if (!c.pol.edited) { c.pol.list = Policy.defaults(result.allocations, Policy.cardCtx(project(), result.allocations)); c.pol.edited = true; }
     return c.pol.list;
   }
-  function polRowHtml(p, i, n, nets) {
+  const TIER_LABEL = { baseline: 'Baseline', recommended: 'Recommended', optional: 'Optional' };
+  const RISK_LABEL = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' };
+  const badge = (cls, label) => `<span class="badge ${cls}">${esc(label)}</span>`;
+  // Tier, risk and the client need for a policy that came from a library card. Policies the engineer made have no card.
+  function polCardHtml(p, libMap) {
+    const card = p.card && Cards.byId(p.card); if (!card) return '';
+    const st = libMap.get(card.id) || { tier: card.tier, because: '' };
+    return `<div class="polcard">${badge('tier-' + st.tier, TIER_LABEL[st.tier])}${badge('risk-' + card.risk, RISK_LABEL[card.risk])}
+      <span class="polwhy">${esc(card.why)}${st.because ? ` <i>Because: ${esc(st.because)}.</i>` : ''}</span></div>`;
+  }
+  // The web filter profile on a policy, in one line (accept policies only).
+  const polWebLine = p => (p.webf && p.webf.groups && p.action !== 'deny'
+    ? `<div class="polweb">Web filter: <b>${esc(Webcat.label(p.webf.preset))}</b> · ${esc(Webcat.summary(p.webf.groups))}</div>` : '');
+  function cardListHtml(lib, edited) {
+    const groups = [['baseline', 'Baseline'], ['recommended', 'Recommended'], ['optional', 'Optional']];
+    return groups.map(([t, label]) => {
+      const rows = lib.filter(e => e.tier === t);
+      if (!rows.length) return '';
+      return `<h3 class="cardgrp">${label}</h3>` + rows.map(e => {
+        const c = e.card, isP = c.type === 'policy';
+        const ctl = isP
+          ? `<input type="checkbox" data-card="${esc(c.id)}"${e.on ? ' checked' : ''}${t === 'baseline' && !edited ? ' disabled' : ''} aria-label="${esc(c.name)}">`
+          : '<span class="badge advice">Advice</span>';
+        return `<label class="cardrow${e.on || !isP ? '' : ' off'}">${ctl}<span><b>${esc(c.name)}</b> ${badge('risk-' + c.risk, RISK_LABEL[c.risk])}
+          <span class="polwhy">${esc(c.why)}${e.because ? ` <i>Because: ${esc(e.because)}.</i>` : ''}${isP ? '' : ' ' + esc(c.text)}</span></span></label>`;
+      }).join('');
+    }).join('');
+  }
+  function polRowHtml(p, i, n, nets, libMap) {
     const o = (v, l, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(l)}</option>`;
     const miss = x => (nets.indexOf(x) < 0 && x !== 'internet' && x !== 'internal');
     const netOpts = sel => nets.map(x => o(x, x, sel === x)).join('');
@@ -390,6 +488,7 @@
     return `<div class="polrow${miss(p.src) || miss(p.dst) ? ' bad' : ''}${p.action === 'deny' ? ' deny' : ''}" data-pi="${i}">
       <div class="polhead"><b>${i + 1}. ${esc(Policy.policyName(p))}</b>
         <span class="polbtns"><button type="button" class="btn sm" data-pact="up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" class="btn sm" data-pact="down" aria-label="Move down"${i === n - 1 ? ' disabled' : ''}>↓</button><button type="button" class="btn sm" data-pact="del" aria-label="Delete policy">×</button></span></div>
+      ${polCardHtml(p, libMap)}${polWebLine(p)}
       <div class="polgrid">
         <label>Source<select data-pf="src">${miss(p.src) ? o(p.src, '(not in plan) ' + p.src, true) : ''}${netOpts(p.src)}</select></label>
         <label>Destination<select data-pf="dst">${o('internet', 'Internet', p.dst === 'internet')}${o('internal', 'All internal networks', p.dst === 'internal')}${miss(p.dst) ? o(p.dst, '(not in plan) ' + p.dst, true) : ''}${netOpts(p.dst)}</select></label>
@@ -398,7 +497,9 @@
         <label class="check"><input type="checkbox" data-pf="nat"${p.nat ? ' checked' : ''}${p.action === 'deny' ? ' disabled' : ''}> NAT</label>
         <label class="check"><input type="checkbox" data-pf="log"${p.log !== false ? ' checked' : ''}> Log</label>
       </div>
-      <details class="polmore"${web.mode || app.mode ? ' open' : ''}><summary>Websites and applications (optional)</summary>
+      <details class="polmore"${web.mode || app.mode || p.webf ? ' open' : ''}><summary>Websites and applications (optional)</summary>
+        <div class="webf"><label>Web filter profile (FortiGuard categories)<select data-wpreset>${o('', 'Off', !p.webf)}${Webcat.PRESET_IDS.map(id => o(id, Webcat.label(id), p.webf && p.webf.preset === id)).join('')}${p.webf && p.webf.preset === 'custom' ? o('custom', 'Custom', true) : ''}</select></label>
+          <div class="wgrid">${Webcat.GROUPS.map(g => `<label>${esc(g.label)}<select data-wg="${g.id}"${p.webf ? '' : ' disabled'}>${Webcat.ACTIONS.map(a => o(a.v, a.l, p.webf && Webcat.normGroups(p.webf.groups)[g.id] === a.v)).join('')}</select></label>`).join('')}</div></div>
         <label>Websites<select data-pf="web.mode">${mode(web.mode, 'Allow-list (only these sites)', 'Block-list (block these sites)')}</select></label>
         <textarea data-pf="web.sites" rows="2" spellcheck="false" autocapitalize="off" placeholder="Sites, e.g. example.com, news.example.com">${esc(web.sites || '')}</textarea>
         <div class="catbox">${cat('web', Policy.WEB_CATS, web.cats || [])}</div>
@@ -413,10 +514,17 @@
     const c = cur();
     if ($('#tagline') !== document.activeElement && $('#tagline').value !== (c.tagline || '')) $('#tagline').value = c.tagline || '';
     $('#polnote').textContent = Policy.NOTE;
-    if (!result || !result.ok) { $('#pollist').innerHTML = '<p class="hint">Fix the problem above to edit policies.</p>'; $('#pre-polcli').textContent = ''; return; }
+    if (!result || !result.ok) { $('#pollist').innerHTML = '<p class="hint">Fix the problem above to edit policies.</p>'; $('#cardlist').innerHTML = ''; $('#pre-polcli').textContent = ''; return; }
     const list = Policy.effective(project(), result.allocations), nets = Policy.policyNets(result.allocations);
+    const lib = Policy.cardView(project(), result.allocations), libMap = new Map(lib.map(e => [e.card.id, e]));
+    const offCount = lib.filter(e => e.card.type === 'policy' && !e.on).length;
+    $('#cardlibsum').textContent = `Policy library (${lib.length} cards${offCount ? `, ${offCount} off` : ''})`;
+    const sg = Suggest.run(result.allocations, c.intake), indL = (Suggest.INDUSTRIES.find(x => x.v === sg.industry) || {}).l || 'Office';
+    $('#sugline').textContent = `Suggested for a ${sg.size} ${indL.toLowerCase()} site (${sg.staff} staff, ${sg.facts.ifaces} networks). Suggestions only seed the list: editing a policy keeps your own list.${c.intake.webFilter && Webcat.INDUSTRY_WHY[sg.industry] ? ' Web filtering: ' + Webcat.INDUSTRY_WHY[sg.industry] : ''}`;
+    $('#sugnotes').innerHTML = sg.notes.map(n => `<li>${esc(n)}</li>`).join('');
+    $('#cardlist').innerHTML = cardListHtml(lib, !!(c.pol && c.pol.edited));
     $('#pollist').innerHTML = (c.pol && c.pol.edited ? '' : '<p class="hint">These are the default rules for this plan and follow it when the plan changes. Editing anything below keeps your own list.</p>') +
-      (list.length ? list.map((p, i) => polRowHtml(p, i, list.length, nets)).join('') : '<p class="hint">No policies. Everything is denied. Add one or reset to defaults.</p>');
+      (list.length ? list.map((p, i) => polRowHtml(p, i, list.length, nets, libMap)).join('') : '<p class="hint">No policies. Everything is denied. Add one or reset to defaults.</p>');
     renderPolicyCli();
   }
   function setPath(p, path, v) {
@@ -436,6 +544,8 @@
       edit(list => {
         const p = list[i]; if (!p) return;
         if (t.dataset.pf) setPath(p, t.dataset.pf, t.type === 'checkbox' ? t.checked : t.value);
+        else if (t.dataset.wpreset !== undefined) { if (t.value !== 'custom') Policy.setWebPreset(p, t.value, cur().intake.industry); }
+        else if (t.dataset.wg) Policy.setWebGroup(p, t.dataset.wg, t.value);
         else if (t.dataset.pcat) {
           const k = t.dataset.pcat, o = k === 'web' ? (p.web = p.web || { mode: '', sites: '', cats: [] }) : (p.app = p.app || { mode: '', cats: [] });
           const id = Number(t.value); o.cats = (o.cats || []).map(Number).filter(x => x !== id); if (t.checked) o.cats.push(id);
@@ -457,6 +567,14 @@
       });
       renderPolicies(); renderSummaries();
     });
+    // Library cards: before the first edit this only records the switch (the list keeps following the plan); after it, the card's rules are added or removed.
+    $('#cardlist').addEventListener('change', e => {
+      const t = e.target; if (!t.dataset.card || !result.ok) return;
+      const c = cur();
+      if (c.pol && c.pol.edited) c.pol.list = Policy.setCardInList(c.pol.list, t.dataset.card, t.checked, result.allocations, Policy.cardCtx(project(), result.allocations));
+      else { c.pol = c.pol || { edited: false, list: [] }; c.pol.toggles = c.pol.toggles || {}; c.pol.toggles[t.dataset.card] = t.checked; }
+      touch(); renderPolicies(); renderSummaries();
+    });
     $('#tagline').addEventListener('input', e => { cur().tagline = e.target.value; touch(); });
     $('#btnAddPol').addEventListener('click', () => {
       if (!result.ok) return;
@@ -464,7 +582,7 @@
       edit(list => list.push(Policy.mkPolicy({ src: nets[0], dst: 'internet', service: 'ALL', action: 'accept', nat: true })));
       renderPolicies(); renderSummaries(); polMsg('Added a policy at the bottom (above the final deny). Set it with the dropdowns.');
     });
-    $('#btnResetPol').addEventListener('click', () => { cur().pol = { edited: false, list: [] }; touch(); renderPolicies(); renderSummaries(); polMsg('Back to the default policies for this plan.'); });
+    $('#btnResetPol').addEventListener('click', () => { cur().pol = { edited: false, list: [], toggles: {} }; touch(); renderPolicies(); renderSummaries(); polMsg('Back to the default policies for this plan.'); });
     $('#btnParse').addEventListener('click', () => {
       const txt = $('#tagline').value.trim(); cur().tagline = txt; touch();
       if (!txt) { polMsg('Type a sentence first, or use + Add policy.', true); return; }
@@ -563,7 +681,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindClients(); bindIntake(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
+  bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {

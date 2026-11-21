@@ -7,8 +7,8 @@
 
   const GROWTH = { none: 25, soon: 50, big: 100 };
   const EXPANSION_LABEL = { none: 'None', soon: 'Soon', big: 'Big growth' };
-  const VLAN_IDS = { mgmt: 10, staff: 20, servers: 30, voice: 40, cameras: 50, iot: 60, guest: 70, dmz: 80 };
-  const COUNT_FIELDS = ['staff', 'wired', 'wifi', 'voice', 'cameras', 'iot', 'servers', 'guest', 'dmz'];
+  const VLAN_IDS = { mgmt: 10, staff: 20, servers: 30, voice: 40, cameras: 50, printers: 55, iot: 60, pos: 65, guest: 70, dmz: 80 };
+  const COUNT_FIELDS = ['staff', 'wired', 'wifi', 'voice', 'cameras', 'iot', 'servers', 'guest', 'dmz', 'printers', 'pos'];
   // Optional networks: planned only when their box is ticked. Unticked means not planned (the count is ignored).
   const OPTIONAL = [
     { kind: 'servers', key: 'servers', name: 'Servers', role: 'LAN', label: 'Servers', unit: 'servers' },
@@ -17,6 +17,8 @@
     { kind: 'voice', key: 'voice', name: 'Voice', role: 'LAN', label: 'Voice / phones', unit: 'phones' },
     { kind: 'cameras', key: 'cameras', name: 'Cameras', role: 'LAN', label: 'Cameras', unit: 'cameras' },
     { kind: 'iot', key: 'iot', name: 'IoT', role: 'LAN', label: 'IoT', unit: 'IoT devices' },
+    { kind: 'printers', key: 'printers', name: 'Printers', role: 'LAN', label: 'Printers', unit: 'printers' },
+    { kind: 'pos', key: 'pos', name: 'POS', role: 'LAN', label: 'Card payments (POS)', unit: 'card terminals' },
   ];
 
   const MAX_OTHERS = 10;
@@ -25,12 +27,15 @@
 
   function newIntake() {
     const counts = {}; COUNT_FIELDS.forEach(k => { counts[k] = 0; });
-    return { counts, existing: '', expansion: 'none', req: { servers: false, guest: false, dmz: false, voice: false, cameras: false, iot: false }, others: [], remote: { on: false, count: '', reach: null }, wanNote: '' };
+    return { counts, existing: '', expansion: 'none', req: { servers: false, guest: false, dmz: false, voice: false, cameras: false, iot: false, printers: false, pos: false }, others: [], remote: { on: false, count: '', reach: null }, wanNote: '', ...siteAnswers() };
   }
+  // Answers about the site that do not change the networks but steer the suggested policies (see suggest.js). '' means not stated.
+  // webFilter: new clients start with FortiGuard web filtering on (preset profiles per network type). Older saved clients are migrated to off so their exports do not change.
+  function siteAnswers() { return { industry: '', serversWhere: '', wifi: '', voip: '', dualWan: false, siteVpn: false, webFilter: true }; }
   function newClient(name) {
     return {
       id: uid(), name: name || 'New client', site: '', date: new Date().toISOString().slice(0, 10),
-      intake: newIntake(), pol: { edited: false, list: [] }, tagline: '', parent: '', parentAuto: true, networks: [], v6: { enabled: true, prefix: Calc6.generateUla() },
+      intake: newIntake(), pol: { edited: false, list: [], toggles: {} }, tagline: '', parent: '', parentAuto: true, networks: [], v6: { enabled: true, prefix: Calc6.generateUla() },
       opts: Object.assign({}, Calc.DEFAULT_OPTS, { style: 'vlan24' }), ifName: 'PORT_CHANGE_ME', planEdited: false, genNotes: [],
     };
   }
@@ -105,7 +110,10 @@
     it.req = it.req || {};
     if (!Array.isArray(it.others)) it.others = [];
     if (!it.remote || typeof it.remote !== 'object') it.remote = { on: false, count: '', reach: null };
-    if (!client.pol || !Array.isArray(client.pol.list)) client.pol = { edited: false, list: [] };
+    if (typeof it.webFilter !== 'boolean') it.webFilter = false;
+    const site = siteAnswers(); Object.keys(site).forEach(k => { if (typeof it[k] !== typeof site[k]) it[k] = site[k]; });
+    if (!client.pol || !Array.isArray(client.pol.list)) client.pol = { edited: false, list: [], toggles: {} };
+    if (!client.pol.toggles || typeof client.pol.toggles !== 'object') client.pol.toggles = {};
     if (typeof client.tagline !== 'string') client.tagline = '';
     if (it.req.servers === undefined) it.req.servers = num(it.counts.servers) > 0;
     if (!client.v6) client.v6 = { enabled: false, prefix: '' };
@@ -133,8 +141,42 @@
     return applyIntake(c);
   }
 
+  // Demo clients: every intake answer filled in, so one click shows the whole flow (plan, diagram, suggested policies, web filters, remote plan, exports, report).
+  // Made-up clients, not real ones. Both are also test cases for the suggestion engine.
+  const DEMOS = {
+    accountancy: {
+      title: 'Demo: Accountancy firm (25 staff)', blurb: '25 staff, guest Wi-Fi, a printer VLAN, remote staff, one IoT pool, no card payments.',
+      name: 'Demo: Accountancy firm', site: 'Reading office', expansion: 'soon',
+      wanNote: 'Single fibre line, 300/300. Remote staff use the IPsec VPN. The old router uses 192.168.1.0/24.',
+      existing: '192.168.1.0/24',
+      counts: { staff: 25, servers: 2, guest: 10, voice: 25, printers: 3, iot: 6 },
+      req: { servers: true, guest: true, voice: true, printers: true, iot: true, pos: false },
+      remote: { on: true, count: 5 },
+      site_answers: { industry: 'office', serversWhere: 'onprem', wifi: 'fortiap', voip: 'hosted', dualWan: false, siteVpn: false, webFilter: true },
+    },
+    clinic: {
+      title: 'Demo: Dental clinic (POS + dual WAN)', blurb: '12 staff, card terminals kept isolated, dual WAN, a link to a sister clinic, on-site phone system.',
+      name: 'Demo: Dental clinic', site: 'Harbour Road clinic', expansion: 'none',
+      wanNote: 'Fibre primary with a 4G backup (dual WAN). IPsec tunnel to the sister clinic.',
+      existing: '10.20.0.0/16',
+      counts: { staff: 12, servers: 1, guest: 15, voice: 10, cameras: 4, printers: 2, pos: 2 },
+      req: { servers: true, guest: true, voice: true, cameras: true, printers: true, pos: true },
+      remote: { on: false, count: '' },
+      site_answers: { industry: 'clinic', serversWhere: 'onprem', wifi: 'thirdparty', voip: 'onprem', dualWan: true, siteVpn: true, webFilter: true },
+    },
+  };
+  const DEMO_KEYS = Object.keys(DEMOS);
+  function demoClient(key) {
+    const d = DEMOS[key]; if (!d) return null;
+    const c = newClient(d.name);
+    c.site = d.site; c.intake.expansion = d.expansion; c.intake.wanNote = d.wanNote; c.intake.existing = d.existing;
+    Object.assign(c.intake.counts, d.counts); Object.assign(c.intake.req, d.req); Object.assign(c.intake, d.site_answers);
+    c.intake.remote = { on: !!d.remote.on, count: d.remote.count, reach: null };
+    return applyIntake(c);
+  }
+
   // Client -> the project object Calc.plan and Fmt expect.
   const toProject = client => Object.assign({}, client, { existing: parseExisting(client.intake && client.intake.existing) });
 
-  return { GROWTH, EXPANSION_LABEL, VLAN_IDS, COUNT_FIELDS, OPTIONAL, MAX_OTHERS, SAMPLES, migrate, newIntake, newClient, parseExisting, pickParent, suggestNetworks, applyIntake, sampleClient, toProject };
+  return { GROWTH, EXPANSION_LABEL, VLAN_IDS, COUNT_FIELDS, OPTIONAL, MAX_OTHERS, SAMPLES, DEMOS, DEMO_KEYS, migrate, newIntake, newClient, parseExisting, pickParent, suggestNetworks, applyIntake, sampleClient, demoClient, toProject };
 }));

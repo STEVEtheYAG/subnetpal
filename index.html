@@ -35,6 +35,10 @@
         <select id="clientSel" aria-label="Client"></select>
         <button id="btnNew" class="btn sm" type="button">New</button>
       </div>
+      <div class="btnrow demorow">
+        <button id="btnDemo" class="btn sm primary" type="button" title="25-person accountancy: guest Wi-Fi, printers, remote staff, IoT">Load demo client</button>
+        <button id="btnDemo2" class="btn sm" type="button" title="Dental clinic: isolated card terminals, dual WAN, site-to-site VPN">Clinic demo</button>
+      </div>
       <details class="manage">
         <summary>Duplicate, delete or add a sample</summary>
         <div class="btnrow">
@@ -42,6 +46,20 @@
           <button id="btnDel" class="btn sm danger" type="button">Delete</button>
         </div>
         <div id="samples" class="btnrow"></div>
+      </details>
+
+      <details class="more contractbox" id="contractbox">
+        <summary>Import from contract</summary>
+        <p class="hint"><b>Stays on this device.</b> The contract text is read here in the browser only: it is not saved, not uploaded and not sent anywhere, and it is cleared when you apply or cancel. Paste text or choose a .txt file. PDF and Word files are not supported yet: copy the text out of them and paste it here.</p>
+        <textarea id="contract-text" rows="6" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the contract text here"></textarea>
+        <div class="btnrow">
+          <label class="btn sm filebtn" for="contract-file">Choose .txt file</label>
+          <input type="file" id="contract-file" accept=".txt,text/plain" hidden>
+          <button id="btnContractScan" class="btn sm primary" type="button">Find intake fields</button>
+          <button id="btnContractClear" class="btn sm" type="button">Clear</button>
+        </div>
+        <p id="contract-msg" class="hint" role="status"></p>
+        <div id="contract-review"></div>
       </details>
 
       <label class="fld">Client name
@@ -74,6 +92,25 @@
           <label class="check"><input type="checkbox" id="rem-on"> Remote staff (IPsec VPN)</label>
           <input class="cnt" id="rem-count" inputmode="numeric" autocomplete="off" placeholder="How many?" aria-label="Number of remote staff" hidden>
         </div>
+      </div>
+
+      <div class="fld">About the site (steers the suggested policies)
+        <label class="fld">Industry
+          <select id="i-industry"><option value="">Not stated (treated as office)</option><option value="office">Office</option><option value="clinic">Clinic</option><option value="school">School</option><option value="retail">Retail</option></select>
+        </label>
+        <label class="fld">Servers
+          <select id="i-serverswhere"><option value="">Not stated</option><option value="onprem">On-site servers</option><option value="cloud">Cloud only</option></select>
+        </label>
+        <label class="fld">Wi-Fi
+          <select id="i-wifi"><option value="">Not stated</option><option value="fortiap">FortiAP (managed by the FortiGate)</option><option value="thirdparty">Third-party access points</option></select>
+        </label>
+        <label class="fld">Phones (VoIP)
+          <select id="i-voip"><option value="">Not stated</option><option value="hosted">Hosted (cloud) phone system</option><option value="onprem">On-site phone system (PBX)</option></select>
+        </label>
+        <label class="check"><input type="checkbox" id="i-dualwan"> Dual WAN (two internet lines)</label>
+        <label class="check"><input type="checkbox" id="i-sitevpn"> Site-to-site VPN</label>
+        <label class="check"><input type="checkbox" id="i-webfilter"> Web filtering (FortiGuard categories) on internet policies</label>
+        <p class="hint">Printers and card payments are ticked in the list above.</p>
       </div>
 
       <details id="more" class="more">
@@ -154,6 +191,12 @@
           <button id="btnResetPol" class="btn sm" type="button">Reset to defaults</button>
         </div>
         <p id="parsemsg" class="hint" role="status"></p>
+        <details class="more2 cardlib" id="cardlibbox"><summary id="cardlibsum">Policy library</summary>
+          <p class="hint" id="sugline"></p>
+          <ul class="sugnotes" id="sugnotes"></ul>
+          <p class="hint">Cards that fit this plan. Baseline rules are always on. Tick a recommended or optional card to add its rules, untick to remove them.</p>
+          <div id="cardlist"></div>
+        </details>
         <div id="pollist"></div>
         <div class="polfinal"><b>Last rule:</b> deny everything else (always applied at the bottom).</div>
         <p id="polnote" class="hint warnbox"></p>
@@ -227,6 +270,10 @@
 <script src="calc.js"></script>
 <script src="calc6.js"></script>
 <script src="access.js"></script>
+<script src="contract.js"></script>
+<script src="webcat.js"></script>
+<script src="cards.js"></script>
+<script src="suggest.js"></script>
 <script src="remote.js"></script>
 <script src="policy.js"></script>
 <script src="intake.js"></script>

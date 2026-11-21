@@ -1,8 +1,8 @@
 /* SubnetPal - exporters (CSV, Markdown, text, FortiOS, client handover doc). Pure, no DOM. window.Fmt / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./policy.js'), require('./remote.js'));
-  else root.Fmt = factory(root.Access, root.Policy, root.Remote);
-}(typeof self !== 'undefined' ? self : this, function (Access, Policy, Remote) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./policy.js'), require('./remote.js'), require('./webcat.js'));
+  else root.Fmt = factory(root.Access, root.Policy, root.Remote, root.Webcat);
+}(typeof self !== 'undefined' ? self : this, function (Access, Policy, Remote, Webcat) {
   'use strict';
 
   const FORTI_NOTE = 'Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules.';
@@ -10,8 +10,8 @@
   const ALLOWACCESS = { LAN: 'ping https ssh', Mgmt: 'ping https ssh', Guest: 'ping', DMZ: 'ping', WAN: 'ping', Transit: 'ping', '': 'ping https ssh' };
   const FORTI_ROLE = { LAN: 'lan', Guest: 'lan', Mgmt: 'lan', DMZ: 'dmz', WAN: 'wan', Transit: 'undefined', Loopback: 'undefined', '': 'lan' };
   const EXP_LABEL = { none: 'None', soon: 'Soon', big: 'Big growth' };
-  const COUNT_LABEL = { staff: 'staff', wired: 'wired devices', wifi: 'Wi-Fi devices', voice: 'phones', cameras: 'cameras', iot: 'IoT devices', servers: 'servers', guest: 'guest users', dmz: 'public servers (DMZ)' };
-  const REQ_LABEL = { guest: 'Guest Wi-Fi separation', dmz: 'DMZ / public servers', voice: 'Voice VLAN', cameras: 'Cameras VLAN', iot: 'IoT VLAN' };
+  const COUNT_LABEL = { staff: 'staff', wired: 'wired devices', wifi: 'Wi-Fi devices', voice: 'phones', cameras: 'cameras', iot: 'IoT devices', servers: 'servers', guest: 'guest users', dmz: 'public servers (DMZ)', printers: 'printers', pos: 'card terminals' };
+  const REQ_LABEL = { guest: 'Guest Wi-Fi separation', dmz: 'DMZ / public servers', voice: 'Voice VLAN', cameras: 'Cameras VLAN', iot: 'IoT VLAN', printers: 'Printers VLAN', pos: 'Card payments (POS) isolated' };
 
   const rng = (a, b) => (a && b ? `${a} - ${b}` : '');
   const usable = a => (a.prefix === 32 ? a.firstUsable : rng(a.firstUsable, a.lastUsable));
@@ -96,31 +96,52 @@
 
   // Website filter + application control profiles for the policies that ask for them. Returns Map(policy id -> { web, app } profile names).
   function profileCLI(L, pols) {
-    const out = new Map(), webs = [], apps = [];
+    const out = new Map(), webs = [], apps = [], wsig = new Map();
     pols.forEach(p => {
-      if (!p.web && !p.app) return;
+      const wf = p.webf && Webcat.entries(p.webf.groups).length ? p.webf : null;  // a profile that allows everything adds nothing
+      if (p.action !== 'accept' || (!p.web && !p.app && !wf)) return;            // profiles only ever attach to Accept policies
       const e = {}; out.set(p.id, e);
-      if (p.web) { e.web = 'SP_Web_' + (webs.length + 1); webs.push({ name: e.web, w: p.web }); }
+      if (p.web || wf) {                                                         // identical profiles are shared between policies
+        const sig = JSON.stringify([p.web || null, wf ? wf.groups : null]);
+        if (!wsig.has(sig)) { const name = 'SP_Web_' + (webs.length + 1); wsig.set(sig, name); webs.push({ name, w: p.web, f: wf, used: [] }); }
+        e.web = wsig.get(sig); webs.find(x => x.name === e.web).used.push(p.name);
+      }
       if (p.app) { e.app = 'SP_App_' + (apps.length + 1); apps.push({ name: e.app, a: p.app }); }
     });
     if (webs.length) {
-      L.push('', '# Website filtering. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. Category IDs are unverified.');
-      L.push('config webfilter urlfilter');
-      webs.forEach(({ name, w }, i) => {
-        const sites = String(w.sites || '').split(/[\s,;]+/).map(s => s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim()).filter(Boolean);
-        const act = w.mode === 'allow' ? 'allow' : 'block';
-        L.push(`    edit ${101 + i}`, `        set name ${q(name + '_urls')}`, '        config entries');
-        sites.forEach((s, k) => L.push(`            edit ${k + 1}`, `                set url ${q(s)}`, '                set type simple', `                set action ${act}`, '            next'));
-        if (w.mode === 'allow') L.push(`            edit ${sites.length + 1}`, '                set url "*"', '                set type wildcard', '                set action block', '            next');
-        L.push('        end', '    next');
+      L.push('', '# Website filtering. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. FortiGuard category IDs are UNVERIFIED (from memory): check each ID against its name before applying.');
+      L.push('# Web filtering needs a FortiGuard licence. Blocking HTTPS sites by category with certificate inspection is done from the site name; a block or warning page may only display with deep inspection (unverified).');
+      if (webs.some(x => x.w)) {
+        L.push('config webfilter urlfilter');
+        webs.forEach(({ name, w }, i) => {
+          if (!w) return;
+          const sites = String(w.sites || '').split(/[\s,;]+/).map(s => s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim()).filter(Boolean);
+          const act = w.mode === 'allow' ? 'allow' : 'block';
+          L.push(`    edit ${101 + i}`, `        set name ${q(name + '_urls')}`, '        config entries');
+          sites.forEach((s, k) => L.push(`            edit ${k + 1}`, `                set url ${q(s)}`, '                set type simple', `                set action ${act}`, '            next'));
+          if (w.mode === 'allow') L.push(`            edit ${sites.length + 1}`, '                set url "*"', '                set type wildcard', '                set action block', '            next');
+          L.push('        end', '    next');
+        });
+        L.push('end', '');
+      }
+      // One map of every category ID used, so each ID can be checked against its name once.
+      const idMap = new Map(), notes = new Set();
+      webs.forEach(({ w, f }) => {
+        (w ? (w.cats || []).filter(Boolean) : []).forEach(c => idMap.set(Number(c), (Policy.WEB_CATS.find(x => x.id === Number(c)) || {}).l || 'category'));
+        if (f) { Webcat.entries(f.groups).forEach(x => idMap.set(x.id, x.name)); Webcat.notes(f.groups).forEach(n => notes.add(n)); }
       });
-      L.push('end', '', 'config webfilter profile');
-      webs.forEach(({ name, w }, i) => {
-        L.push(`    edit ${q(name)}`, '        config web', `            set urlfilter-table ${101 + i}`, '        end');
-        const cats = (w.cats || []).filter(Boolean);
-        if (cats.length) {
+      if (idMap.size) L.push('# Category IDs used below and the category each one is MEANT to be (UNVERIFIED, from memory): ' + Array.from(idMap).sort((a, b) => a[0] - b[0]).map(([id, n]) => `${id} ${n}`).join(', ') + '.');
+      notes.forEach(n => L.push('# ' + n));
+      webs.forEach(({ name, w, f, used }) => L.push(`# ${name} (${f ? Webcat.label(f.preset) + ': ' + Webcat.summary(f.groups) : 'your own site and category lists'}). Used by: ${used.join(', ')}.`));
+      L.push('config webfilter profile');
+      webs.forEach(({ name, w, f }, i) => {
+        L.push(`    edit ${q(name)}`);
+        if (w) L.push('        config web', `            set urlfilter-table ${101 + i}`, '        end');
+        const entries = (w ? (w.cats || []).filter(Boolean) : []).map(c => ({ id: Number(c), action: w.mode === 'allow' ? 'monitor' : 'block' }));
+        if (f) Webcat.entries(f.groups).forEach(x => { if (!entries.some(y => y.id === x.id)) entries.push(x); });
+        if (entries.length) {
           L.push('        config ftgd-wf', '            config filters');
-          cats.forEach((c, k) => L.push(`                edit ${k + 1}`, `                    set category ${c}`, `                    set action ${w.mode === 'allow' ? 'monitor' : 'block'}`, '                next'));
+          entries.forEach((x, k) => L.push(`                edit ${k + 1}`, `                    set category ${x.id}`, `                    set action ${x.action}`, '                next'));
           L.push('            end', '        end');
         }
         L.push('    next');
@@ -351,6 +372,13 @@
       ['Expected growth', `${EXP_LABEL[expKey] || EXP_LABEL.none} (${growth}% growth buffer)`],
       ['Existing ranges avoided', existing.length ? existing.join(', ') : 'None'],
     ];
+    const prof = [];
+    if (it.industry) prof.push(it.industry.charAt(0).toUpperCase() + it.industry.slice(1));
+    if (it.serversWhere) prof.push(it.serversWhere === 'cloud' ? 'cloud-only applications' : 'on-site servers');
+    if (it.wifi) prof.push(it.wifi === 'fortiap' ? 'FortiAP Wi-Fi' : 'third-party Wi-Fi');
+    if (it.voip) prof.push(it.voip === 'hosted' ? 'hosted phones' : 'on-site phone system');
+    if (it.dualWan) prof.push('dual WAN'); if (it.siteVpn) prof.push('site-to-site VPN');
+    if (prof.length) reqLines.push(['Site profile', prof.join(', ')]);
     const why = result.allocations.map(a => ({ name: a.name, cidr: a.cidr, text: Access.why(a, it) }));
     const m = Access.matrix(result.allocations);
     const cell = v => (v === 'self' ? '-' : v ? 'Yes' : 'No');

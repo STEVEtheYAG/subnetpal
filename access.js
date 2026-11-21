@@ -6,13 +6,15 @@
   'use strict';
 
   const ROLE_KIND = { LAN: 'lan', Guest: 'guest', DMZ: 'dmz', Mgmt: 'mgmt', WAN: 'wan', Transit: 'transit', Loopback: 'loopback', '': 'lan' };
-  const INTERNAL = ['mgmt', 'staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other'];
+  const INTERNAL = ['mgmt', 'staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos'];
   const NO_POLICY = ['transit', 'loopback', 'wan'];
 
   // Starter rules, by source kind: may it reach the internet, and which kinds may it initiate to.
+  // This drives the "who can talk to who" matrix. The firewall policies themselves come from the policy card
+  // library (cards.js); a test keeps the two in step for the default selection.
   const RULES = {
-    staff: { internet: true, to: ['servers', 'dmz'] },
-    lan: { internet: true, to: ['servers', 'dmz'] },
+    staff: { internet: true, to: ['servers', 'dmz', 'printers'] },
+    lan: { internet: true, to: ['servers', 'dmz', 'printers'] },
     servers: { internet: true, to: [] },
     voice: { internet: true, to: ['servers'] },
     cameras: { internet: false, to: ['servers'] },
@@ -20,7 +22,9 @@
     other: { internet: true, to: [] },
     guest: { internet: true, to: [] },
     dmz: { internet: true, to: [] },
-    mgmt: { internet: true, to: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'dmz'] },
+    printers: { internet: false, to: [] },
+    pos: { internet: true, to: [] },
+    mgmt: { internet: true, to: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'dmz'] },
   };
 
   const kindOf = a => a.kind || ROLE_KIND[a.role || ''] || 'lan';
@@ -44,23 +48,6 @@
     };
   }
 
-  // Ordered starter policies: explicit denies first, then allows.
-  // { name, action:'accept'|'deny', from: alloc, to: alloc | 'internet' | 'internal', services }
-  function policies(allocs) {
-    const nets = allocs.filter(hasPolicy);
-    const out = [];
-    const hasInternal = nets.some(isInternal);
-    if (hasInternal) {
-      nets.filter(n => ['guest', 'dmz'].indexOf(kindOf(n)) >= 0).forEach(n =>
-        out.push({ name: `${n.name} to internal (block)`, action: 'deny', from: n, to: 'internal', services: ['ALL'] }));
-    }
-    nets.forEach(f => {
-      if (internetAllowed(f)) out.push({ name: `${f.name} to internet`, action: 'accept', from: f, to: 'internet', services: kindOf(f) === 'guest' ? ['DNS', 'HTTP', 'HTTPS'] : ['ALL'] });
-      nets.forEach(t => { if (allowed(f, t) === true) out.push({ name: `${f.name} to ${t.name}`, action: 'accept', from: f, to: t, services: ['ALL'] }); });
-    });
-    return out;
-  }
-
   const n0 = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; };
 
   // One plain-English line tying a network to the client's need.
@@ -75,6 +62,8 @@
       case 'voice': return has ? `Separate voice VLAN for ${n0(c.voice)} IP phones so call traffic can be prioritised and kept apart from other devices.` : 'Voice VLAN for IP phones.';
       case 'cameras': return has ? `Cameras VLAN for ${n0(c.cameras)} cameras, kept off the staff network and allowed to reach the recorder on the servers network only.` : 'Cameras VLAN.';
       case 'iot': return has ? `IoT VLAN for ${n0(c.iot)} smart or embedded devices, isolated so a compromised device cannot reach staff or servers.` : 'IoT VLAN.';
+      case 'printers': return has && n0(c.printers) ? `Printers VLAN for ${n0(c.printers)} network printers and copiers. Staff can print to them, but the printers cannot start connections to anything else.` : 'Printers VLAN. Staff can print, printers cannot reach other networks.';
+      case 'pos': return has && n0(c.pos) ? `Card payment network for ${n0(c.pos)} terminals, isolated from staff, guests and servers to keep card data out of scope as far as possible. Only the payment provider is reachable.` : 'Card payment (POS) network, isolated from everything else.';
       case 'other': return `Custom device pool "${a.name}" (${a.hosts} planned), kept on its own VLAN with internet access only.`;
       case 'guest': return has ? `Guest Wi-Fi separation requested: ${n0(c.guest)} guest users get internet access only, with no route to internal systems.` : 'Guest network with internet-only access.';
       case 'dmz': return has ? `DMZ for ${n0(c.dmz)} public-facing server${n0(c.dmz) === 1 ? '' : 's'}, isolated so a compromise cannot reach the internal network.` : 'DMZ for public-facing servers.';
@@ -84,5 +73,5 @@
     }
   }
 
-  return { ROLE_KIND, INTERNAL, RULES, kindOf, hasPolicy, isInternal, allowed, internetAllowed, matrix, policies, why };
+  return { ROLE_KIND, INTERNAL, RULES, kindOf, hasPolicy, isInternal, allowed, internetAllowed, matrix, why };
 }));

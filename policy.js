@@ -1,8 +1,8 @@
 /* SubnetPal - firewall policy model: defaults from the plan, offline tagline parser, ordering. Pure, no DOM. window.Policy / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'));
-  else root.Policy = factory(root.Access);
-}(typeof self !== 'undefined' ? self : this, function (Access) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./cards.js'), require('./suggest.js'), require('./webcat.js'));
+  else root.Policy = factory(root.Access, root.Cards, root.Suggest, root.Webcat);
+}(typeof self !== 'undefined' ? self : this, function (Access, Cards, Suggest, Webcat) {
   'use strict';
 
   const NOTE = 'Generated, untested. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production.';
@@ -26,21 +26,57 @@
   const uid = () => 'p' + Math.random().toString(36).slice(2, 8);
   const blankProfile = () => ({ mode: '' });
   const mkPolicy = o => Object.assign({
-    id: uid(), name: '', src: '', dst: 'internet', service: 'ALL', action: 'accept', nat: false, log: true,
-    web: { mode: '', sites: '', cats: [] }, app: { mode: '', cats: [] },
+    id: uid(), card: '', name: '', src: '', dst: 'internet', service: 'ALL', action: 'accept', nat: false, log: true,
+    web: { mode: '', sites: '', cats: [] }, app: { mode: '', cats: [] }, webf: null,
   }, o);
   const dstLabel = p => (p.dst === 'internet' ? 'internet' : p.dst === 'internal' ? 'internal' : p.dst);
   const policyName = p => p.name || `${p.src} to ${dstLabel(p)}${p.action === 'deny' && p.dst === 'internal' ? ' (block)' : ''}`;
 
-  // Sensible defaults: the access rules for this plan, as editable policies.
-  function defaults(allocs) {
-    return Access.policies(allocs || []).map(p => mkPolicy({
-      name: p.name, src: p.from.name, dst: p.to === 'internet' || p.to === 'internal' ? p.to : p.to.name,
-      service: p.services.join(','), action: p.action, nat: p.to === 'internet' && p.action === 'accept', log: true,
-    }));
+  // What the card library needs from a saved client: the intake answers and the engineer's card switches.
+  // The suggestion engine picks each card's tier from the intake answers, so the card context carries its result.
+  function cardCtx(project, allocs) {
+    const intake = project && project.intake;
+    return { intake, toggles: project && project.pol && project.pol.toggles, sel: allocs ? Suggest.run(allocs, intake).sel : null, webFilter: !!(intake && intake.webFilter) };
+  }
+
+  // Sensible defaults: the policy cards that suit this plan, as editable policies. ctx: { intake, toggles, sel } (all optional).
+  function defaults(allocs, ctx) {
+    return Cards.build(allocs || [], ctx).map(mkPolicy);
   }
   // Edited list wins; otherwise the defaults follow the plan.
-  const effective = (project, allocs) => (project && project.pol && project.pol.edited ? project.pol.list : defaults(allocs));
+  const effective = (project, allocs) => (project && project.pol && project.pol.edited ? project.pol.list : defaults(allocs, cardCtx(project, allocs)));
+
+  // The library for this plan as the Policies view shows it. Once the list is edited, a card counts as "on" when its policies are in the list.
+  function cardView(project, allocs) {
+    const lib = Cards.library(allocs || [], cardCtx(project, allocs || []));
+    if (project && project.pol && project.pol.edited) {
+      const have = new Set((project.pol.list || []).map(p => p.card).filter(Boolean));
+      lib.forEach(e => { if (e.card.type === 'policy') e.on = have.has(e.card.id); });
+    }
+    return lib;
+  }
+
+  // Web filter profile on one policy (accept policies only use it). preset '' removes it; changing one group makes the profile "custom".
+  function setWebPreset(p, preset, industry) { p.webf = preset && Webcat.PRESETS[preset] ? Webcat.profile(preset, industry || 'office') : null; }
+  function setWebGroup(p, group, action) {
+    if (Webcat.GROUP_IDS.indexOf(group) < 0 || !Webcat.ACTIONS.some(a => a.v === action)) return;
+    p.webf = { preset: 'custom', groups: Webcat.normGroups(p.webf && p.webf.groups ? p.webf.groups : null) };
+    p.webf.groups[group] = action;
+  }
+
+  // Switch one card on or off in a list the engineer has already edited: remove its policies, or add them in the right place.
+  function setCardInList(list, id, on, allocs, ctx) {
+    const rest = list.filter(p => p.card !== id);
+    if (!on) return rest;
+    const add = Cards.policiesFor(id, allocs, ctx).map(mkPolicy);
+    const card = Cards.byId(id);
+    if (card && (card.exception || card.action === 'deny')) { // above the allows: after the last exception (or deny) already there
+      let at = 0; rest.forEach((p, i) => { const c = Cards.byId(p.card); if (p.action === 'deny' || (c && c.exception)) at = i + 1; });
+      if (card.exception) at = 0;
+      rest.splice(at, 0, ...add); return rest;
+    }
+    return rest.concat(add);
+  }
 
   // Names usable as a source / destination in the dropdowns.
   const policyNets = allocs => (allocs || []).filter(Access.hasPolicy).map(a => a.name);
@@ -55,6 +91,8 @@
     iot: ['iot', 'smart devices'],
     dmz: ['dmz', 'public servers'],
     mgmt: ['management', 'mgmt', 'admin network'],
+    printers: ['printers', 'printer', 'copiers'],
+    pos: ['pos', 'tills', 'card terminals', 'card machines', 'payment terminals'],
   };
   const INTERNET_ALIASES = ['the internet', 'internet', 'wan', 'outside'];
   const SERVICE_WORDS = {
@@ -144,13 +182,14 @@
       const from = by.get(p.src), to = p.dst === 'internet' || p.dst === 'internal' ? p.dst : by.get(p.dst);
       if (!from || !to) { skipped.push(policyName(p)); return; }
       pols.push({
-        id: p.id, name: policyName(p), action: p.action === 'deny' ? 'deny' : 'accept', from, to,
+        id: p.id, card: p.card || '', name: policyName(p), action: p.action === 'deny' ? 'deny' : 'accept', from, to,
         services: String(p.service || 'ALL').split(',').map(s => s.trim()).filter(Boolean), nat: !!p.nat, log: p.log !== false,
         web: p.web && p.web.mode ? p.web : null, app: p.app && p.app.mode ? p.app : null,
+        webf: p.action !== 'deny' && p.webf && p.webf.groups ? { preset: p.webf.preset || 'custom', groups: Webcat.normGroups(p.webf.groups) } : null,
       });
     });
     return { pols, skipped };
   }
 
-  return { NOTE, SERVICES, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, policyNets, parse, apply, resolve, blankProfile };
+  return { NOTE, SERVICES, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile };
 }));
