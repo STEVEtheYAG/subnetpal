@@ -618,15 +618,17 @@
     box.innerHTML = tiles.map((t, k) => {
       const row = Math.floor(k / cols), pos = k % cols, rtl = row % 2 === 1, col = rtl ? cols - pos : pos + 1;
       const end = pos === cols - 1, dir = k === total - 1 ? '' : (cols === 1 || end) ? 'd' : rtl ? 'l' : 'r';
-      return `<div class="snk ${dir}" style="grid-row:${row + 1};grid-column:${col}">${t}</div>`;
+      const sc = (1 - 0.22 * k / Math.max(1, total - 1)).toFixed(3);   // tiles shrink down the snake: 1.00 for rule 1 to 0.78 for the Implicit deny
+      return `<div class="snk ${dir}" style="grid-row:${row + 1};grid-column:${col};--s:${sc}">${t}</div>`;
     }).join('');
     box.style.setProperty('--cols', cols);
   }
   function polTile(p, i, nets) {
     const deny = p.action === 'deny';
     return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-pol="${i}">
-      <div class="ncsum"><span class="nt"><span class="swatch" style="background:${deny ? 'var(--bad)' : 'var(--ok)'}"></span><b>${i + 1}. ${esc(Policy.policyName(p))}</b><span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span><span class="chev" aria-hidden="true">›</span></span>
-      <dl class="nf"><div><dt>From</dt><dd>${esc(p.src)}</dd></div><div><dt>To</dt><dd>${esc(p.dst === 'internet' ? 'Internet' : p.dst === 'internal' ? 'All internal networks' : p.dst)}</dd></div><div><dt>Service</dt><dd class="mono">${esc(polSvcs(p).join(', '))}</dd></div></dl></div></div>`;
+      <div class="ncsum"><span class="nt"><button type="button" class="phandle" data-phandle aria-label="Drag to reorder policy ${i + 1}" title="Drag to reorder">&#8942;&#8942;</button><span class="swatch" style="background:${deny ? 'var(--bad)' : 'var(--ok)'}"></span><b>${i + 1}. ${esc(Policy.policyName(p))}</b><span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span><button type="button" class="pdelx" data-pdel aria-label="Delete policy ${i + 1}" title="Delete">&times;</button></span>
+      <dl class="nf"><div><dt>From</dt><dd>${esc(p.src)}</dd></div><div><dt>To</dt><dd>${esc(p.dst === 'internet' ? 'Internet' : p.dst === 'internal' ? 'All internal networks' : p.dst)}</dd></div><div><dt>Service</dt><dd class="mono">${esc(polSvcs(p).join(', '))}</dd></div></dl></div>
+      <div class="pconf" hidden><b>Delete this policy?</b><span><button type="button" class="btn sm danger" data-pdelgo>Delete</button><button type="button" class="btn sm" data-pdelno>Cancel</button></span></div></div>`;
   }
   // The popup body, laid out like the hand-drawn FortiGate policy table.
   function polPopHtml(p, i, n, nets, libMap, editOpen) {
@@ -742,6 +744,7 @@
     pop.addEventListener('click', e => {
       const b = e.target.closest('[data-pact]'); if (!b) return;
       const i = Number(b.closest('.popol').dataset.pi), a = b.dataset.pact; let j = i;
+      if (a === 'del' && !b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Delete?'; b.classList.add('danger'); setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '\u00d7'; b.classList.remove('danger'); } }, 3000); return; }
       edit(list => {
         if (a === 'del') list.splice(i, 1);
         else { j = a === 'up' ? i - 1 : i + 1; if (j >= 0 && j < list.length) { const x = list[i]; list[i] = list[j]; list[j] = x; } else j = i; }
@@ -750,8 +753,60 @@
       polOpen = j; rerender();
     });
     pop.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('pedit')) polEditOpen = e.target.open; }, true);
-    box.addEventListener('click', e => { const c = e.target.closest('[data-pol]'); if (c) openPol(Number(c.dataset.pol), c); });
+    const delPol = i => { edit(list => { list.splice(i, 1); }); renderPolicies(); renderSummaries(); toast('Policy deleted'); };
+    let justDragged = false;
+    box.addEventListener('click', e => {
+      if (justDragged) return;
+      const t = e.target, tile = t.closest('[data-pol]'); if (!tile) return;
+      const i = Number(tile.dataset.pol);
+      if (t.closest('[data-phandle]')) return;
+      if (t.closest('[data-pdel]')) { tile.querySelector('.pconf').hidden = false; tile.querySelector('[data-pdelno]').focus(); return; }
+      if (t.closest('[data-pdelno]')) { tile.querySelector('.pconf').hidden = true; return; }
+      if (t.closest('[data-pdelgo]')) { delPol(i); return; }
+      if (t.closest('.pconf')) return;
+      openPol(i, tile);
+    });
     box.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset && e.target.dataset.pol !== undefined) { e.preventDefault(); openPol(Number(e.target.dataset.pol), e.target); } });
+    // Drag to reorder: grab the dots on a tile (mouse or touch), drop on the tile whose place you want. Dropping on Implicit deny sends it to the end of the list.
+    let drag = null;
+    const scrollParent = el => { for (let n = el.parentElement; n; n = n.parentElement) { const o = getComputedStyle(n).overflowY; if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n; } return null; };
+    const endDrag = () => { if (!drag) return; drag.snk.style.transform = ''; drag.snk.classList.remove('dragging'); box.classList.remove('dragmode'); box.querySelectorAll('.dropt').forEach(x => x.classList.remove('dropt')); drag = null; };
+    box.addEventListener('pointerdown', e => {
+      const h = e.target.closest('[data-phandle]'); if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      const tile = h.closest('[data-pol]');
+      drag = { i: Number(tile.dataset.pol), id: e.pointerId, snk: tile.parentNode, x0: e.clientX, y0: e.clientY, sy: 0, on: false, over: -1, last: e };
+      try { h.setPointerCapture(e.pointerId); } catch (x) { /* older browsers */ }
+      e.preventDefault();
+    });
+    const dragAt = e => {
+      if (!drag.on) return;
+      const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      drag.snk.style.transform = `translate(${dx}px, ${dy}px)`;
+      const t = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest && x.closest('.snk')).find(x => x && x !== drag.snk && box.contains(x));
+      box.querySelectorAll('.dropt').forEach(x => x.classList.remove('dropt'));
+      drag.over = t ? Array.prototype.indexOf.call(t.parentNode.children, t) : -1;
+      if (t) t.classList.add('dropt');
+    };
+    box.addEventListener('pointermove', e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.last = e;
+      if (!drag.on) { if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return; drag.on = true; drag.snk.classList.add('dragging'); box.classList.add('dragmode'); const sp = scrollParent(box); drag.sp = sp; drag.sy0 = sp ? sp.scrollTop : window.scrollY; drag.scrolled = 0; }
+      // edge auto-scroll
+      const r = drag.sp ? drag.sp.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const dy = e.clientY < r.top + 50 ? -14 : e.clientY > r.bottom - 50 ? 14 : 0;
+      if (dy) { if (drag.sp) drag.sp.scrollTop += dy; else window.scrollBy(0, dy); }
+      dragAt(e);
+    });
+    box.addEventListener('pointerup', e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const was = drag.on, from = drag.i, n = Policy.effective(project(), result.allocations).length;
+      const to = drag.over < 0 ? -1 : Math.min(drag.over, n - 1);
+      endDrag();
+      if (!was) return;
+      justDragged = true; setTimeout(() => { justDragged = false; }, 0);
+      if (to >= 0 && to !== from) { edit(list => { const x = list.splice(from, 1)[0]; list.splice(to, 0, x); }); renderPolicies(); renderSummaries(); toast(`Moved to ${to + 1}`); }
+    });
+    box.addEventListener('pointercancel', endDrag);
     // Library cards: before the first edit this only records the switch (the list keeps following the plan); after it, the card's rules are added or removed.
     $('#cardlist').addEventListener('change', e => {
       const t = e.target; if (!t.dataset.card || !result.ok) return;

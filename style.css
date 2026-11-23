@@ -567,3 +567,24 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 .addpol { padding: 12px 14px 16px; }
 .addpol textarea { width: 100%; min-width: 0; }
 #tagline { width: 100%; }
+
+/* shrink down the snake, drag handle, delete x, confirm overlay */
+.snk { width: calc(var(--s, 1) * 100%); justify-self: center; align-self: start; z-index: 1; }
+.snk .ncsum { padding: calc(12px * var(--s, 1)); }
+.snk .nt b { font-size: calc(16px * var(--s, 1)); }
+.snk .nf > div, .snk .ntype { font-size: calc(14px * var(--s, 1)); }
+.snk .hint { font-size: calc(13px * var(--s, 1)); }
+.phandle, .pdelx { flex: none; border: 0; background: transparent; color: var(--mute); cursor: pointer; padding: 2px 6px; font-size: 18px; line-height: 1; border-radius: 8px; min-width: 28px; min-height: 28px; }
+.phandle { cursor: grab; touch-action: none; letter-spacing: -2px; user-select: none; }
+.phandle:hover, .pdelx:hover { background: var(--panel2); color: var(--text); }
+.pdelx:hover { color: var(--bad); }
+.ptile { position: relative; }
+.pconf { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--panel); border-radius: inherit; z-index: 2; text-align: center; padding: 8px; }
+.pconf[hidden] { display: none; }
+.pconf span { display: flex; gap: 8px; }
+.snk.dragging { z-index: 20; opacity: .9; cursor: grabbing; filter: drop-shadow(0 12px 18px #0006); transition: none; }
+.snk.dragging .ncard { box-shadow: 0 0 0 2px var(--accent-t); }
+.dragmode { user-select: none; }
+.dragmode .ncard:hover { transform: none; }
+.snk.dropt .ncard { outline: 2px dashed var(--accent-t); outline-offset: 3px; }
+@media (prefers-reduced-motion: no-preference) { .snk { transition: width .2s; } }

@@ -199,3 +199,9 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 - **Snake:** policy tiles run left to right, wrap, then run right to left, joined by arrows, so rule 1 (checked first) leads down to a final dashed **Implicit deny** tile (`SP_Final_deny`, always last, not editable). Columns: 3 wide, 2 medium, 1 on a phone (arrows point down). It redraws on resize.
 - **Add new policy:** the sentence box and the + Add policy button are gone from the page. **+ Add new policy** opens the shared popup with the sentence box (Build policies from this: new rules go at the top, popup closes, a toast says how many) and **Or add a blank policy** (added above the final deny, opens straight in its editor). Reset to defaults stays on the page.
 - sw.js cache is v27.
+
+## Reorder, delete and shrink (policy snake)
+- **Drag to reorder:** grab the dots on a tile (mouse or touch, pointer events) and drop it on the tile whose place you want; the list renumbers. Dropping on Implicit deny moves it to the end of the list (above the deny). The deny tile cannot be dragged. The popup still has up/down. The first reorder freezes the list as your own (same as any edit); Reset to defaults undoes it. Edge auto-scroll while dragging.
+- **Delete:** an × on each tile asks "Delete this policy?" on the tile (Delete / Cancel). In the popup the × needs a second click ("Delete?").
+- **Shrink:** tiles scale from 100% (rule 1) down to 78% (Implicit deny) to show order of activation; text stays readable.
+- sw.js cache is v28.
