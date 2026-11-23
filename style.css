@@ -11,9 +11,9 @@
 @media screen {
 :root[data-theme="dark"] {
   --page: #0b0b12; --bg: #14141c; --panel: #1d1d28; --panel2: #262634; --line: #31313f; --text: #ececf4; --mute: #a0a0b6;
-  --accent: #6d5ef0; --accent2: #a855f7; --accent-t: #b0a6ff; --accent-ink: #ffffff; --ok: var(--ok); --warn: var(--warn); --bad: #ff7b7b;
-  --ok-line: var(--ok-line); --accent-line: #3b3a7a; --warn-bg: var(--warn-bg); --warn-line: var(--warn-line); --warn-ink: var(--warn-ink);
-  --bad-bg: #2a171c; --bad-line: var(--bad-line); --bad-ink: var(--bad-ink); --hatch1: #1c1c27; --hatch2: #2a2a38; --hover: var(--hover); --toast: #2e2e3f; --mark: var(--mark);
+  --accent: #6d5ef0; --accent2: #a855f7; --accent-t: #b0a6ff; --accent-ink: #ffffff; --ok: #4ade80; --warn: #f5b94a; --bad: #ff7b7b;
+  --ok-line: #1f5a38; --accent-line: #3b3a7a; --warn-bg: #2a2210; --warn-line: #5a4513; --warn-ink: #f5d58a;
+  --bad-bg: #2a171c; --bad-line: #6b2a2a; --bad-ink: #ffb4b4; --hatch1: #1c1c27; --hatch2: #2a2a38; --hover: #6d5ef026; --toast: #2e2e3f; --mark: #6b5a12;
   --shadow: 0 8px 30px rgba(0, 0, 0, .35); --shadow-up: 0 14px 34px rgba(0, 0, 0, .5);
   color-scheme: dark;
 }
@@ -529,3 +529,27 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
   #sidebody > * { break-inside: avoid; margin: 0 0 12px; }
 }
 @media (max-width: 480px) { .sidebtn { padding: 0 12px; font-size: 13px; gap: 6px; } }
+
+/* Policy tiles + popup (table laid out like the FortiGate policy form) */
+.ptile.deny { border-left: 4px solid var(--bad); } .ptile:not(.deny) { border-left: 4px solid var(--ok); }
+.ptile.bad { outline: 1px solid var(--warn); }
+.ntype.pallow { color: var(--ok); border-color: var(--ok-line); } .ntype.pdeny { color: var(--bad); border-color: var(--bad-line); }
+.popol { padding: 12px 14px 16px; min-width: 0; }
+.ptable { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 2px solid var(--accent-t); border-radius: 12px; overflow: hidden; margin: 10px 0; }
+.pcell { display: grid; gap: 2px; align-content: start; padding: 10px 12px; border: 1px solid var(--line); margin: -1px 0 0 -1px; min-width: 0; }
+.pname, .pnat { grid-column: 1 / -1; }
+.plab { font-size: 12px; font-weight: 700; color: var(--accent-t); text-transform: uppercase; letter-spacing: .03em; }
+.phint { font-size: 12px; color: var(--mute); }
+.pmain { overflow-wrap: anywhere; font-size: 16px; }
+.psub { font-size: 12px; color: var(--mute); overflow-wrap: anywhere; }
+.pchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.schip { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px; border: 1.5px solid var(--warn); color: var(--warn); border-radius: 6px; background: var(--panel2); }
+.pact.allow .pmain { color: var(--ok); } .pact.deny .pmain { color: var(--bad); }
+.pnat .pmain { font-size: 16px; }
+.plegend { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px 12px; font-size: 13px; color: var(--mute); margin: 4px 0 12px; }
+.plegend .plab { grid-column: 1 / -1; }
+.lg.used { color: var(--text); }
+.pedit { margin: 8px 0; }
+.pedit > summary { padding: 6px 0; }
+.polform { padding-top: 8px; }
+@media (max-width: 480px) { .ptable { grid-template-columns: minmax(0, 1fr); } }

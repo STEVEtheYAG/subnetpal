@@ -364,6 +364,7 @@
   function guideFor(key) {
     if (!result || !result.ok) return null;
     if (key === '__vpn') return Guide.vpn(result, project());
+    if (String(key).indexOf('pol:') === 0) { const i = Number(String(key).slice(4)), l = Policy.effective(project(), result.allocations); return l[i] ? { cli: polCli(i), alias: Policy.policyName(l[i]) } : null; }
     const i = result.allocations.findIndex(a => a.name === key);
     return i < 0 ? null : Guide.iface(result, project(), i);
   }
@@ -418,7 +419,7 @@
       $('#cardsw').style.background = color(Math.max(0, names.indexOf(a.name))); $('#cardtitle').textContent = a.name; $('#cardtype').textContent = typeOf(a);
       $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + dnsBox(a) + dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
     }
-    cardOpener = opener || null; $('#cardbody').scrollTop = 0;
+    cardOpener = opener || null; $('#cardbody').scrollTop = 0; dlg.dataset.kind = 'net'; polOpen = -1;
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
   }
   function closeCard() { const d = $('#carddlg'); if (d.close) d.close(); else d.removeAttribute('open'); if (cardOpener && document.contains(cardOpener)) cardOpener.focus(); }
@@ -575,10 +576,7 @@
     const web = p.web || { mode: '', sites: '', cats: [] }, app = p.app || { mode: '', cats: [] };
     const cat = (kind, list, sel) => list.map(c => `<label class="check small"><input type="checkbox" data-pcat="${kind}" value="${c.id}"${sel.indexOf(c.id) >= 0 || sel.indexOf(String(c.id)) >= 0 ? ' checked' : ''}> ${esc(c.l)}</label>`).join('');
     const mode = (sel, a, b) => `<option value=""${sel === '' ? ' selected' : ''}>Off</option><option value="allow"${sel === 'allow' ? ' selected' : ''}>${a}</option><option value="block"${sel === 'block' ? ' selected' : ''}>${b}</option>`;
-    return `<div class="polrow${miss(p.src) || miss(p.dst) ? ' bad' : ''}${p.action === 'deny' ? ' deny' : ''}" data-pi="${i}">
-      <div class="polhead"><b>${i + 1}. ${esc(Policy.policyName(p))}</b>
-        <span class="polbtns"><button type="button" class="btn sm" data-pact="up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" class="btn sm" data-pact="down" aria-label="Move down"${i === n - 1 ? ' disabled' : ''}>↓</button><button type="button" class="btn sm" data-pact="del" aria-label="Delete policy">×</button></span></div>
-      ${polCardHtml(p, libMap)}${polWebLine(p)}
+    return `<div class="polform">
       <div class="polgrid">
         <label>Source<select data-pf="src">${miss(p.src) ? o(p.src, '(not in plan) ' + p.src, true) : ''}${netOpts(p.src)}</select></label>
         <label>Destination<select data-pf="dst">${o('internet', 'Internet', p.dst === 'internet')}${o('internal', 'All internal networks', p.dst === 'internal')}${miss(p.dst) ? o(p.dst, '(not in plan) ' + p.dst, true) : ''}${netOpts(p.dst)}</select></label>
@@ -599,6 +597,71 @@
       </details>
     </div>`;
   }
+  // ---- policy tiles and popup (same dialog as the network cards) ----
+  const SVC_LEGEND = [['HTTPS', 'Secure web, TCP 443'], ['DNS', 'Name lookups, 53'], ['SMB', 'Windows file share, 445'], ['RDP', 'Remote desktop, 3389'], ['SSH', 'Secure command line, 22'], ['HTTP', 'Plain web traffic, 80'], ['PING', 'ICMP ("are you there")']];
+  const SVC_EXTRA = { SMTP: 'Email sending, 25', FTP: 'File transfer, 21', NTP: 'Time sync, UDP 123', SP_PRINT: 'Printing, TCP 9100, 631, 515' };
+  const polSvcs = p => String(p.service || 'ALL').split(',').map(s => s.trim()).filter(Boolean);
+  const polBad = (p, nets) => [p.src, p.dst].some(x => nets.indexOf(x) < 0 && x !== 'internet' && x !== 'internal');
+  // For a network name: its interface name (same rule as the CLI) and subnet, or null if it is not in the plan.
+  function polEnd(name, ph) {
+    if (name === 'internet') return { top: Fmt.WAN_IF, sub: 'the internet side', note: 'all' };
+    if (name === 'internal') return { top: 'any', sub: 'All internal networks', note: 'SP_INTERNAL' };
+    const al = result.allocations, i = al.findIndex(a => a.name === name);
+    return i < 0 ? null : { top: Fmt.ifaceNames(al, ph)[i], sub: name, note: al[i].cidr };
+  }
+  function polTile(p, i, nets) {
+    const deny = p.action === 'deny';
+    return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-pol="${i}">
+      <div class="ncsum"><span class="nt"><span class="swatch" style="background:${deny ? 'var(--bad)' : 'var(--ok)'}"></span><b>${i + 1}. ${esc(Policy.policyName(p))}</b><span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span><span class="chev" aria-hidden="true">›</span></span>
+      <dl class="nf"><div><dt>From</dt><dd>${esc(p.src)}</dd></div><div><dt>To</dt><dd>${esc(p.dst === 'internet' ? 'Internet' : p.dst === 'internal' ? 'All internal networks' : p.dst)}</dd></div><div><dt>Service</dt><dd class="mono">${esc(polSvcs(p).join(', '))}</dd></div></dl></div></div>`;
+  }
+  // The popup body, laid out like the hand-drawn FortiGate policy table.
+  function polPopHtml(p, i, n, nets, libMap, editOpen) {
+    const ph = (cur().ifName && String(cur().ifName).trim()) || 'PORT_CHANGE_ME';
+    const f = polEnd(p.src, ph), t = polEnd(p.dst, ph), deny = p.action === 'deny', svcs = polSvcs(p);
+    const cell = (label, hint, main, sub) => `<div class="pcell"><span class="plab">${label}</span><span class="phint">${hint}</span><b class="pmain">${main}</b>${sub ? `<span class="psub mono">${sub}</span>` : ''}</div>`;
+    const chips = svcs.map(x => `<span class="schip">${esc(x === 'ALL' ? 'ALL' : x)}</span>`).join('');
+    const used = svcs.filter(x => x !== 'ALL');
+    const legend = SVC_LEGEND.map(([k, v]) => [k, v]).concat(used.filter(x => SVC_EXTRA[x]).map(x => [x, SVC_EXTRA[x]]));
+    const natNote = deny ? 'Not used on a deny rule.' : p.nat ? 'Swaps the private address for a public one (the public address from your ISP).' : 'Off: private addresses stay as they are, normal between your own networks.';
+    return `<div class="popol${deny ? ' deny' : ''}" data-pi="${i}">
+      <div class="polhead"><span class="dim small">Policy ${i + 1} of ${n}${polBad(p, nets) ? ' · a network in this policy is not in the plan' : ''}</span>
+        <span class="polbtns"><button type="button" class="btn sm" data-pact="up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" class="btn sm" data-pact="down" aria-label="Move down"${i === n - 1 ? ' disabled' : ''}>↓</button><button type="button" class="btn sm" data-pact="del" aria-label="Delete policy">×</button></span></div>
+      ${polCardHtml(p, libMap)}${polWebLine(p)}
+      <div class="ptable">
+        <div class="pcell pname"><span class="plab">Name</span><b class="pmain">${esc(Policy.policyName(p))}</b><span class="phint">label the rule</span></div>
+        ${cell('Incoming interface', f ? 'where the traffic comes in' : '', esc(f ? f.top : p.src), f ? esc(f.sub) : '')}
+        ${cell('Outgoing interface', t ? (p.dst === 'internet' ? 'the internet side' : 'where the traffic goes out') : '', esc(t ? t.top : p.dst), t && p.dst !== 'internet' ? esc(t.sub) : '')}
+        ${cell('Source', 'who', esc(p.src), f && f.note ? esc(f.note) : '')}
+        ${cell('Destination', 'where to', esc(p.dst === 'internet' ? 'all' : p.dst === 'internal' ? 'All internal networks' : p.dst), t && p.dst !== 'internet' ? esc(t.note) : 'the internet')}
+        <div class="pcell"><span class="plab">Service</span><span class="phint">which kind of traffic?</span><span class="pchips">${chips}</span></div>
+        <div class="pcell pact ${deny ? 'deny' : 'allow'}"><span class="plab">Action</span><span class="phint">allow or deny</span><b class="pmain">${deny ? 'DENY' : 'ACCEPT'}</b></div>
+        <div class="pcell pnat"><span class="plab">NAT (network address translation)</span><b class="pmain">${p.nat && !deny ? 'ON' : 'OFF'}</b><span class="phint">${esc(natNote)}</span></div>
+      </div>
+      <div class="plegend"><span class="plab">Policy services</span>${legend.map(([k, v]) => `<span class="lg${svcs.indexOf(k) >= 0 ? ' used' : ''}"><span class="schip">${esc(k)}</span> ${esc(v)}</span>`).join('')}</div>
+      <details class="polmore pedit"${editOpen ? ' open' : ''}><summary>Edit this policy</summary>${polRowHtml(p, i, n, nets, libMap)}</details>
+      <div class="fg"><div class="fgtop"><b>Set it up on the FortiGate</b><button type="button" class="btn sm" data-opencli="pol:${i}">Open CLI</button></div>
+        <p class="hint">Policy &amp; Objects, then Firewall Policy, then Create new. Open CLI has this one policy with its address objects. Policies use edit 0: pasting twice makes duplicates. ${esc(Policy.NOTE)}</p></div>
+    </div>`;
+  }
+  let polOpen = -1, polEditOpen = false;
+  function openPol(i, opener) {
+    if (!result || !result.ok) return;
+    const list = Policy.effective(project(), result.allocations); const p = list[i]; if (!p) { closeCard(); return; }
+    const nets = Policy.policyNets(result.allocations), lib = Policy.cardView(project(), result.allocations), libMap = new Map(lib.map(e => [e.card.id, e]));
+    const dlg = $('#carddlg'), deny = p.action === 'deny', body = $('#cardbody'), keep = dlg.open ? body.scrollTop : 0;
+    polOpen = i; dlg.dataset.kind = 'pol';
+    $('#cardsw').style.background = deny ? 'var(--bad)' : 'var(--ok)'; $('#cardtitle').textContent = `${i + 1}. ${Policy.policyName(p)}`; $('#cardtype').textContent = deny ? 'DENY' : 'ACCEPT';
+    body.innerHTML = polPopHtml(p, i, list.length, nets, libMap, polEditOpen);
+    if (opener) cardOpener = opener;
+    body.scrollTop = keep;
+    if (!dlg.open) { if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', ''); }
+  }
+  // One policy as a standalone snippet: the full generator run with just this policy in the list.
+  function polCli(i) {
+    const p = project(), list = Policy.effective(p, result.allocations); if (!list[i]) return '';
+    return Fmt.toPolicyFortiOS(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName);
+  }
   function renderPolicyCli() { const t = text('polcli'); $('#pre-polcli').textContent = t || 'Fix the problem at the top to enable this output.'; }
   function renderPolicies() {
     const c = cur();
@@ -614,8 +677,9 @@
     $('#sugnotes').innerHTML = sg.notes.map(n => `<li>${esc(n)}</li>`).join('');
     $('#cardlist').innerHTML = cardListHtml(lib, !!(c.pol && c.pol.edited));
     $('#pollist').innerHTML = (c.pol && c.pol.edited ? '' : '<p class="hint">These are the default rules for this plan and follow it when the plan changes. Editing anything below keeps your own list.</p>') +
-      (list.length ? list.map((p, i) => polRowHtml(p, i, list.length, nets, libMap)).join('') : '<p class="hint">No policies. Everything is denied. Add one or reset to defaults.</p>');
+      (list.length ? '<p class="hint">Tap a policy to see and edit it.</p><div class="cards">' + list.map((p, i) => polTile(p, i, nets)).join('') + '</div>' : '<p class="hint">No policies. Everything is denied. Add one or reset to defaults.</p>');
     renderPolicyCli();
+    if (polOpen >= 0 && $('#carddlg').dataset.kind === 'pol' && $('#carddlg').open) openPol(polOpen);
   }
   function setPath(p, path, v) {
     if (path === 'web.mode' || path === 'web.sites') { p.web = p.web || { mode: '', sites: '', cats: [] }; p.web[path.split('.')[1]] = v; }
@@ -626,10 +690,11 @@
     if (path === 'dst' && v === 'internet' && p.action === 'accept') p.nat = true;
   }
   function bindPolicies() {
-    const box = $('#pollist');
+    const box = $('#pollist'), pop = $('#cardbody');
     const edit = fn => { const list = materialize(); fn(list); touch(); };
-    box.addEventListener('change', e => {
-      const t = e.target, row = t.closest('.polrow'); if (!row) return;
+    const rerender = () => { renderPolicies(); renderSummaries(); };
+    pop.addEventListener('change', e => {
+      const t = e.target, row = t.closest('.popol'); if (!row) return;
       const i = Number(row.dataset.pi);
       edit(list => {
         const p = list[i]; if (!p) return;
@@ -641,22 +706,26 @@
           const id = Number(t.value); o.cats = (o.cats || []).map(Number).filter(x => x !== id); if (t.checked) o.cats.push(id);
         }
       });
-      renderPolicies(); renderSummaries();
+      polEditOpen = true; rerender(); if (!$('#carddlg').open) return; openPol(i);
     });
-    box.addEventListener('input', e => {
+    pop.addEventListener('input', e => {
       const t = e.target; if (t.dataset.pf !== 'web.sites') return;
-      const i = Number(t.closest('.polrow').dataset.pi);
+      const i = Number(t.closest('.popol').dataset.pi);
       edit(list => { if (list[i]) setPath(list[i], 'web.sites', t.value); }); renderPolicyCli();
     });
-    box.addEventListener('click', e => {
+    pop.addEventListener('click', e => {
       const b = e.target.closest('[data-pact]'); if (!b) return;
-      const i = Number(b.closest('.polrow').dataset.pi), a = b.dataset.pact;
+      const i = Number(b.closest('.popol').dataset.pi), a = b.dataset.pact; let j = i;
       edit(list => {
         if (a === 'del') list.splice(i, 1);
-        else { const j = a === 'up' ? i - 1 : i + 1; if (j >= 0 && j < list.length) { const x = list[i]; list[i] = list[j]; list[j] = x; } }
+        else { j = a === 'up' ? i - 1 : i + 1; if (j >= 0 && j < list.length) { const x = list[i]; list[i] = list[j]; list[j] = x; } else j = i; }
       });
-      renderPolicies(); renderSummaries();
+      if (a === 'del') { rerender(); closeCard(); return; }
+      polOpen = j; rerender();
     });
+    pop.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('pedit')) polEditOpen = e.target.open; }, true);
+    box.addEventListener('click', e => { const c = e.target.closest('[data-pol]'); if (c) openPol(Number(c.dataset.pol), c); });
+    box.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset && e.target.dataset.pol !== undefined) { e.preventDefault(); openPol(Number(e.target.dataset.pol), e.target); } });
     // Library cards: before the first edit this only records the switch (the list keeps following the plan); after it, the card's rules are added or removed.
     $('#cardlist').addEventListener('change', e => {
       const t = e.target; if (!t.dataset.card || !result.ok) return;
