@@ -45,7 +45,7 @@
         <button id="btnDemo2" class="btn sm" type="button" title="Dental clinic: isolated card terminals, dual WAN, site-to-site VPN">Clinic demo</button>
       </div>
       <details class="manage">
-        <summary>Duplicate, delete or add a sample</summary>
+        <summary>Manage client ▾</summary>
         <div class="btnrow">
           <button id="btnDup" class="btn sm" type="button">Duplicate</button>
           <button id="btnDel" class="btn sm danger" type="button">Delete</button>
@@ -228,7 +228,7 @@
         <p class="sectionsum" id="sum-remote"></p>
         <p id="remoteoff" class="hint">Tick <b>Remote staff</b> in the intake on the left to plan VPN access.</p>
         <div id="remoteon" hidden>
-          <p><b>VPN type:</b> IPsec (IKEv2 dial-up)</p>
+          <p><b>VPN type:</b> IPsec dial-up (FortiClient, XAuth + pre-shared key; confirm IKE version on the VM)</p>
           <div id="vpnpool"></div>
           <h3>Remote staff can reach <span class="dim">(split tunnel: only these networks go through the VPN)</span></h3>
           <div id="reachlist"></div>
@@ -258,9 +258,22 @@
           <button type="button" data-out="text">Text</button>
         </div>
         <div id="out-forti">
-          <label class="fld">Interface name placeholder (used in the CLI)
+          <label class="fld">Parent port (replaces PORT_CHANGE_ME everywhere in the CLI and cards)
             <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
           </label>
+          <p class="hint warnbox"><b>Never use the port you are managing the firewall through.</b> Changing its address or VLAN mid-paste locks you out. Use a spare port.</p>
+          <details class="more2" id="preflight"><summary>Pre-flight checklist (read before pasting)</summary>
+            <ol class="fgl">
+              <li>Back up the config (System > Config > Backup).</li>
+              <li>Confirm which port you manage through, and do not use it as the parent port.</li>
+              <li>Check existing DHCP server IDs: <span class="mono">show system dhcp server</span> (this export uses IDs 101 and up).</li>
+              <li>Create the RemoteStaff group and users first, and set the real pre-shared key (replace PSK_CHANGE_ME).</li>
+              <li>Paste the VLAN interfaces before the policies.</li>
+              <li>Policies use <span class="mono">edit 0</span>: pasting them twice creates duplicates. Delete the old ones first.</li>
+              <li>Dual WAN: use the SD-WAN zone in policies, not wan1.</li>
+              <li>Have a rollback plan: console or out-of-band access, and a way to restore the backup.</li>
+            </ol>
+          </details>
           <p id="fortinote" class="hint warnbox"></p>
           <details class="more2" id="forticlibox"><summary>FortiOS CLI</summary>
             <button class="btn sm" type="button" data-copy="forti">Copy FortiOS CLI</button>

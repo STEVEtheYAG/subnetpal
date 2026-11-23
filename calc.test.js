@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v24'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v25'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v24/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v25/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1512,7 +1512,7 @@ test('guide: VPN card is Bob\'s 10-step checklist with the plan values, computed
   assert.ok(/DES, 3DES, MD5, SHA1/.test(rowOf('Phase 1 proposal').v) && rowOf('Diffie-Hellman groups').v === '20, 21' && /Leave what the wizard chose/.test(rowOf('IKE version').v));
   assert.strictEqual(rowOf('Log allowed traffic').v, 'All sessions'); assert.strictEqual(rowOf('Action / NAT').v, 'ACCEPT / NAT off');
   assert.strictEqual(v.table.rows.length, 6); assert.ok(v.table.rows.find(x => x.k === 'Logs recorded').approx);
-  assert.strictEqual(v.mistakes.length, 5);
+  assert.strictEqual(v.mistakes.length, 6);
   ['SP_VPN', 'aes256-sha256', 'RemoteStaff', 'PSK_CHANGE_ME', 'set dhgrp 20 21', 'set ipv4-start-ip ' + pool.first].forEach(t => assert.ok(v.cli.includes(t), t));
   assert.ok(!/set ike-version/.test(v.cli) && v.cli.includes(F.FORTI_NOTE) && !/unverified/.test(v.note));
 });
@@ -1590,6 +1590,54 @@ test('layout: network cards are tiles that open a modal (no dropdown), with Esc/
   assert.ok(!app.includes('<details class="ncard"') && !app.includes('openCards') && app.includes('openCard(') && app.includes('e.target === $(\'#carddlg\')') && app.includes('showModal'));
   assert.ok(app.includes("role=\"button\" tabindex=\"0\"") && app.includes("e.key === 'Enter'"), 'keyboard accessible tiles');
   assert.ok(css.includes('.dlgbody') && css.includes('overflow-y: auto') && /print[\s\S]*\.dlg/.test(css));
+});
+const fs = require('fs');
+test('Bob review: DHCP IDs start at 101 with a check note; no id 1 in the main CLI or card CLI', () => {
+  const { r, p } = demo('accountancy'), f = F.toFortiOS(r, p, '');
+  const dh = f.slice(f.indexOf('config system dhcp-server'));
+  assert.ok(/edit 101\b/.test(dh) && !/\n    edit 1\n/.test(dh.slice(0, dh.indexOf('config firewall address'))) && f.includes('show system dhcp server'));
+  const g = G.iface(r, p, r.allocations.findIndex(a => a.dhcpStart));
+  assert.ok(/edit 101\b/.test(g.cli) && !/edit 100\b/.test(g.cli) && g.cli.includes('show system dhcp server'));
+});
+test('Bob review: lock-out warning in every CLI and the parent port flows through; empty keeps PORT_CHANGE_ME', () => {
+  const { r, p } = demo('accountancy');
+  [F.toFortiOS(r, p, ''), F.toRemoteFortiOS(r, p, '')].forEach(t => assert.ok(/must NOT be the port you are managing/.test(t)));
+  assert.ok(F.toFortiOS(r, p, '').includes('PORT_CHANGE_ME') && !F.toFortiOS(r, p, 'port5').includes('PORT_CHANGE_ME') && F.toFortiOS(r, p, 'port5').includes('set interface "port5"'));
+  const ix = fs.readFileSync('index.html', 'utf8');
+  assert.ok(ix.includes('Parent port') && ix.includes('Never use the port you are managing') && ix.includes('Pre-flight checklist') && ix.includes('edit 0') && ix.includes('rollback'));
+});
+test('Bob review: remote CLI is consistent (IKEv1 + XAuth, no IKEv2 wording) and gives clients DNS', () => {
+  const { r, p } = demo('accountancy');
+  assert.ok(!/IKEv2 dial-up/.test(fs.readFileSync('index.html', 'utf8')) && !/IKEv2 dial-up/.test(fs.readFileSync('README.md', 'utf8')));
+  let t = F.toRemoteFortiOS(r, p, ''); assert.ok(/CONFIRM ON THE VM/.test(t) && /# set ipv4-dns-server1/.test(t));
+  const q = JSON.parse(JSON.stringify(p)), srv = r.allocations.find(a => /server/i.test(a.name)) || r.allocations[0];
+  q.dhcpDns = {}; r.allocations.forEach(a => { q.dhcpDns[a.name] = { server: '10.9.9.9', domain: 'corp.example.com' }; });
+  t = F.toRemoteFortiOS(r, q, ''); assert.ok(t.includes('set ipv4-dns-server1 10.9.9.9') && t.includes('set domain "corp.example.com"'));
+});
+test('Bob review: per-network DHCP DNS flows into the CLI, validates the address, and defaults to System DNS', () => {
+  const { r, p } = demo('accountancy'), a = r.allocations.find(x => x.dhcpStart), q = JSON.parse(JSON.stringify(p));
+  assert.ok(!F.toFortiOS(r, p, '').includes('dns-server1'));
+  q.dhcpDns = { [a.name]: { server: '10.0.0.10', domain: 'corp.local' } };
+  const f = F.toFortiOS(r, q, ''); assert.ok(f.includes('set dns-service specify') && f.includes('set dns-server1 10.0.0.10') && f.includes('set domain "corp.local"'));
+  q.dhcpDns = { [a.name]: { server: '10.0.0.999', domain: 'bad domain!' } };
+  assert.ok(!F.toFortiOS(r, q, '').includes('dns-server1') && !F.toFortiOS(r, q, '').includes('bad domain'));
+  q.dhcpDns = { [a.name]: { server: '10.0.0.10' } };
+  const gi = G.iface(r, q, r.allocations.indexOf(a)); assert.ok(gi.cli.includes('dns-server1 10.0.0.10') && gi.groups.some(g => g.rows.some(x => x.k === 'DNS server' && /Specify: 10\.0\.0\.10/.test(x.v))));
+  assert.ok(fs.readFileSync('app.js', 'utf8').includes('data-dns="server"'));
+});
+test('Bob review: POS wording matches the policy; dual WAN warns; web category warning is stronger; advice cautions present', () => {
+  const { r, p } = demo('clinic'), f = F.toFortiOS(r, p, '');
+  assert.ok(!/Only the payment provider is reachable/.test(fs.readFileSync('access.js', 'utf8')) && !/with access to the payment provider only/.test(fs.readFileSync('report.js', 'utf8')));
+  assert.ok(/DUAL WAN/.test(f) && f.includes('virtual-wan-link') && !/DUAL WAN/.test(F.toFortiOS(demo('accountancy').r, demo('accountancy').p, '')));
+  assert.ok(/show webfilter profile/.test(f) && /no IPS, antivirus or SSL inspection/.test(f) && /break OS and vendor updates/.test(f));
+  const h = n => G.iface(r, p, r.allocations.findIndex(a => new RegExp(n, 'i').test(a.name))).hints.join(' ');
+  assert.ok(/Management network only/.test(h('staff')) && /option 66/.test(h('voice|phone')) && /vendor updates/.test(h('server')));
+  assert.ok(/VPN-only/.test(G.vpn(demo('accountancy').r, demo('accountancy').p).mistakes.join(' ')));
+});
+test('Bob review: usability (demo collapses panel, short toast, Manage menu, reworded banner, IP at top of popup)', () => {
+  const app = fs.readFileSync('app.js', 'utf8'), ix = fs.readFileSync('index.html', 'utf8');
+  assert.ok(/setSideCollapsed\(true, true\); toast\('Demo loaded'\)/.test(app) && app.includes('1600') && !app.includes('Check this') && ix.includes('Manage client'));
+  assert.ok(app.indexOf("['Port / gateway IP', a.gateway") < app.indexOf('+ dnsBox(a) + dlRows(netRows(a))'));
 });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

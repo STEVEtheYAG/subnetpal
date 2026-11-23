@@ -67,7 +67,7 @@
     P('dmz-internet', 'Public servers to the internet', { src: ['dmz'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
       why: 'Public servers fetch updates and call out to cloud services.' }),
     P('pos-internet', 'Card terminals to the payment provider', { src: ['pos'], dst: 'internet', service: 'DNS,HTTPS,NTP', risk: 'medium', tags: ['pos-pci'],
-      why: 'The terminals only need to reach your payment provider, so that is all they can reach. Check with the provider whether it needs anything else.' }),
+      why: 'The terminals only need name lookups, secure web access and time sync, so that is all they get. It is not limited to one provider address yet: ask the provider which addresses it uses and narrow it once known.' }),
     P('mgmt-internet', 'Management to the internet', { src: ['mgmt'], dst: 'internet', tier: 'baseline', tags: ['management', 'wifi-ap'],
       why: 'Switches, access points and the firewall fetch firmware, licences and cloud-managed settings.' }),
     P('mgmt-admin', 'Management to internal networks', { src: ['mgmt'], dst: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'dmz'], tier: 'baseline', risk: 'high', tags: ['management'],

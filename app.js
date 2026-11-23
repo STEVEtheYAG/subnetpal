@@ -34,7 +34,7 @@
     let t = $('#toast');
     if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
     t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200);
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1600);
   }
 
   // ---------- clients ----------
@@ -71,8 +71,8 @@
       save();
     });
     // Demo clients (made-up): a whole intake in one tap. Each adds a new client, so nothing you have is overwritten.
-    $('#btnDemo').addEventListener('click', () => { addClient(Intake.demoClient('accountancy')); toast(Intake.DEMOS.accountancy.blurb); });
-    $('#btnDemo2').addEventListener('click', () => { addClient(Intake.demoClient('clinic')); toast(Intake.DEMOS.clinic.blurb); });
+    $('#btnDemo').addEventListener('click', () => { addClient(Intake.demoClient('accountancy')); setSideCollapsed(true, true); toast('Demo loaded'); });
+    $('#btnDemo2').addEventListener('click', () => { addClient(Intake.demoClient('clinic')); setSideCollapsed(true, true); toast('Demo loaded'); });
     $('#samples').addEventListener('click', e => { const b = e.target.closest('[data-sample]'); if (b) addClient(Intake.sampleClient(b.dataset.sample)); });
   }
 
@@ -184,7 +184,7 @@
     $('#btnDone').addEventListener('click', () => { setSideCollapsed(true); window.scrollTo(0, 0); });
   }
   // ---------- import from contract (text stays on this device: nothing here is saved, uploaded or logged) ----------
-  const CONF_LABEL = { high: 'High confidence', medium: 'Check this', low: 'Low confidence' };
+  const CONF_LABEL = { high: 'High confidence', medium: 'Worth a look', low: 'Low confidence' };
   const markHit = (snip, hit) => { const i = hit ? snip.indexOf(hit) : -1; return i < 0 ? esc(snip) : esc(snip.slice(0, i)) + '<mark>' + esc(hit) + '</mark>' + esc(snip.slice(i + hit.length)); };
   let contractFound = null;                                  // the last scan (field values and short snippets only, never the whole text)
   const cmsg = (t, bad) => { const m = $('#contract-msg'); m.textContent = t; m.classList.toggle('warnbox', !!bad); };
@@ -273,7 +273,7 @@
     if (result.v6Error) items.push('IPv6: ' + result.v6Error);
     items.push(...Remote.warnings(result, project()));
     const vp = Remote.plan(result, project()); if (vp && !vp.ok) items.push('Remote access: ' + vp.error);
-    $('#warn').innerHTML = items.length ? `<div class="banner"><b>⚠ Check this</b><ul>${items.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>` : '';
+    $('#warn').innerHTML = items.length ? `<div class="banner"><b>Things to review</b><ul>${items.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>` : '';
   }
   function renderSummaries() {
     const c = cur(), ok = result.ok, n = ok ? result.allocations.length : 0;
@@ -395,6 +395,14 @@
     box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), a.name, typeOf(a),
       [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]])).join('') + vpnCard();
   }
+  // Optional DHCP DNS for one network (default stays System DNS). Stored per client by network name: project().dhcpDns[name] = { server, domain }.
+  function dnsBox(a) {
+    if (!a.dhcpStart) return '';
+    const d = (project().dhcpDns || {})[a.name] || {};
+    return `<div class="dnsbox"><label class="fld">DHCP DNS server (optional)<input data-dns="server" value="${esc(d.server || '')}" placeholder="Same as System DNS" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+      <label class="fld">DNS domain (optional)<input data-dns="domain" value="${esc(d.domain || '')}" placeholder="corp.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <p class="hint">Windows domain? Put the domain controller here. Empty keeps "Same as System DNS".</p></div>`;
+  }
   // The card popup: same detail the card used to drop down, over a darkened page.
   let cardOpener = null;
   function openCard(key, opener) {
@@ -408,7 +416,7 @@
       const i = result.allocations.findIndex(a => a.name === key); if (i < 0) return;
       const a = result.allocations[i];
       $('#cardsw').style.background = color(Math.max(0, names.indexOf(a.name))); $('#cardtitle').textContent = a.name; $('#cardtype').textContent = typeOf(a);
-      $('#cardbody').innerHTML = dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
+      $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + dnsBox(a) + dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
     }
     cardOpener = opener || null; $('#cardbody').scrollTop = 0;
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
@@ -735,6 +743,14 @@
     cardsBox.addEventListener('click', e => { const c = e.target.closest('.ncard'); if (c) openCard(c.dataset.name, c); });
     cardsBox.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('ncard')) { e.preventDefault(); openCard(e.target.dataset.name, e.target); } });
     $('#cardclose').addEventListener('click', closeCard);
+    // Per-network DHCP DNS (optional): saved on input, the CLI/guide rows refresh on change.
+    const dnsSave = () => { const c = cur(), name = $('#cardtitle').textContent; c.dhcpDns = c.dhcpDns || {}; const d = c.dhcpDns[name] = c.dhcpDns[name] || {}; $('#cardbody').querySelectorAll('[data-dns]').forEach(i => { d[i.dataset.dns] = i.value.trim(); }); touch(); };
+    $('#cardbody').addEventListener('input', e => { if (e.target.dataset && e.target.dataset.dns) { dnsSave(); renderExport(); } });
+    $('#cardbody').addEventListener('change', e => {
+      if (!(e.target.dataset && e.target.dataset.dns)) return;
+      const name = $('#cardtitle').textContent, g = guideFor(name), fg = $('#cardbody').querySelector('.fg');
+      if (g && fg) fg.outerHTML = guidePanel(g, name, 'Set it up on the FortiGate');
+    });
     $('#carddlg').addEventListener('click', e => {
       if (e.target === $('#carddlg')) { closeCard(); return; }                    // backdrop click (Esc is native)
       const b = e.target.closest('[data-opencli]'); if (!b) return;

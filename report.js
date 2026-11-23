@@ -21,7 +21,7 @@
     cameras: { label: 'Cameras', who: 'Security cameras. Kept off the staff network and only able to talk to the recording server.' },
     iot: { label: 'Smart devices', who: 'Smart or connected gadgets such as sensors and displays. Isolated so one weak device cannot reach staff or servers.' },
     printers: { label: 'Printers', who: 'Your printers and copiers. Staff can print to them, but the printers cannot reach anything else.' },
-    pos: { label: 'Card payments', who: 'Your card terminals. Kept completely apart from everything else, with access to the payment provider only.' },
+    pos: { label: 'Card payments', who: 'Your card terminals. Kept completely apart from everything else, with internet access limited to name lookups, secure web and time sync (to be narrowed to the payment provider).' },
     mgmt: { label: 'Network equipment', who: 'The firewall, switches and Wi-Fi access points. Locked down so only administrators can reach them.' },
     transit: { label: 'Link to other equipment', who: 'A small private link that joins the firewall to your internet provider’s or another site’s equipment.' },
     loopback: { label: 'Firewall identity', who: 'A private address that gives the firewall a fixed identity on the network. No devices connect here.' },

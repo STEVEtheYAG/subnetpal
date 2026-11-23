@@ -279,7 +279,13 @@ body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .clientbar { display: flex; gap: 8px; }
 .clientbar select { flex: 1; min-width: 0; }
 .manage summary, .more > summary, .more2 > summary { cursor: pointer; color: var(--accent-t); font-weight: 600; min-height: 40px; display: flex; align-items: center; }
-.manage .btnrow { margin-top: 6px; }
+.manage { position: relative; }
+.manage summary { list-style: none; border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; justify-content: space-between; background: var(--card, transparent); }
+.manage summary::-webkit-details-marker { display: none; }
+.manage[open] summary { border-color: var(--accent-t); }
+.manage .btnrow { margin-top: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; }
+.dnsbox { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 10px 0; }
+.dnsbox input { width: 100%; max-width: 100%; box-sizing: border-box; }
 .more { border: 1px solid var(--line); border-radius: var(--r); padding: 0 12px 12px; background: var(--panel); }
 .more > * + * { margin-top: 12px; }
 .more > summary { margin-bottom: 0; }

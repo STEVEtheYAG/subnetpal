@@ -108,8 +108,8 @@
       if (p.app) { e.app = 'SP_App_' + (apps.length + 1); apps.push({ name: e.app, a: p.app }); }
     });
     if (webs.length) {
-      L.push('', '# Website filtering. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. FortiGuard category IDs are UNVERIFIED (from memory): check each ID against its name before applying.');
-      L.push('# Web filtering needs a FortiGuard licence. Blocking HTTPS sites by category with certificate inspection is done from the site name; a block or warning page may only display with deep inspection (unverified).');
+      L.push('', '# Website filtering. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. FortiGuard category IDs are UNVERIFIED (from memory). SAFER: build the profile in the GUI (Security Profiles > Web Filter), then read the real IDs back with: show webfilter profile. Do not paste these IDs blind.');
+      L.push('# Web filtering needs a FortiGuard licence. Blocking HTTPS sites by category with certificate inspection is done from the site name; a block or warning page may only display with deep inspection (unverified; Warn pages probably need deep inspection over HTTPS). Only a web filter profile is generated here: no IPS, antivirus or SSL inspection profiles. Category blocking on the Servers network can break OS and vendor updates.');
       if (webs.some(x => x.w)) {
         L.push('config webfilter urlfilter');
         webs.forEach(({ name, w }, i) => {
@@ -177,8 +177,18 @@
     L.push(`        set role ${FORTI_ROLE[a.role] || 'lan'}`, `        set alias ${q(a.name)}`, '    next');
     return L;
   };
-  const dhcpLines = (a, name, id, lease) => ['    edit ' + id, '        set dns-service default', `        set default-gateway ${a.gateway}`, ...(lease ? [`        set lease-time ${lease}`] : []), `        set netmask ${a.netmask}`, `        set interface ${q(name)}`,
+  // Optional per-network DNS: dns = { server, domain }. Empty = "Same as System DNS". Only a plain IPv4 address is accepted.
+  const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const okIp = s => { const m = IPV4.exec(String(s || '').trim()); return !!m && m.slice(1).every(x => Number(x) <= 255); };
+  const dnsOf = (project, a) => { const d = project && project.dhcpDns && project.dhcpDns[a.name] || {}; return { server: okIp(d.server) ? String(d.server).trim() : '', domain: /^[A-Za-z0-9.-]{1,60}$/.test(String(d.domain || '').trim()) ? String(d.domain).trim() : '' }; };
+  const DHCP_ID0 = 101; // first DHCP server ID we use: a factory FortiGate already has ID 1, and re-using it would overwrite that server
+  const dhcpLines = (a, name, id, lease, dns) => ['    edit ' + id, ...(dns && dns.server ? ['        set dns-service specify', `        set dns-server1 ${dns.server}`] : ['        set dns-service default']), ...(dns && dns.domain ? [`        set domain ${q(dns.domain)}`] : []), `        set default-gateway ${a.gateway}`, ...(lease ? [`        set lease-time ${lease}`] : []), `        set netmask ${a.netmask}`, `        set interface ${q(name)}`,
     '        config ip-range', '            edit 1', `                set start-ip ${a.dhcpStart}`, `                set end-ip ${a.dhcpEnd}`, '            next', '        end', '    next'];
+
+  // Shared warnings: the parent port must never be the port you are managing through; dual WAN needs the SD-WAN zone.
+  const lockWarn = ph => [`# !! WARNING: "${ph}" must NOT be the port you are managing the firewall through. Changing its address or VLAN mid-paste locks you out. Use a spare port, or have console access ready.`];
+  const wanWarn = project => (project && project.intake && project.intake.dualWan) ? [
+    `# !! DUAL WAN: every policy and the VPN below use "${WAN_IF}" only. If wan1 and wan2 are SD-WAN members, policies cannot use a member port: replace "${WAN_IF}" in each dstintf line with your SD-WAN zone (default name "virtual-wan-link"; check: show system sdwan). Create the zone and members first, and keep the VPN on a physical WAN port.`] : [];
 
   // ifName: the single interface-name placeholder the user edits.
   function toFortiOS(result, project, ifName) {
@@ -191,6 +201,7 @@
     L.push('# ===== SubnetPal FortiOS snippet =====');
     L.push('# ' + FORTI_NOTE);
     L.push(`# >>> INTERFACE NAME PLACEHOLDER: "${ph}"  <<<  Replace every occurrence with your real port/aggregate name.`);
+    L.push(...lockWarn(ph), ...wanWarn(project));
     if (result.v6) L.push(`# IPv6: site prefix ${result.v6.cidr} (${result.v6.kind}). Each network is a /64 (SLAAC via router advertisements on client networks). If IPv6 is hidden in the GUI, enable it under System > Feature Visibility.`);
     L.push('# VLAN sub-interfaces use the placeholder as their parent port. Non-VLAN networks use it as the interface name itself.');
     L.push(`# Policies assume the internet-facing interface is "${WAN_IF}". Change it if yours differs.`);
@@ -201,8 +212,9 @@
 
     const dhcp = info.filter(({ a }) => a.dhcpStart);
     if (dhcp.length) {
-      L.push('', 'config system dhcp-server');
-      dhcp.forEach(({ a, name }, i) => L.push(...dhcpLines(a, name, i + 1)));
+      L.push('', `# DHCP server IDs start at ${DHCP_ID0} so they cannot overwrite one that already exists. Check first: show system dhcp server`);
+      L.push('config system dhcp-server');
+      dhcp.forEach(({ a, name }, i) => L.push(...dhcpLines(a, name, DHCP_ID0 + i, 0, dnsOf(project, a))));
       L.push('end');
     }
 
@@ -307,7 +319,7 @@
     const full = toFortiOS(result, project, ifName);
     const i = full.indexOf('config firewall address\n');
     const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
-      `# >>> INTERFACE NAME PLACEHOLDER: "${(ifName && String(ifName).trim()) || 'PORT_CHANGE_ME'}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ''];
+      `# >>> INTERFACE NAME PLACEHOLDER: "${(ifName && String(ifName).trim()) || 'PORT_CHANGE_ME'}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies use edit 0: pasting them twice creates duplicates.', ''];
     return head.join('\n') + '\n' + (i >= 0 ? full.slice(i) : full);
   }
 
@@ -322,6 +334,7 @@
     const reach = Remote.reachList(result, project);
     const idx = a => result.allocations.indexOf(a);
     const objOf = a => 'SP_' + (fname(a.name) || 'net');
+    L.push(...lockWarn(ph), ...wanWarn(project));
     L.push(`# Internet-facing interface is assumed to be "${WAN_IF}". Interface names for office networks use the placeholder "${ph}" like the main snippet.`);
     pool.notes.forEach(n => L.push('# ' + n));
     L.push('', 'config firewall address', '    edit "SP_VPN_POOL"', `        set subnet ${pool.network} ${pool.netmask}`, `        set comment ${q('VPN user pool ' + pool.cidr)}`, '    next');
@@ -329,11 +342,15 @@
     L.push('end');
     if (reach.length) L.push('', 'config firewall addrgrp', '    edit "SP_VPN_SPLIT"', '        set member ' + reach.map(a => q(objOf(a))).join(' '), '    next', 'end');
     else L.push('', '# No office networks are ticked for remote staff, so there is no split-tunnel list or policy.');
-    L.push('', '# Phase 1: dial-up. IKE version is NOT forced: leave what the VPN Wizard (FortiClient template) chose. XAuth belongs to IKEv1; if your wizard chose IKEv2, delete the xauthtype line. Weak crypto is left out (no DES, 3DES, MD5, SHA1); DH 20 and 21.',
+    L.push('', '# Phase 1: dial-up. IKE version is NOT forced: leave what the VPN Wizard (FortiClient template) chose. This snippet is the IKEv1 + XAuth dial-up (FortiClient IPsec): xauthtype is an IKEv1 feature. If your wizard chose IKEv2, delete the xauthtype line and use EAP instead. CONFIRM ON THE VM. Weak crypto is left out (no DES, 3DES, MD5, SHA1); DH 20 and 21.',
       'config vpn ipsec phase1-interface', '    edit "SP_VPN"', '        set type dynamic', `        set interface ${q(WAN_IF)}`,
       '        set peertype any', '        set net-device disable', '        set mode-cfg enable', '        set proposal aes256-sha256', '        set dhgrp 20 21',
       '        set dpd on-idle', '        set xauthtype auto', '        set authusrgrp "RemoteStaff"',
       `        set ipv4-start-ip ${pool.first}`, `        set ipv4-end-ip ${pool.last}`, `        set ipv4-netmask ${pool.netmask}`);
+    const vd = reach.map(x => dnsOf(project, x)).find(d => d.server) || null; // VPN clients use the office DNS set on the first ticked network that has one
+    if (vd && vd.server) L.push(`        set ipv4-dns-server1 ${vd.server}`);
+    if (vd && vd.domain) L.push(`        set domain ${q(vd.domain)}`);
+    else if (!vd || !vd.server) L.push('        # set ipv4-dns-server1 <office DNS server>   <- VPN clients get no DNS without this');
     if (reach.length) L.push('        set ipv4-split-include "SP_VPN_SPLIT"');
     L.push('        set add-route enable', '        set psksecret PSK_CHANGE_ME', '    next', 'end',
       '', '# Phase 2', 'config vpn ipsec phase2-interface', '    edit "SP_VPN"', '        set phase1name "SP_VPN"', '        set proposal aes256-sha256', '    next', 'end');
@@ -429,7 +446,7 @@
   }
 
   return {
-    FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, handoverRows, handoverCells,
+    FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));
