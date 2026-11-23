@@ -183,7 +183,6 @@
       cur().intake.expansion = b.dataset.exp; Intake.applyIntake(cur()); renderExpansion(); touch(); recalc();
     });
     $('#v6-new').addEventListener('click', () => { const c = cur(); c.v6.prefix = Calc6.generateUla(); $('#v6-prefix').value = c.v6.prefix; touch(); recalc(); });
-    $('#sumBtn').addEventListener('click', () => { setSideCollapsed(!$('#side').classList.contains('collapsed')); if (!$('#side').classList.contains('collapsed')) window.scrollTo(0, 0); });
     $('#btnDone').addEventListener('click', () => { setSideCollapsed(true); window.scrollTo(0, 0); });
   }
   // ---------- import from contract (text stays on this device: nothing here is saved, uploaded or logged) ----------
@@ -244,13 +243,25 @@
       contractReset(true); cmsg(`Applied ${done.length} field${done.length === 1 ? '' : 's'} to the intake. The contract text has been cleared from this page.`);
     });
   }
-  function setSideCollapsed(v) {
+  // Client information panel: slides out from the left. Desktop: a column that closes to give the results the full width. Phone: a drawer over the page.
+  // The open/closed choice is remembered per layout (desktop and phone keep separate choices).
+  const sideKey = () => 'subnetpal-side-' + (isPhone() ? 'm' : 'd');
+  function setSideCollapsed(v, noSave) {
     $('#side').classList.toggle('collapsed', v);
-    $('#sumBtn').setAttribute('aria-expanded', String(!v));
+    document.body.classList.toggle('side-closed', v); document.body.classList.toggle('side-open', !v);
+    $('#sideTab').setAttribute('aria-expanded', String(!v)); $('#sideTabTxt').textContent = v ? 'Client info' : 'Hide';
+    $('#sideBackdrop').hidden = v || !isPhone();
+    if (!noSave) { try { localStorage.setItem(sideKey(), v ? '0' : '1'); } catch (e) { /* private mode: just not remembered */ } }
   }
-  function renderSumLine() {
-    const c = cur(), n = result && result.ok ? result.allocations.length : c.networks.length;
-    $('#sumText').textContent = `Client: ${c.name || 'New client'} · ${n} network${n === 1 ? '' : 's'}`;
+  function initSide() {
+    let v = null; try { v = localStorage.getItem(sideKey()); } catch (e) { /* ignore */ }
+    setSideCollapsed(v === null ? isPhone() : v === '0', true); // first visit: open on desktop, closed on phones
+  }
+  function bindSide() {
+    $('#sideTab').addEventListener('click', () => setSideCollapsed(!$('#side').classList.contains('collapsed')));
+    $('#sideBackdrop').addEventListener('click', () => { setSideCollapsed(true); $('#sideTab').focus(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && isPhone() && !$('#side').classList.contains('collapsed') && !$('#clidlg').open) { setSideCollapsed(true); $('#sideTab').focus(); } });
+    matchMedia('(max-width: 899px)').addEventListener('change', initSide);
   }
   function renderV6Msg() {
     const el = $('#v6-msg'), c = cur(), r = result;
@@ -733,7 +744,7 @@
     result = Calc.plan(project());
     Calc6.annotate(result, cur().v6).forEach(w => result.warnings.push(w));
     $('#i-parent').placeholder = cur().parentAuto === false ? 'auto' : `auto (${cur().parent || 'none free'})`;
-    renderV6Msg(); renderWarn(); renderSummaries(); renderSumLine();
+    renderV6Msg(); renderWarn(); renderSummaries();
     if (openSec) renderSection(openSec);
     save();
   }
@@ -757,7 +768,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindTheme(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
+  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {
@@ -767,8 +778,7 @@
   (function first() {
     const c = cur(); Intake.migrate(c); Intake.applyIntake(c);
     renderClientSel(); renderIntake(); recalc();
-    const done = c.name && c.name !== 'New client' && Number(c.intake.counts.staff) > 0;
-    if (isPhone() && done) setSideCollapsed(true); // filled in: show just the one-line summary
+    initSide();
   }());
   setOpen('plan', false);
   registerSW();

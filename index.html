@@ -34,12 +34,11 @@
   </div>
 </header>
 
+<button id="sideTab" class="sidetab" type="button" aria-controls="side" aria-expanded="true" title="Show or hide the client information"><span id="sideTabTxt">Client info</span></button>
+<div id="sideBackdrop" class="sidebackdrop" hidden></div>
 <div class="app">
   <!-- LEFT: client intake (a top section on phones) -->
-  <aside id="side" class="side">
-    <button id="sumBtn" class="sumline" type="button" aria-expanded="true" aria-controls="sidebody">
-      <span id="sumText">Client</span><span class="chev" aria-hidden="true">▾</span>
-    </button>
+  <aside id="side" class="side" aria-label="Client information">
     <div id="sidebody">
       <div class="clientbar">
         <select id="clientSel" aria-label="Client"></select>
