@@ -338,6 +338,22 @@
     document.addEventListener('click', e => { const el = e.target.closest('.ip'); if (!el) return; e.preventDefault(); e.stopPropagation(); copyIp(el); }, true);
     document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('ip')) { e.preventDefault(); copyIp(e.target); } });
   }
+  // "Set it up on the FortiGate" panel: grouped like the FortiOS form, a plain-English why per field, and a copy button for the CLI.
+  function guideRows(rows) {
+    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw">${esc(r.why)}</span>` : ''}</div>`).join('');
+  }
+  function guidePanel(g, key, title) {
+    if (!g) return '';
+    const body = g.groups ? g.groups.map(x => `<h4 class="fgh">${esc(x.title)}</h4>${guideRows(x.rows)}`).join('')
+      : g.steps.map(s => `<h4 class="fgh">${esc(s.title)}</h4><p class="fgw"><span class="dim">${esc(s.where)}.</span> ${esc(s.why)}</p>${guideRows(s.rows)}`).join('');
+    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-copycli="${esc(key)}">Copy CLI</button></div>${body}<p class="hint">${esc(g.note)}</p></div>`;
+  }
+  function guideFor(key) {
+    if (!result || !result.ok) return null;
+    if (key === '__vpn') return Guide.vpn(result, project());
+    const i = result.allocations.findIndex(a => a.name === key);
+    return i < 0 ? null : Guide.iface(result, project(), i);
+  }
   function vpnCard() {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
     return `<details class="ncard" data-name="__vpn"${openCards.has('__vpn') ? ' open' : ''}>
@@ -350,6 +366,7 @@
           </dl>
         </summary>
         <dl class="nf extra"><div><dt>Remote staff planned</dt><dd class="mono">${p.staff} + ${p.growth}% buffer</dd></div><div><dt>Pool size</dt><dd class="mono">${p.size.toLocaleString()} (${p.usable.toLocaleString()} usable)</dd></div><div><dt>Placement</dt><dd class="mono">${p.where === 'inside' ? 'office block, outside every network' : 'separate block'}</dd></div></dl>
+        ${guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate')}
       </details>`;
   }
   function renderCards() {
@@ -374,6 +391,7 @@
           </dl>
         </summary>
         <dl class="nf extra">${extra.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${esc(v)}</dd></div>`).join('')}</dl>
+        ${guidePanel(Guide.iface(result, project(), result.allocations.indexOf(a)), a.name, 'Set it up on the FortiGate')}
       </details>`;
     }).join('') + vpnCard();
   }
@@ -694,6 +712,11 @@
   function bindAccordion() {
     $$('.rtabs button').forEach(b => b.addEventListener('click', () => setOpen(b.dataset.tab, false)));
     $('#fitUsed').addEventListener('change', renderMap);
+    $('#cards').addEventListener('click', async e => {
+      const b = e.target.closest('[data-copycli]'); if (!b) return;
+      const g = guideFor(b.dataset.copycli);
+      toast(g && await copy(g.cli) ? 'Copied the FortiOS CLI for this card' : 'Copy was blocked. Use the Export tab instead.');
+    });
     $('#cards').addEventListener('toggle', e => { const d = e.target.closest('details'); if (!d) return; if (d.open) openCards.add(d.dataset.name); else openCards.delete(d.dataset.name); }, true);
   }
 

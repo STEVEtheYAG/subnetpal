@@ -1394,7 +1394,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v18'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v19'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1446,12 +1446,73 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v18/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v19/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
   assert.ok(!/greet|Good morning/.test(fs.readFileSync(__dirname + '/index.html', 'utf8') + fs.readFileSync(__dirname + '/app.js', 'utf8')), 'welcome greeting removed');
   assert.ok(!/\(\?<[=!]/.test(fs.readFileSync(__dirname + '/theme.js', 'utf8')), 'no regex lookbehind');
+});
+
+console.log('FortiGate setup guide');
+const G = require('./guide.js');
+const guideProj = () => ({ parent: '10.20.0.0/16', networks: [{ name: 'Management', hosts: 20, vlan: 10, role: 'Mgmt', kind: 'mgmt' }, { name: 'Staff', hosts: 50, vlan: 20, role: 'LAN', kind: 'staff' }, { name: 'Guest', hosts: 30, vlan: 30, role: 'Guest', kind: 'guest' }, { name: 'Cameras', hosts: 10, vlan: 40, role: 'LAN', kind: 'cameras' }, { name: 'Servers', hosts: 10, vlan: 50, role: 'LAN', kind: 'servers' }], opts: {}, existing: [], intake: { remote: { on: true, count: 5 } }, ifName: 'port2' });
+const gRow = (g, k) => g.groups.reduce((x, y) => x.concat(y.rows), []).find(r => r.k === k);
+test('guide: least-privilege admin access per kind, and the main CLI uses the same', () => {
+  assert.deepStrictEqual(A.adminAccess({ kind: 'mgmt' }), ['https', 'ping', 'ssh']);
+  ['guest', 'iot', 'cameras', 'pos', 'other'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), [], k));
+  ['staff', 'servers', 'voice', 'printers', 'dmz'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['ping'], k));
+  const p = guideProj(), r = C.plan(p), cli = F.toFortiOS(r, p, 'port2');
+  assert.ok(/edit "vlan10"[\s\S]*?set allowaccess https ping ssh[\s\S]*?next/.test(cli));
+  assert.ok(/edit "vlan30"[\s\S]*?unset allowaccess[\s\S]*?next/.test(cli));
+});
+test('guide: interface card mirrors the FortiOS form and carries a why for every field', () => {
+  const p = guideProj(), r = C.plan(p), i = r.allocations.findIndex(a => a.name === 'Staff'), a = r.allocations[i], g = G.iface(r, p, i);
+  assert.deepStrictEqual(g.groups.map(x => x.title), ['Interface', 'Address', 'Administrative Access', 'DHCP Server', 'Network', 'Status']);
+  assert.strictEqual(gRow(g, 'Name').v, 'vlan20'); assert.strictEqual(gRow(g, 'Alias').v, 'Staff');
+  assert.strictEqual(gRow(g, 'VLAN ID').v, '20'); assert.strictEqual(gRow(g, 'Interface').v, 'port2'); assert.strictEqual(gRow(g, 'Role').v, 'LAN');
+  assert.strictEqual(gRow(g, 'IP/Netmask').v, `${a.gateway}/${a.netmask}`);
+  assert.strictEqual(gRow(g, 'Address range').v, `${a.dhcpStart} - ${a.dhcpEnd}`);
+  assert.strictEqual(gRow(g, 'Lease time').v, '604800 seconds');
+  g.groups.forEach(x => x.rows.forEach(row => { if (row.k !== 'VPN') assert.ok(row.v !== '', row.k); }));
+  assert.ok(g.cli.includes('set ip ' + a.gateway) && g.cli.includes('set vlanid 20') && g.cli.includes('set device-identification enable') && g.cli.includes('set lease-time 604800'));
+  assert.ok(g.cli.includes(F.FORTI_NOTE) && g.note.includes(F.FORTI_NOTE) && /unverified/.test(g.note));
+});
+test('guide: management, guest and cameras differ sensibly', () => {
+  const p = guideProj(), r = C.plan(p), at = n => G.iface(r, p, r.allocations.findIndex(a => a.name === n));
+  assert.deepStrictEqual(gRow(at('Management'), 'IPv4').chips.filter(c => c.on).map(c => c.t), ['HTTPS', 'PING', 'SSH']);
+  assert.deepStrictEqual(gRow(at('Guest'), 'IPv4').chips.filter(c => c.on), []); assert.strictEqual(gRow(at('Guest'), 'Lease time').v, '28800 seconds');
+  assert.strictEqual(gRow(at('Cameras'), 'Device detection').v, 'On'); assert.strictEqual(gRow(at('Servers'), 'Device detection').v, 'Off');
+  assert.ok(!/set device-identification/.test(at('Servers').cli));
+});
+test('guide: a non-VLAN port and a loopback have no VLAN rows', () => {
+  const p = { parent: '10.5.0.0/24', networks: [{ name: 'Office', hosts: 20, vlan: '', role: 'LAN', kind: 'staff' }, { name: 'Lo', hosts: 1, vlan: '', role: 'Loopback', kind: 'loopback' }], opts: {}, existing: [] }, r = C.plan(p);
+  const g = G.iface(r, p, r.allocations.findIndex(a => a.name === 'Office'));
+  assert.strictEqual(gRow(g, 'Type').v, 'Physical interface'); assert.strictEqual(gRow(g, 'VLAN ID'), undefined); assert.ok(!/vlanid/.test(g.cli));
+  assert.strictEqual(gRow(G.iface(r, p, r.allocations.findIndex(a => a.name === 'Lo')), 'Type').v, 'Loopback');
+  assert.strictEqual(G.iface(r, p, 99), null);
+});
+test('guide: VPN steps use the plan values and agree with the remote CLI', () => {
+  const p = guideProj(), r = C.plan(p), v = G.vpn(r, p), pool = R.plan(r, p);
+  assert.strictEqual(v.steps.length, 5);
+  const rows = v.steps.reduce((x, s) => x.concat(s.rows), []), rowOf = k => rows.find(x => x.k === k);
+  assert.strictEqual(rowOf('SP_VPN_POOL').v, `${pool.network}/${pool.netmask}`);
+  assert.strictEqual(rowOf('Client address range').v, `${pool.first} - ${pool.last}`);
+  assert.strictEqual(rowOf('Split tunnel').v, 'SP_VPN_SPLIT');
+  ['SP_VPN', 'aes256-sha256', 'VPN_USERS_CHANGE_ME', 'PSK_CHANGE_ME', 'set ike-version 2', 'set dhgrp 14', 'set ipv4-start-ip ' + pool.first].forEach(t => assert.ok(v.cli.includes(t.replace(/^set /, '')) , t));
+  assert.ok(v.cli.includes(`set ipv4-start-ip ${pool.first}`) && v.cli.includes(F.FORTI_NOTE) && /unverified/.test(v.note));
+  pool.reach.forEach(n => assert.ok(rows.some(x => x.k === 'SP_VPN to ' + n), n));
+});
+test('guide: no VPN guide unless remote staff is ticked; no reach networks gives no policy rows', () => {
+  const p = guideProj(), r = C.plan(p); p.intake.remote.on = false; assert.strictEqual(G.vpn(r, p), null);
+  p.intake.remote = { on: true, count: 3, reach: {} }; const v = G.vpn(r, p);
+  assert.strictEqual(v.steps[3].rows[0].k, 'No policy'); assert.strictEqual(v.steps[2].rows.find(x => x.k === 'Split tunnel').v, 'None');
+});
+test('guide: sw.js precaches guide.js, index loads it after format.js and the card styles keep the layout guards', () => {
+  const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
+  assert.ok(sw.includes("'./guide.js'")); assert.ok(html.indexOf('guide.js') > html.indexOf('format.js') && html.indexOf('guide.js') > html.indexOf('remote.js'));
+  assert.ok(css.includes('.fgr') && css.includes('grid-column: 1 / -1') && /@media print \{ \.fg \{ display: none/.test(css));
+  assert.ok(!/\(\?<[=!]/.test(fs.readFileSync(__dirname + '/guide.js', 'utf8')), 'no regex lookbehind');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

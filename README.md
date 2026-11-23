@@ -117,7 +117,7 @@ Installed copies update on their next online open (cache-first with background r
 **FortiOS output (generated, untested)**
 - Includes interfaces, DHCP servers, one firewall address object per subnet (`SP_<name>`), an `SP_INTERNAL` address group and starter policies, with the note "Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules." at the top and bottom.
 - One placeholder field (`PORT_CHANGE_ME` by default) is the parent port for VLAN interfaces (named `vlan<ID>`) or the interface name for non-VLAN networks. The internet interface in policies is assumed to be `wan1`.
-- `allowaccess` is `ping https ssh` for LAN and Mgmt and `ping` for the rest. Roles map to `lan`, `dmz`, `wan` or `undefined`. Deny policies come first; allow policies use NAT toward the internet and `logtraffic all`.
+- `allowaccess` is least-privilege per network kind (`Access.adminAccess`): Management `https ping ssh`; staff, servers, phones, printers, DMZ, WAN `ping`; guest, IoT, cameras, card terminals and custom pools none (`unset allowaccess`). Roles map to `lan`, `dmz`, `wan` or `undefined`. Deny policies come first; allow policies use NAT toward the internet and `logtraffic all`.
 
 **App**
 - **Storage:** clients live in `localStorage` (key `subnetpal.v2`) on the device. Nothing is sent anywhere. Clearing Safari website data deletes them, so copy outputs you need. The earlier "named projects" data (key `subnetpal.v1`) is not migrated.
@@ -156,3 +156,10 @@ Installed copies update on their next online open (cache-first with background r
 - **Diagram:** follows the current mode on screen. "Download SVG"/"Copy SVG" and printing always use the light version. The client report window is unchanged (already light and print-friendly).
 Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(0, 1fr)` kept; checkboxes still listen on `input`.
 - Needs `color-mix()` (all current browsers); older ones fall back to a transparent selected-option fill.
+
+## FortiGate setup guide on the cards (new, unverified)
+- Expand a network card on the Plan tab to see "Set it up on the FortiGate": groups mirror the FortiOS interface form (Interface, Address, Administrative Access, DHCP Server, Network, Status), a plain-English why per field, and a Copy CLI button for that one interface. The remote staff VPN card shows 5 steps (users and group, address objects, IPsec tunnel, firewall policy, FortiClient) and copies the full remote CLI.
+- Code: `guide.js` (pure, no DOM; `Guide.iface`, `Guide.vpn`), UI in `app.js` (`guidePanel`), styles `.fg*` at the end of `style.css`. `format.js` now exports `ifaceLines`/`dhcpLines`, shared by the main snippet and the card CLI. Hidden when printing.
+- Assumptions (decided, not asked): least-privilege admin access per kind (see above); device detection on for client networks only; DHCP lease 604800 s, guests 28800 s; DNS "Same as System DNS"; gateway "Same as Interface IP"; VRF 0; DHCP server ID 100 is a placeholder in the card CLI; expanded cards span the full row.
+- All FortiOS menu paths, field names and CLI are from memory and UNVERIFIED; the UI shows a small note plus the "Generated, untested..." note. One thing to check on the VM when convenient: the existing remote CLI pairs `ike-version 2` with `xauthtype`, which may need EAP instead.
+- sw.js cache is subnetpal-v19, `guide.js` is in ASSETS. Tests: 161 pass.

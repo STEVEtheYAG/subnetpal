@@ -62,6 +62,10 @@
     };
   }
 
+  // Least-privilege administrative access (FortiGate allowaccess) per network kind. Only Management gets the admin pages.
+  const ADMIN = { mgmt: ['https', 'ping', 'ssh'], staff: ['ping'], lan: ['ping'], servers: ['ping'], voice: ['ping'], printers: ['ping'], dmz: ['ping'], wan: ['ping'], transit: ['ping'], loopback: ['ping'], cameras: [], iot: [], other: [], guest: [], pos: [] };
+  const adminAccess = a => (ADMIN[kindOf(a)] || ['ping']).slice();
+
   const n0 = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; };
 
   // One plain-English line tying a network to the client's need.
@@ -87,5 +91,5 @@
     }
   }
 
-  return { ROLE_KIND, INTERNAL, RULES, kindOf, hasPolicy, isInternal, allowed, internetAllowed, matrix, matrixFromPolicies, why };
+  return { ROLE_KIND, INTERNAL, ADMIN, adminAccess, RULES, kindOf, hasPolicy, isInternal, allowed, internetAllowed, matrix, matrixFromPolicies, why };
 }));

@@ -7,7 +7,6 @@
 
   const FORTI_NOTE = 'Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules.';
   const WAN_IF = 'wan1';
-  const ALLOWACCESS = { LAN: 'ping https ssh', Mgmt: 'ping https ssh', Guest: 'ping', DMZ: 'ping', WAN: 'ping', Transit: 'ping', '': 'ping https ssh' };
   const FORTI_ROLE = { LAN: 'lan', Guest: 'lan', Mgmt: 'lan', DMZ: 'dmz', WAN: 'wan', Transit: 'undefined', Loopback: 'undefined', '': 'lan' };
   const EXP_LABEL = { none: 'None', soon: 'Soon', big: 'Big growth' };
   const COUNT_LABEL = { staff: 'staff', wired: 'wired devices', wifi: 'Wi-Fi devices', voice: 'phones', cameras: 'cameras', iot: 'IoT devices', servers: 'servers', guest: 'guest users', dmz: 'public servers (DMZ)', printers: 'printers', pos: 'card terminals' };
@@ -164,6 +163,23 @@
     return out;
   }
 
+  // Access list for one network, as FortiOS CLI. Empty means the interface answers nothing.
+  const accessCLI = (a, ind) => { const v = Access.adminAccess(a); return v.length ? `${ind}set allowaccess ${v.join(' ')}` : `${ind}unset allowaccess`; };
+  const ifaceLines = (a, name, ph) => {
+    const L = [`    edit ${q(name)}`, '        set vdom "root"', `        set ip ${a.gateway ? a.gateway : a.firstUsable} ${a.netmask}`, accessCLI(a, '        ')];
+    if (a.v6) {
+      L.push('        config ipv6', '            set ip6-mode static', `            set ip6-address ${a.v6.address}/${a.v6.prefix}`, accessCLI(a, '            ').replace('allowaccess', 'ip6-allowaccess'));
+      if (a.dhcpStart) L.push('            set ip6-send-adv enable'); // client networks: advertise the /64 so devices self-configure (SLAAC)
+      L.push('        end');
+    }
+    if (a.role === 'Loopback') L.push('        set type loopback');
+    else if (a.vlan !== '') L.push(`        set interface ${q(ph)}`, `        set vlanid ${a.vlan}`);
+    L.push(`        set role ${FORTI_ROLE[a.role] || 'lan'}`, `        set alias ${q(a.name)}`, '    next');
+    return L;
+  };
+  const dhcpLines = (a, name, id, lease) => ['    edit ' + id, '        set dns-service default', `        set default-gateway ${a.gateway}`, ...(lease ? [`        set lease-time ${lease}`] : []), `        set netmask ${a.netmask}`, `        set interface ${q(name)}`,
+    '        config ip-range', '            edit 1', `                set start-ip ${a.dhcpStart}`, `                set end-ip ${a.dhcpEnd}`, '            next', '        end', '    next'];
+
   // ifName: the single interface-name placeholder the user edits.
   function toFortiOS(result, project, ifName) {
     const ph = (ifName && String(ifName).trim()) || 'PORT_CHANGE_ME';
@@ -180,42 +196,13 @@
     L.push(`# Policies assume the internet-facing interface is "${WAN_IF}". Change it if yours differs.`);
     L.push('');
     L.push('config system interface');
-    info.forEach(({ a, name }) => {
-      L.push(`    edit ${q(name)}`);
-      L.push('        set vdom "root"');
-      L.push(`        set ip ${a.gateway ? a.gateway : a.firstUsable} ${a.netmask}`);
-      L.push(`        set allowaccess ${ALLOWACCESS[a.role] || 'ping'}`);
-      if (a.v6) {
-        L.push('        config ipv6', '            set ip6-mode static', `            set ip6-address ${a.v6.address}/${a.v6.prefix}`);
-        L.push(`            set ip6-allowaccess ${ALLOWACCESS[a.role] || 'ping'}`);
-        if (a.dhcpStart) L.push('            set ip6-send-adv enable'); // client networks: advertise the /64 so devices self-configure (SLAAC)
-        L.push('        end');
-      }
-      if (a.role === 'Loopback') L.push('        set type loopback');
-      else if (a.vlan !== '') { L.push(`        set interface ${q(ph)}`); L.push(`        set vlanid ${a.vlan}`); }
-      L.push(`        set role ${FORTI_ROLE[a.role] || 'lan'}`);
-      L.push(`        set alias ${q(a.name)}`);
-      L.push('    next');
-    });
+    info.forEach(({ a, name }) => L.push(...ifaceLines(a, name, ph)));
     L.push('end');
 
     const dhcp = info.filter(({ a }) => a.dhcpStart);
     if (dhcp.length) {
       L.push('', 'config system dhcp-server');
-      dhcp.forEach(({ a, name }, i) => {
-        L.push(`    edit ${i + 1}`);
-        L.push('        set dns-service default');
-        L.push(`        set default-gateway ${a.gateway}`);
-        L.push(`        set netmask ${a.netmask}`);
-        L.push(`        set interface ${q(name)}`);
-        L.push('        config ip-range');
-        L.push('            edit 1');
-        L.push(`                set start-ip ${a.dhcpStart}`);
-        L.push(`                set end-ip ${a.dhcpEnd}`);
-        L.push('            next');
-        L.push('        end');
-        L.push('    next');
-      });
+      dhcp.forEach(({ a, name }, i) => L.push(...dhcpLines(a, name, i + 1)));
       L.push('end');
     }
 
@@ -442,7 +429,7 @@
   }
 
   return {
-    FORTI_NOTE, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, handoverRows, handoverCells,
+    FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));
