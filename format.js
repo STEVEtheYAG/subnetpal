@@ -248,6 +248,12 @@
     const prof = profileCLI(L, pols);
     const usedNames = new Set();
     const polName = (pre, p) => { let n = (pre + fname(p.name.replace('(block)', 'block'))).slice(0, 35), k = 2; while (usedNames.has(n)) n = (pre + fname(p.name.replace('(block)', 'block'))).slice(0, 32) + '_' + k++; usedNames.add(n); return n; };
+    const customSvc = Object.keys(Policy.CUSTOM_SERVICES || {}).filter(n => pols.some(p => p.services.indexOf(n) >= 0));
+    if (customSvc.length) {
+      L.push('', 'config firewall service custom');
+      customSvc.forEach(n => { const s = Policy.CUSTOM_SERVICES[n]; L.push(`    edit ${q(n)}`, `        set tcp-portrange ${s.tcp}`, `        set comment ${q(s.comment)}`, '    next'); });
+      L.push('end');
+    }
     L.push('', '# ' + Policy.NOTE);
     L.push('# Policies are ordered top to bottom (first match wins); the last one denies everything else.');
     L.push('config firewall policy');

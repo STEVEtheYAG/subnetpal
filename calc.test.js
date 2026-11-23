@@ -898,7 +898,7 @@ test('defaults: baseline + recommended on, optional off; explicit denies come be
 test('defaults for the full scenario: the explicit denies and isolations are there', () => {
   const { r } = fullClient(); const f = polFlat(Pol.defaults(r.allocations));
   ['Guest>internal:ALL:deny', 'IoT>internal:ALL:deny', 'POS>internal:ALL:deny', 'Staff LAN>POS:ALL:deny', 'Printers>internal:ALL:deny', 'Cameras>internet:ALL:deny',
-    'Voice>Management:ALL:deny', 'Staff LAN>Printers:ALL:accept', 'POS>internet:DNS,HTTPS,NTP:accept', 'Management>Servers:ALL:accept', 'Lab>internal:ALL:deny']
+    'Voice>Management:ALL:deny', 'Staff LAN>Printers:SP_PRINT:accept', 'POS>internet:DNS,HTTPS,NTP:accept', 'Management>Servers:ALL:accept', 'Lab>internal:ALL:deny']
     .forEach(x => assert.ok(f.includes(x), 'missing ' + x));
   assert.ok(!f.some(x => /^(Printers|Cameras)>internet:.*accept/.test(x)) && !f.some(x => /^Staff LAN>Management/.test(x)));  // printers/cameras get no internet allow; staff cannot reach management
   assert.ok(!f.some(x => /^(Guest|POS|Printers)>(Staff LAN|Servers)/.test(x) && x.endsWith('accept')));                    // nobody isolated can reach staff or servers
@@ -1394,7 +1394,37 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v15'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v16'/.test(sw));
+});
+test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
+  const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
+  assert.ok(f.includes('config firewall service custom') && f.includes('edit "SP_PRINT"') && f.includes('set tcp-portrange 9100 631 515'));
+  assert.ok(f.indexOf('config firewall service custom') < f.indexOf('config firewall policy'));
+  assert.strictEqual(f.split('edit "SP_PRINT"').length, 2);
+  const none = fullClient(c => { c.intake.req.printers = false; }); assert.ok(!F.toFortiOS(none.r, none.p, 'port5').includes('SP_PRINT'));
+});
+test('report: the access matrix follows the policy list, so optional cards and edits show', () => {
+  const { r, p } = fullClient(); const al = r.allocations, ix = n => al.findIndex(a => a.name === n);
+  const base = A.matrixFromPolicies(al, Pol.resolve(Pol.effective(p, al), al).pols);
+  const cell = (m, f, t) => m.rows[m.cols.indexOf(f) < 0 ? 0 : m.cols.indexOf(f)].cells[m.cols.indexOf(t)];
+  assert.strictEqual(cell(base, 'POS', 'Servers'), false);
+  p.pol = { edited: false, list: [], toggles: { 'pos-servers': true } };
+  const on = A.matrixFromPolicies(al, Pol.resolve(Pol.effective(p, al), al).pols);
+  assert.strictEqual(cell(on, 'POS', 'Servers'), true);
+  assert.strictEqual(cell(on, 'Staff LAN', 'Printers'), true); assert.strictEqual(cell(on, 'Guest', 'Staff LAN'), false); assert.strictEqual(cell(on, 'Staff LAN', 'Staff LAN'), 'self');
+  assert.ok(ix('POS') >= 0);
+});
+test('remote: an existing range that is itself a home-router range reads naturally', () => {
+  const { r, p } = fullClient(c => { c.intake.existing = '192.168.1.0/24'; });
+  const w = R.warnings(r, p).filter(x => x.includes('existing range'));
+  assert.ok(w.length && w[0].includes('192.168.1.0/24 is a range many home routers use') && !w[0].includes('overlaps 192.168.1.0/24,'));
+});
+test('diagram: dual WAN is labelled on the internet link', () => {
+  const T = require('./topology.js');
+  const a = fullClient(c => { c.intake.dualWan = true; }), b = fullClient();
+  assert.ok(T.build(a.r, a.p, { cols: 1 }).includes('WAN1 + WAN2'));
+  assert.ok(T.build(a.r, a.p, { cols: 1, plain: true }).includes('Two internet connections'));
+  assert.ok(!T.build(b.r, b.p, { cols: 1 }).includes('WAN1 + WAN2'));
 });
 test('contract: a large contract is scanned quickly', () => {
   const big = (ACC_TEXT + '\n').repeat(300).slice(0, 300000), t0 = Date.now(); const r = K.extract(big);

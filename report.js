@@ -156,7 +156,7 @@ section.page h2{margin-top:0}
     const netRows = allocs.map(a => [esc(a.name), esc(kindInfo(a).who), `<span class="mono">${esc(range(a))}</span>`, `<span class="mono">${esc(exitPoint(a))}</span>`]);
 
     // Who can reach what
-    const m = Access.matrix(allocs);
+    const m = Access.matrixFromPolicies(allocs, Policy.resolve(Policy.effective(project, allocs), allocs).pols);
     const names = m.cols;
     const mark = v => (v === 'self' ? '<span class="no">–</span>' : v ? '<span class="yes">Yes</span>' : '<span class="no">No</span>');
     const matrixRows = m.rows.map(r => [esc(r.name), esc(shortSays(r, names)), mark(r.internet)].concat(r.cells.map(mark)));

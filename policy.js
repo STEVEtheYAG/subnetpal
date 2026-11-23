@@ -12,7 +12,10 @@
     { v: 'ALL', l: 'All services' }, { v: 'DNS,HTTP,HTTPS', l: 'Web + DNS' }, { v: 'HTTP,HTTPS', l: 'Web (HTTP, HTTPS)' },
     { v: 'DNS', l: 'DNS' }, { v: 'HTTP', l: 'HTTP' }, { v: 'HTTPS', l: 'HTTPS' }, { v: 'SSH', l: 'SSH' }, { v: 'RDP', l: 'RDP' },
     { v: 'SMB', l: 'SMB (file sharing)' }, { v: 'SMTP', l: 'SMTP (email)' }, { v: 'PING', l: 'Ping' }, { v: 'FTP', l: 'FTP' }, { v: 'NTP', l: 'NTP' },
+    { v: 'SP_PRINT', l: 'Printing (TCP 9100, 631, 515)' },
   ];
+  // Custom service objects SubnetPal creates itself (no FortiOS predefined service covers them). Emitted by format.js.
+  const CUSTOM_SERVICES = { SP_PRINT: { tcp: '9100 631 515', comment: 'Raw/JetDirect, IPP, LPD printing' } };
   // FortiGuard web category and application category IDs. Unverified: check them on the lab VM.
   const WEB_CATS = [
     { id: 26, l: 'Malicious Websites' }, { id: 61, l: 'Phishing' }, { id: 59, l: 'Proxy Avoidance' }, { id: 37, l: 'Social Networking' },
@@ -191,5 +194,5 @@
     return { pols, skipped };
   }
 
-  return { NOTE, SERVICES, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile };
+  return { NOTE, SERVICES, CUSTOM_SERVICES, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile };
 }));

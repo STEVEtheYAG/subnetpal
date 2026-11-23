@@ -34,7 +34,7 @@ git add .; git commit -m "Client intake flow"; git push
 
 First-time setup (once): install GitHub CLI (`winget install GitHub.cli`, reopen PowerShell, `gh auth login`), then `gh repo create subnetpal --public --source=. --push` and `gh api -X POST "repos/{owner}/subnetpal/pages" -f "source[branch]=main" -f "source[path]=/"`. Live at `https://<your-github-username>.github.io/subnetpal/`. Netlify alternative: drag this folder onto https://app.netlify.com/drop.
 
-Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v15`; new files go in `ASSETS`).
+Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v16`; new files go in `ASSETS`).
 
 ## Files
 
@@ -72,7 +72,10 @@ Installed copies update on their next online open (cache-first with background r
 - **Order:** narrow optional exceptions (POS to servers, DMZ to a database) first so the deny rules cannot shadow them, then explicit denies, then allows grouped by source network with the internet rule first.
 - **New network kinds:** Printers (VLAN 55) and POS (VLAN 65), planned only when ticked, like the other optional networks. Printers: staff can print, printers cannot start connections inward and get no internet. POS: no access to anything internal, internet only on DNS, HTTPS and NTP to reach the payment provider (check your provider for other ports), staff are explicitly blocked from it.
 - **Explicit denies added:** IoT, custom "Other" pools, printers and POS to internal networks, staff to POS, cameras to the internet, phones and cameras to Management. They change nothing in practice (the final deny already covers them) but make the intent visible and logged. Management stays the only network that may initiate to the others; "admin sources" are the Management network, with an optional "Staff LAN to Management" card (HTTPS, SSH, high risk, off by default) for admins who sit on the staff LAN.
-- **Printing services:** printers use `ALL` from staff, because the print ports (9100, 631, 515) are not predefined FortiOS service names that I am sure of. Narrow it with a custom service on the lab VM.
+- **Printing services:** staff-to-printers now uses a custom service `SP_PRINT` (TCP 9100, 631, 515), written by the FortiOS export as `config firewall service custom` only when a policy uses it (`CUSTOM_SERVICES` in `policy.js`). The service name is my own; the port list is standard (JetDirect, IPP, LPD). Verify on the lab VM when it is unparked.
+- **Report access matrix** now follows the real policy list (optional cards you switched on, and your edits, show up), via `Access.matrixFromPolicies`. The default matrix, `Access.matrix`, is still used for the starter-rule tests.
+- **Diagram, dual WAN:** the internet link reads "WAN1 + WAN2 (failover)" (client report: "Two internet connections (one is a backup)") when dual WAN is ticked. Site-to-site VPN is still not drawn.
+- **Home-router clash wording:** when an existing range is itself a common home-router range, the banner says "is a range many home routers use" instead of "overlaps" itself.
 - **Unverified (from memory, check on the lab VM):** the service names `MYSQL`, `MS-SQL`, `NTP`, `SIP`; SD-WAN zone wording in the dual-WAN advice; FortiAP being managed as local CAPWAP traffic with no policy; the "keep card-payment logs for about a year" advice.
 - **Matrix:** the client report grid still comes from the access rules (`access.js`), which cover baseline and recommended cards. A test keeps the grid and the default policy list in step. Optional cards you switch on are not shown in the grid yet.
 

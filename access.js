@@ -48,6 +48,20 @@
     };
   }
 
+  // Same shape as matrix(), but worked out from the actual policy list (resolved policies, first match wins, else denied),
+  // so optional cards the engineer switched on, and edits, show up. pols: [{from, to, action}] where from/to are allocations or 'internet'/'internal'.
+  function matrixFromPolicies(allocs, pols) {
+    const nets = allocs.filter(hasPolicy);
+    const verdict = (f, test) => { const p = (pols || []).find(x => x.from.name === f.name && test(x.to)); return !!p && p.action === 'accept'; };
+    return {
+      cols: nets.map(n => n.name),
+      rows: nets.map(f => ({
+        name: f.name, internet: verdict(f, t => t === 'internet'),
+        cells: nets.map(t => (f.name === t.name ? 'self' : verdict(f, x => x === 'internal' ? isInternal(t) : x !== 'internet' && x.name === t.name))),
+      })),
+    };
+  }
+
   const n0 = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; };
 
   // One plain-English line tying a network to the client's need.
@@ -73,5 +87,5 @@
     }
   }
 
-  return { ROLE_KIND, INTERNAL, RULES, kindOf, hasPolicy, isInternal, allowed, internetAllowed, matrix, why };
+  return { ROLE_KIND, INTERNAL, RULES, kindOf, hasPolicy, isInternal, allowed, internetAllowed, matrix, matrixFromPolicies, why };
 }));

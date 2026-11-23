@@ -49,10 +49,11 @@
     const fwH = lo ? 66 : 52, fwY = 92, fwW = 230;
 
     const out = [];
+    const dual = !!(project && project.intake && project.intake.dualWan);
     const edges = [], nodes = [];
     // internet + firewall
     nodes.push(`<g><rect x="${cx - 80}" y="12" width="160" height="38" rx="19" fill="${T.inet}" stroke="${T.line}"/><text x="${cx}" y="36" text-anchor="middle" font-size="15" font-weight="700" fill="${T.text}">Internet</text></g>`);
-    edges.push(`<path d="M${cx} 50 V${fwY}" stroke="${T.line}" stroke-width="2" fill="none"/><text x="${cx + 8}" y="76" font-size="11" fill="${T.mute}">${plain ? 'Internet connection' : 'WAN'}</text>`);
+    edges.push(`<path d="M${cx} 50 V${fwY}" stroke="${T.line}" stroke-width="2" fill="none"/><text x="${cx + 8}" y="76" font-size="11" fill="${T.mute}">${dual ? (plain ? 'Two internet connections (one is a backup)' : 'WAN1 + WAN2 (failover)') : plain ? 'Internet connection' : 'WAN'}</text>`);
     nodes.push(`<g><rect x="${cx - fwW / 2}" y="${fwY}" width="${fwW}" height="${fwH}" rx="10" fill="${T.fw}" stroke="${T.fwLine}" stroke-width="2"/>` +
       `<text x="${cx}" y="${fwY + 24}" text-anchor="middle" font-size="16" font-weight="700" fill="${T.text}">Firewall</text>` +
       (lo ? `<text x="${cx}" y="${fwY + 46}" text-anchor="middle" font-size="12" fill="${T.mute}" font-family="monospace">Loopback ${esc(lo.network)}/32</text>` : plain ? '' : `<text x="${cx}" y="${fwY + 42}" text-anchor="middle" font-size="12" fill="${T.mute}">${esc(result.parent.cidr)}</text>`) + '</g>');

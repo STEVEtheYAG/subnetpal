@@ -48,7 +48,7 @@
       why: 'Staff open shared files, line-of-business apps and databases on the on-site servers.' }),
     P('staff-dmz', 'Staff to public servers', { src: ST, dst: ['dmz'], tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
       why: 'Staff and administrators look after the public-facing servers.' }),
-    P('staff-printers', 'Staff to printers', { src: ST, dst: ['printers'], tags: ['printers', 'staff-lan'],
+    P('staff-printers', 'Staff to printers', { src: ST, dst: ['printers'], service: 'SP_PRINT', tags: ['printers', 'staff-lan'],
       why: 'Staff can send work to the printers. The printers cannot start a connection back, so this is a one-way door.' }),
     P('servers-internet', 'Servers to the internet', { src: ['servers'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
       why: 'Servers fetch updates, licences and cloud services.' }),

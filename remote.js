@@ -55,7 +55,7 @@
   function warnings(result, project) {
     const r = norm(project), out = [];
     if (!r.on || !result || !result.ok) return out;
-    const text = (what, c) => `Remote-worker clash: ${what} ${c.cidr} overlaps ${c.home.join(', ')}, a range many home routers use. A remote worker whose home network uses it cannot reliably reach that office range over the VPN, because their traffic stays on the home network. Renumber it, or ask affected staff to change their home router's range.`;
+    const text = (what, c) => `Remote-worker clash: ${what} ${c.cidr} ${c.home.length === 1 && c.home[0] === c.cidr ? 'is' : 'overlaps ' + c.home.join(', ') + ','} a range many home routers use. A remote worker whose home network uses it cannot reliably reach that office range over the VPN, because their traffic stays on the home network. Renumber it, or ask affected staff to change their home router's range.`;
     homeClashes(project.existing || []).forEach(c => out.push(text('The existing range', c)));
     homeClashes([result.parent.cidr].concat(result.allocations.filter(a => a.prefix <= 30).map(a => a.cidr)))
       .forEach(c => out.push(text('The office network', c)));
