@@ -386,15 +386,25 @@
   }
   function vpnCard() {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
-    return tile('__vpn', '#37c2a0', 'Remote staff (VPN)', 'IPsec pool', [['Usable range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`], ['Pool', esc(p.cidr)], ['Netmask', `${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}`]]);
+    return tile('__vpn', '#37c2a0', '👤 Remote staff (VPN)', 'IPsec pool', [['Usable range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`], ['Pool', esc(p.cidr)], ['Netmask', `${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}`]]);
   }
+  // Folders: tap one to show only its cards. 'all' shows everything. Remembered per page load only.
+  let grpSel = 'all';
+  const grpOf = a => Groups.get(Groups.groupId(a));
   function renderCards() {
-    const box = $('#cards');
-    if (!result.ok) { box.innerHTML = '<p class="hint">Fix the problem above to see the networks.</p>'; return; }
+    const box = $('#cards'), fb = $('#folders');
+    if (!result.ok) { box.innerHTML = '<p class="hint">Fix the problem above to see the networks.</p>'; fb.innerHTML = ''; return; }
     const names = cur().networks.map(n => String(n.name).trim());
     const list = result.allocations.slice().sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
-    box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), a.name, typeOf(a),
-      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]])).join('') + vpnCard();
+    const vpn = Remote.plan(result, project()), vpnOk = !!(vpn && vpn.ok);
+    const count = id => list.filter(a => Groups.groupId(a) === id).length + (vpnOk && id === 'users' ? 1 : 0);
+    const shown = Groups.GROUPS.filter(g => count(g.id));
+    if (grpSel !== 'all' && !shown.some(g => g.id === grpSel)) grpSel = 'all';
+    fb.innerHTML = `<button type="button" class="folder${grpSel === 'all' ? ' on' : ''}" data-grp="all" aria-pressed="${grpSel === 'all'}"><span class="fe" aria-hidden="true">🗂️</span><b>Show all</b><span class="fc">${list.length + (vpnOk ? 1 : 0)}</span></button>` +
+      shown.map(g => `<button type="button" class="folder${grpSel === g.id ? ' on' : ''}" data-grp="${g.id}" aria-pressed="${grpSel === g.id}"><span class="fe" aria-hidden="true">${g.emoji}</span><b>${esc(g.name)}</b><span class="fc">${count(g.id)}</span></button>`).join('');
+    const vis = a => grpSel === 'all' || Groups.groupId(a) === grpSel;
+    box.innerHTML = list.filter(vis).map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), `${grpOf(a).emoji} ${a.name}`, typeOf(a),
+      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]], a.name)).join('') + (vpnOk && (grpSel === 'all' || grpSel === 'users') ? vpnCard() : '');
   }
   // Optional DHCP DNS for one network (default stays System DNS). Stored per client by network name: project().dhcpDns[name] = { server, domain }.
   function dnsBox(a) {
@@ -920,6 +930,7 @@
     $$('.rtabs button').forEach(b => b.addEventListener('click', () => setOpen(b.dataset.tab, false)));
     $('#fitUsed').addEventListener('change', renderMap);
     const cardsBox = $('#cards');
+    $('#folders').addEventListener('click', e => { const f = e.target.closest('.folder'); if (f) { grpSel = f.dataset.grp; renderCards(); const n = $('#folders').querySelector(`[data-grp="${grpSel}"]`); if (n) n.focus(); } });
     cardsBox.addEventListener('click', e => { const c = e.target.closest('.ncard'); if (c) openCard(c.dataset.name, c); });
     cardsBox.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('ncard')) { e.preventDefault(); openCard(e.target.dataset.name, e.target); } });
     $('#cardclose').addEventListener('click', closeCard);

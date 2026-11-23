@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v31'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v32'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v31/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v32/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1662,6 +1662,26 @@ test('policy popup: cells edit a draft, Save/Cancel, no Edit this policy section
   assert.ok(!app.includes('Edit this policy') && !app.includes('polEditOpen'));
   ['data-psave', 'data-pcancel', 'data-psvc', 'polDraft', 'polDirty', 'id="pf-name"', 'data-pf="action"', 'data-pf="nat"'].forEach(x => assert.ok(app.includes(x), x));
   assert.ok(css.includes('.pfoot') && css.includes('.schip.tog'));
+});
+// ---- network folders (groups.js) ----
+test('Groups: kinds and roles map to the four folders; unknown goes to Users', () => {
+  const G = require('./groups.js');
+  const g = n => G.groupId(n);
+  ['mgmt', 'staff', 'guest'].forEach(k => assert.strictEqual(g({ kind: k }), 'users'));
+  ['servers', 'dmz'].forEach(k => assert.strictEqual(g({ kind: k }), 'servers'));
+  ['voice', 'cameras', 'iot', 'printers', 'pos'].forEach(k => assert.strictEqual(g({ kind: k }), 'devices'));
+  assert.strictEqual(g({ role: 'Transit', kind: '' }), 'infra');
+  assert.strictEqual(g({ role: 'Loopback' }), 'infra');
+  assert.strictEqual(g({ role: 'Mgmt' }), 'users');
+  assert.strictEqual(g({ role: 'DMZ' }), 'servers');
+  assert.strictEqual(g({ role: 'LAN', kind: '' }), 'users');
+  assert.strictEqual(g({}), 'users');
+  assert.deepStrictEqual(G.GROUPS.map(x => x.emoji), ['👤', '🖥️', '🖨️', '🔗']);
+});
+test('Groups: UI wires the folder row and Show all, and ships groups.js offline', () => {
+  const fs = require('fs'), app = fs.readFileSync('./app.js', 'utf8'), html = fs.readFileSync('./index.html', 'utf8'), sw = fs.readFileSync('./sw.js', 'utf8');
+  assert.ok(html.includes('id="folders"') && html.includes('groups.js') && sw.includes('./groups.js'));
+  assert.ok(app.includes('data-grp="all"') && app.includes('Show all'));
 });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
