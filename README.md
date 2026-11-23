@@ -34,7 +34,7 @@ git add .; git commit -m "Client intake flow"; git push
 
 First-time setup (once): install GitHub CLI (`winget install GitHub.cli`, reopen PowerShell, `gh auth login`), then `gh repo create subnetpal --public --source=. --push` and `gh api -X POST "repos/{owner}/subnetpal/pages" -f "source[branch]=main" -f "source[path]=/"`. Live at `https://<your-github-username>.github.io/subnetpal/`. Netlify alternative: drag this folder onto https://app.netlify.com/drop.
 
-Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v17`; new files go in `ASSETS`).
+Installed copies update on their next online open (cache-first with background refresh, so the new version shows on the launch after). When you ship changes, bump `CACHE` in `sw.js` (currently `subnetpal-v18`; new files go in `ASSETS`).
 
 ## Files
 
@@ -150,8 +150,9 @@ Installed copies update on their next online open (cache-first with background r
 - **Modes:** Light is the default look (white cards on a pale grey frame, soft shadows, indigo to violet accent). Dark is charcoal cards with a faint purple/pink glow behind the frame. The pill in the top bar toggles it. The choice is saved in `localStorage` (`subnetpal.theme`); until you pick, it follows the system setting (`prefers-color-scheme`), including live changes. Dark colours exist only under `@media screen`, so printing is always light.
 - **Frame:** the app floats as a big rounded frame with a margin on a soft gradient (no photo or glass blur on the page itself). The top is a floating pill with logo, offline status and the theme toggle. The intake is a white side card.
 - **Navigation:** the five tabs are a segmented pill (active tab filled dark in light mode, white in dark mode). On phones (under 900px) they become a floating bottom tab pill. No icon rail, mega menus or 3D art (skipped on purpose).
-- **Bento:** greeting heading (client name in an italic serif accent), then four KPI tiles (Networks as the hero tile, Addresses, Policies, Remote staff), then on the Plan tab the address map in a hero card beside a legend card (side by side from 1200px).
+- **Themes:** five colour themes in a picker next to the Light/Dark toggle (Indigo default, Teal, BluGrn, Burg, Peach), each with a light and a dark version, saved in `localStorage` (`subnetpal.palette`). Accents are darkened shades from each palette so white button text stays at 4.5:1 or better; the pale shades tint the page and glow. Status colours (green / amber / red) are fixed and do not change with the theme, and chips always carry a text label. Print and the report stay light (Indigo).
+- **No welcome heading:** removed the greeting. Four KPI tiles sit above the tabs (Networks as the hero tile, Addresses, Policies, Remote staff), then on the Plan tab the address map in a hero card beside a legend card (side by side from 1200px).
 - **Buttons and chips:** all pills. Primary is the indigo to violet gradient (a black primary would vanish in dark mode), secondary is an outline pill, tertiary is plain text. Cards lift 4px on hover with a spring ease (CSS only, off under `prefers-reduced-motion`).
 - **Diagram:** follows the current mode on screen. "Download SVG"/"Copy SVG" and printing always use the light version. The client report window is unchanged (already light and print-friendly).
-- **Greeting** uses the device clock; the "Good morning, Name" uses the client name field. Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(0, 1fr)` kept; checkboxes still listen on `input`.
+Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(0, 1fr)` kept; checkboxes still listen on `input`.
 - Needs `color-mix()` (all current browsers); older ones fall back to a transparent selected-option fill.

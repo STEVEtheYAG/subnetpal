@@ -281,11 +281,8 @@
     $('#sum-export').textContent = 'Client report · FortiOS CLI · CSV · text';
     renderHello(c, ok, n, nPol);
   }
-  // Greeting + KPI tiles above the tabs. Client name is set with textContent/esc only.
+  // KPI tiles above the tabs.
   function renderHello(c, ok, n, nPol) {
-    const h = $('#hello'); h.textContent = Theme.greeting(new Date().getHours());
-    if (c.name && c.name !== 'New client') { h.appendChild(document.createTextNode(', ')); const i = document.createElement('i'); i.textContent = c.name; h.appendChild(i); }
-    $('#hellosub').textContent = ok ? `${result.parent.cidr} · ${result.style === 'vlan24' ? 'one /24 per VLAN' : 'packed'}` : 'Fill in the intake to build the plan.';
     const vp = ok ? Remote.plan(result, project()) : null;
     const addr = ok ? result.allocations.reduce((t, a) => t + (Number(a.totalAddresses) || 0), 0) : 0;
     const tiles = [
@@ -302,8 +299,24 @@
     $('#themeBtn').setAttribute('aria-label', `Switch to ${nx} mode`);
     $('#themeIco').textContent = nx === 'dark' ? '☾' : '☀'; $('#themeTxt').textContent = nx === 'dark' ? 'Dark' : 'Light';
   }
+  function paintPalette() {
+    const cur = document.documentElement.getAttribute('data-palette') || 'indigo';
+    const nm = (Theme.PALETTES.find(p => p[0] === cur) || Theme.PALETTES[0])[1];
+    $('#tname').textContent = nm;
+    $('#tpop').querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', b.dataset.p === cur ? 'true' : 'false'));
+  }
+  function bindPalette() {
+    $('#tpop').innerHTML = Theme.PALETTES.map(p => `<button type="button" role="radio" data-p="${p[0]}"><span class="sw sw-${p[0]}" aria-hidden="true"></span>${esc(p[1])}</button>`).join('');
+    paintPalette();
+    $('#tpop').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      Theme.applyPalette(b.dataset.p); paintPalette(); $('#themes').open = false; if (openSec === 'diagram') renderTopo();
+    });
+    document.addEventListener('click', e => { const d = $('#themes'); if (d.open && !d.contains(e.target)) d.open = false; });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#themes').open = false; });
+  }
   function bindTheme() {
-    paintThemeBtn();
+    bindPalette(); paintThemeBtn();
     $('#themeBtn').addEventListener('click', () => { Theme.apply(Theme.other(themeNow())); paintThemeBtn(); if (openSec === 'diagram') renderTopo(); });
     // Follow the system only while the person has not picked a side.
     const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');

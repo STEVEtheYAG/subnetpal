@@ -25,7 +25,13 @@
     <h1>SubnetPal</h1>
     <span id="netpill" class="pill" title="Offline status">…</span>
   </div>
+  <div class="tools">
+  <details class="themes" id="themes">
+    <summary aria-label="Colour theme" title="Colour theme"><span class="dot" aria-hidden="true"></span><span class="tname" id="tname">Indigo</span></summary>
+    <div class="tpop" id="tpop" role="radiogroup" aria-label="Colour theme"></div>
+  </details>
   <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco">☾</span><span id="themeTxt">Dark</span></button>
+  </div>
 </header>
 
 <div class="app">
@@ -150,10 +156,6 @@
   <main id="right" class="results">
     <div id="warn" role="alert"></div>
 
-    <div class="hello">
-      <h2 id="hello" class="greet">Good day</h2>
-      <p class="hint" id="hellosub"></p>
-    </div>
     <div class="kpis" id="kpis" aria-label="Plan at a glance"></div>
 
     <div class="rtabs" role="tablist" aria-label="Results">
