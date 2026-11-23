@@ -1394,7 +1394,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v16'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v17'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1429,6 +1429,27 @@ test('diagram: dual WAN is labelled on the internet link', () => {
 test('contract: a large contract is scanned quickly', () => {
   const big = (ACC_TEXT + '\n').repeat(300).slice(0, 300000), t0 = Date.now(); const r = K.extract(big);
   assert.ok(r.ok && Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
+});
+
+test('theme: resolve picks stored side, else the system, light by default', () => {
+  const T = require('./theme.js');
+  assert.strictEqual(T.resolve('dark', false), 'dark'); assert.strictEqual(T.resolve('light', true), 'light');
+  assert.strictEqual(T.resolve(null, true), 'dark'); assert.strictEqual(T.resolve(null, false), 'light');
+  assert.strictEqual(T.resolve('purple', false), 'light'); assert.strictEqual(T.other('dark'), 'light'); assert.strictEqual(T.other('light'), 'dark');
+});
+test('theme: greeting by hour and compact KPI numbers', () => {
+  const T = require('./theme.js');
+  assert.strictEqual(T.greeting(4), 'Good evening'); assert.strictEqual(T.greeting(5), 'Good morning'); assert.strictEqual(T.greeting(11), 'Good morning');
+  assert.strictEqual(T.greeting(12), 'Good afternoon'); assert.strictEqual(T.greeting(17), 'Good afternoon'); assert.strictEqual(T.greeting(18), 'Good evening'); assert.strictEqual(T.greeting(23), 'Good evening');
+  assert.strictEqual(T.compact(0), '0'); assert.strictEqual(T.compact(1795), '1,795'); assert.strictEqual(T.compact(99999), '99,999');
+  assert.strictEqual(T.compact(120000), '120K'); assert.strictEqual(T.compact(65536 * 16), '1M'); assert.strictEqual(T.compact(4294967296), '4.3B'); assert.strictEqual(T.compact('x'), '0');
+});
+test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
+  const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v17/.test(sw));
+  assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
+  assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
+  assert.ok(!/\(\?<[=!]/.test(fs.readFileSync(__dirname + '/theme.js', 'utf8')), 'no regex lookbehind');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

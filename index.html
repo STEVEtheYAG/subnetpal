@@ -5,8 +5,8 @@
 <title>SubnetPal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="Client-intake IP planner for firewall builds. FortiGate CLI export and a plain-language client report.">
-<meta name="theme-color" content="#0f1419">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#e4e7f7">
+<meta name="color-scheme" content="light dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -15,13 +15,17 @@
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
 </head>
 <body>
+<div class="frame">
 <header class="top">
   <div class="brand">
+    <span class="logo" aria-hidden="true">S</span>
     <h1>SubnetPal</h1>
     <span id="netpill" class="pill" title="Offline status">…</span>
   </div>
+  <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco">☾</span><span id="themeTxt">Dark</span></button>
 </header>
 
 <div class="app">
@@ -146,6 +150,12 @@
   <main id="right" class="results">
     <div id="warn" role="alert"></div>
 
+    <div class="hello">
+      <h2 id="hello" class="greet">Good day</h2>
+      <p class="hint" id="hellosub"></p>
+    </div>
+    <div class="kpis" id="kpis" aria-label="Plan at a glance"></div>
+
     <div class="rtabs" role="tablist" aria-label="Results">
       <button type="button" role="tab" data-tab="plan" aria-controls="sec-plan">Plan</button>
       <button type="button" role="tab" data-tab="diagram" aria-controls="sec-diagram">Diagram</button>
@@ -157,9 +167,13 @@
     <section class="acc" id="sec-plan" role="tabpanel">
       <div class="acc-body" id="body-plan">
         <p class="sectionsum" id="sum-plan"></p>
-        <div id="map"></div>
-        <label class="check small"><input type="checkbox" id="fitUsed" checked> Zoom the map to the used space</label>
-        <div id="legend" class="legend"></div>
+        <div class="bento">
+          <div class="bcard hero">
+            <div id="map"></div>
+            <label class="check small"><input type="checkbox" id="fitUsed" checked> Zoom the map to the used space</label>
+          </div>
+          <div class="bcard"><h3 class="bh">Networks in the plan</h3><div id="legend" class="legend"></div></div>
+        </div>
         <h3>Networks <span class="dim">(tap a card for more)</span></h3>
         <div id="cards" class="cards"></div>
         <details class="more2"><summary>Unused space and notes</summary><div id="gaps"></div></details>
@@ -265,6 +279,7 @@
       </div>
     </section>
   </main>
+</div>
 </div>
 
 <script src="calc.js"></script>

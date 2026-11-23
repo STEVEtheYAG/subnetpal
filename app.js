@@ -279,6 +279,38 @@
     const vp = Remote.plan(result, project());
     $('#sum-remote').textContent = !vp ? 'Not planned. Tick Remote staff in the intake.' : vp.ok ? `${vp.staff} remote staff · VPN pool ${vp.cidr} · reaches ${vp.reach.length} network${vp.reach.length === 1 ? '' : 's'}` : 'No space for the VPN pool';
     $('#sum-export').textContent = 'Client report · FortiOS CLI · CSV · text';
+    renderHello(c, ok, n, nPol);
+  }
+  // Greeting + KPI tiles above the tabs. Client name is set with textContent/esc only.
+  function renderHello(c, ok, n, nPol) {
+    const h = $('#hello'); h.textContent = Theme.greeting(new Date().getHours());
+    if (c.name && c.name !== 'New client') { h.appendChild(document.createTextNode(', ')); const i = document.createElement('i'); i.textContent = c.name; h.appendChild(i); }
+    $('#hellosub').textContent = ok ? `${result.parent.cidr} · ${result.style === 'vlan24' ? 'one /24 per VLAN' : 'packed'}` : 'Fill in the intake to build the plan.';
+    const vp = ok ? Remote.plan(result, project()) : null;
+    const addr = ok ? result.allocations.reduce((t, a) => t + (Number(a.totalAddresses) || 0), 0) : 0;
+    const tiles = [
+      ['Networks', ok ? n : '-', ok ? 'in the plan' : 'waiting', 'hero'],
+      ['Addresses', ok ? Theme.compact(addr) : '-', 'allocated', ''],
+      ['Policies', ok ? nPol : '-', 'then deny all', ''],
+      ['Remote staff', vp && vp.ok ? vp.staff : '-', vp && vp.ok ? 'on the VPN' : 'not planned', ''],
+    ];
+    $('#kpis').innerHTML = tiles.map(t => `<div class="kpi ${t[3]}"><span class="kl">${esc(t[0])}</span><b class="kv">${esc(String(t[1]))}</b><span class="ks">${esc(t[2])}</span></div>`).join('');
+  }
+  function themeNow() { return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'; }
+  function paintThemeBtn() {
+    const t = themeNow(), nx = Theme.other(t);
+    $('#themeBtn').setAttribute('aria-label', `Switch to ${nx} mode`);
+    $('#themeIco').textContent = nx === 'dark' ? '☾' : '☀'; $('#themeTxt').textContent = nx === 'dark' ? 'Dark' : 'Light';
+  }
+  function bindTheme() {
+    paintThemeBtn();
+    $('#themeBtn').addEventListener('click', () => { Theme.apply(Theme.other(themeNow())); paintThemeBtn(); if (openSec === 'diagram') renderTopo(); });
+    // Follow the system only while the person has not picked a side.
+    const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq && mq.addEventListener) mq.addEventListener('change', e => { let st = null; try { st = localStorage.getItem(Theme.KEY); } catch (x) { /* ignore */ } if (st !== 'dark' && st !== 'light') { document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light'); paintThemeBtn(); if (openSec === 'diagram') renderTopo(); } });
+    // Printing is always light: swap the diagram for its light version while the print dialog is open.
+    window.addEventListener('beforeprint', () => { if (result && result.ok && $('#topo').firstChild) $('#topo').innerHTML = topoSvg('light'); });
+    window.addEventListener('afterprint', () => { if (openSec === 'diagram') renderTopo(); });
   }
 
   const typeOf = a => (a.role === 'Transit' ? 'Transit' : a.role === 'Loopback' ? 'Loopback' : a.vlan !== '' ? `VLAN ${a.vlan}` : 'Port');
@@ -363,21 +395,21 @@
   }
 
   function topoCols() { const w = ($('#topo').clientWidth || window.innerWidth); return w >= 860 ? 3 : w >= 600 ? 2 : 1; }
-  function topoSvg(theme) { return Topology.build(result, project(), { cols: topoCols(), theme, color, standalone: theme === 'light', vpn: Remote.plan(result, project()) }); }
+  function topoSvg(theme, standalone) { return Topology.build(result, project(), { cols: topoCols(), theme, color, standalone: !!standalone, vpn: Remote.plan(result, project()) }); }
   function renderTopo() {
     $('#topomsg').textContent = '';
-    $('#topo').innerHTML = result && result.ok ? topoSvg('dark') : '<p class="hint">Fix the problem at the top to draw the diagram.</p>';
+    $('#topo').innerHTML = result && result.ok ? topoSvg(themeNow()) : '<p class="hint">Fix the problem at the top to draw the diagram.</p>';
     $('#btnSvg').disabled = $('#btnSvgCopy').disabled = !(result && result.ok);
   }
   function bindTopo() {
     $('#btnSvg').addEventListener('click', () => {
-      const blob = new Blob([topoSvg('light')], { type: 'image/svg+xml' });
+      const blob = new Blob([topoSvg('light', true)], { type: 'image/svg+xml' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
       a.download = (cur().name || 'network').replace(/[^\w-]+/g, '_') + '-network-map.svg';
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       $('#topomsg').textContent = 'SVG downloaded (light theme, for documents).';
     });
-    $('#btnSvgCopy').addEventListener('click', async () => { $('#topomsg').textContent = (await copy(topoSvg('light'))) ? 'SVG copied.' : 'Copy was blocked. Use Download SVG instead.'; });
+    $('#btnSvgCopy').addEventListener('click', async () => { $('#topomsg').textContent = (await copy(topoSvg('light', true))) ? 'SVG copied.' : 'Copy was blocked. Use Download SVG instead.'; });
     let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => { if (openSec === 'diagram') renderTopo(); }, 150); });
   }
 
@@ -681,7 +713,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
+  bindTheme(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {
