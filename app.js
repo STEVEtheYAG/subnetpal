@@ -609,25 +609,23 @@
     const al = result.allocations, i = al.findIndex(a => a.name === name);
     return i < 0 ? null : { top: Fmt.ifaceNames(al, ph)[i], sub: name, note: al[i].cidr };
   }
-  const snakeCols = () => { const w = ($('#snake') && $('#snake').clientWidth) || window.innerWidth; return w >= 820 ? 3 : w >= 540 ? 2 : 1; };
-  // Tiles run left to right, then wrap and run right to left, joined by arrows; the Implicit deny tile closes the snake.
+  // A stack of slender planks, one per row, joined by small down arrows. The numbers sit in a fixed left gutter: dragging moves the policy, not the number. Implicit deny is the last plank.
   function renderSnake() {
     const box = $('#snake'); if (!box || !result || !result.ok) return;
-    const list = Policy.effective(project(), result.allocations), nets = Policy.policyNets(result.allocations), cols = snakeCols(), total = list.length + 1;
-    const tiles = list.map((p, i) => polTile(p, i, nets)).concat(['<div class="ncard ptile deny final"><div class="ncsum"><span class="nt"><span class="swatch" style="background:var(--bad)"></span><b>Implicit deny</b><span class="ntype pdeny">DENY</span></span><p class="hint">Everything not matched above is blocked. Always last (SP_Final_deny).</p></div></div>']);
-    box.innerHTML = tiles.map((t, k) => {
-      const row = Math.floor(k / cols), pos = k % cols, rtl = row % 2 === 1, col = rtl ? cols - pos : pos + 1;
-      const end = pos === cols - 1, dir = k === total - 1 ? '' : (cols === 1 || end) ? 'd' : rtl ? 'l' : 'r';
-      const sc = (1 - 0.22 * k / Math.max(1, total - 1)).toFixed(3);   // tiles shrink down the snake: 1.00 for rule 1 to 0.78 for the Implicit deny
-      return `<div class="snk ${dir}" style="grid-row:${row + 1};grid-column:${col};--s:${sc}">${t}</div>`;
+    const list = Policy.effective(project(), result.allocations), nets = Policy.policyNets(result.allocations), total = list.length + 1;
+    const final = '<div class="ncard ptile deny final"><div class="plk"><span class="swatch" style="background:var(--bad)"></span><b class="ptitle">Implicit deny</b><span class="pflow">everything not matched above is blocked (SP_Final_deny)</span><span class="ntype pdeny">DENY</span></div></div>';
+    box.innerHTML = list.map((p, i) => polTile(p, i, nets)).concat([final]).map((t, k) => {
+      const sc = (1 - 0.18 * k / Math.max(1, total - 1)).toFixed(3);   // planks taper from 100% (rule 1) to 82% (Implicit deny)
+      return `<div class="slot"><span class="snum">${k < total - 1 ? k + 1 : '\u2022'}</span><div class="snk" data-k="${k}" style="--s:${sc}">${t}</div></div>` + (k < total - 1 ? '<div class="sarrow" aria-hidden="true"><span>\u2193</span></div>' : '');
     }).join('');
-    box.style.setProperty('--cols', cols);
   }
   function polTile(p, i, nets) {
     const deny = p.action === 'deny';
-    return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-pol="${i}">
-      <div class="ncsum"><span class="nt"><button type="button" class="phandle" data-phandle aria-label="Drag to reorder policy ${i + 1}" title="Drag to reorder">&#8942;&#8942;</button><span class="swatch" style="background:${deny ? 'var(--bad)' : 'var(--ok)'}"></span><b>${i + 1}. ${esc(Policy.policyName(p))}</b><span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span><button type="button" class="pdelx" data-pdel aria-label="Delete policy ${i + 1}" title="Delete">&times;</button></span>
-      <dl class="nf"><div><dt>From</dt><dd>${esc(p.src)}</dd></div><div><dt>To</dt><dd>${esc(p.dst === 'internet' ? 'Internet' : p.dst === 'internal' ? 'All internal networks' : p.dst)}</dd></div><div><dt>Service</dt><dd class="mono">${esc(polSvcs(p).join(', '))}</dd></div></dl></div>
+    const to = p.dst === 'internet' ? 'Internet' : p.dst === 'internal' ? 'All internal networks' : p.dst;
+    return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}" role="button" tabindex="0" aria-haspopup="dialog" aria-label="Policy ${i + 1}: ${esc(Policy.policyName(p))}" data-pol="${i}">
+      <div class="plk"><button type="button" class="phandle" data-phandle aria-label="Drag to reorder policy ${i + 1}" title="Drag to reorder">&#8942;&#8942;</button><span class="swatch" style="background:${deny ? 'var(--bad)' : 'var(--ok)'}"></span><b class="ptitle">${esc(Policy.policyName(p))}</b>
+        <span class="pflow">${esc(p.src)} &rarr; ${esc(to)}</span><span class="pchipsm">${polSvcs(p).map(x => `<span class="schip">${esc(x)}</span>`).join('')}</span>
+        <span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span><button type="button" class="pdelx" data-pdel aria-label="Delete policy ${i + 1}" title="Delete">&times;</button></div>
       <div class="pconf" hidden><b>Delete this policy?</b><span><button type="button" class="btn sm danger" data-pdelgo>Delete</button><button type="button" class="btn sm" data-pdelno>Cancel</button></span></div></div>`;
   }
   // The popup body, laid out like the hand-drawn FortiGate policy table.
@@ -774,7 +772,7 @@
     box.addEventListener('pointerdown', e => {
       const h = e.target.closest('[data-phandle]'); if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
       const tile = h.closest('[data-pol]');
-      drag = { i: Number(tile.dataset.pol), id: e.pointerId, snk: tile.parentNode, x0: e.clientX, y0: e.clientY, sy: 0, on: false, over: -1, last: e };
+      drag = { i: Number(tile.dataset.pol), id: e.pointerId, snk: tile.closest('.snk'), x0: e.clientX, y0: e.clientY, sy: 0, on: false, over: -1, last: e };
       try { h.setPointerCapture(e.pointerId); } catch (x) { /* older browsers */ }
       e.preventDefault();
     });
@@ -784,7 +782,7 @@
       drag.snk.style.transform = `translate(${dx}px, ${dy}px)`;
       const t = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest && x.closest('.snk')).find(x => x && x !== drag.snk && box.contains(x));
       box.querySelectorAll('.dropt').forEach(x => x.classList.remove('dropt'));
-      drag.over = t ? Array.prototype.indexOf.call(t.parentNode.children, t) : -1;
+      drag.over = t ? Number(t.dataset.k) : -1;
       if (t) t.classList.add('dropt');
     };
     box.addEventListener('pointermove', e => {

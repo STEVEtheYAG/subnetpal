@@ -205,3 +205,8 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 - **Delete:** an × on each tile asks "Delete this policy?" on the tile (Delete / Cancel). In the popup the × needs a second click ("Delete?").
 - **Shrink:** tiles scale from 100% (rule 1) down to 78% (Implicit deny) to show order of activation; text stays readable.
 - sw.js cache is v28.
+
+## Policy stack (replaces the snake)
+- **Planks:** one slender plank per row with a small down arrow between each, and Implicit deny as the last plank (dashed, fixed). Each plank shows the name, From → To, service chips, ACCEPT/DENY, a drag handle and ×. Planks taper from 100% width (rule 1) to 82% (Implicit deny); on a phone the plank wraps to two lines.
+- **Fixed numbers:** the numbers sit in a left gutter that never moves. Dragging (mouse or touch, from the dots) moves the policy into another numbered slot; the numbers do not travel with it. The plank title no longer carries a number; the popup title shows the slot number.
+- Delete (× with a confirm on the plank, double-click × in the popup), Add new policy popup and the policy popup are unchanged. sw.js cache is v29. The snake from v27/v28 is gone.
