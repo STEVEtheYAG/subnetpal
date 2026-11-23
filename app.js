@@ -369,7 +369,7 @@
     return i < 0 ? null : Guide.iface(result, project(), i);
   }
   // Network cards are tiles; clicking one opens a modal with the full detail (built fresh each time).
-  const tile = (key, swatch, name, type, fields) => `<div class="ncard" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
+  const tile = (key, swatch, name, type, fields, off) => `<div class="ncard${off ? ' off' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
         <div class="ncsum">
           <span class="nt"><span class="swatch" style="background:${swatch}"></span><b>${esc(name)}</b><span class="ntype">${esc(type)}</span><span class="chev" aria-hidden="true">›</span></span>
           <dl class="nf">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${v}</dd></div>`).join('')}</dl>
@@ -384,9 +384,9 @@
     if (a.v6) rows.push(['IPv6 subnet', a.v6.cidr], ['IPv6 gateway', a.v6.address]);
     return rows;
   }
-  function vpnCard() {
+  function vpnCard(off) {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
-    return tile('__vpn', '#37c2a0', '👤 Remote staff (VPN)', 'IPsec pool', [['Usable range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`], ['Pool', esc(p.cidr)], ['Netmask', `${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}`]]);
+    return tile('__vpn', '#37c2a0', '👤 Remote staff (VPN)', 'IPsec pool', [['Usable range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`], ['Pool', esc(p.cidr)], ['Netmask', `${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}`]], off);
   }
   // Folders: tap one to show only its cards. 'all' shows everything. Remembered per page load only.
   let grpSel = 'all';
@@ -402,9 +402,10 @@
     if (grpSel !== 'all' && !shown.some(g => g.id === grpSel)) grpSel = 'all';
     fb.innerHTML = `<button type="button" class="folder${grpSel === 'all' ? ' on' : ''}" data-grp="all" aria-pressed="${grpSel === 'all'}"><span class="fe" aria-hidden="true">🗂️</span><b>Show all</b><span class="fc">${list.length + (vpnOk ? 1 : 0)}</span></button>` +
       shown.map(g => `<button type="button" class="folder${grpSel === g.id ? ' on' : ''}" data-grp="${g.id}" aria-pressed="${grpSel === g.id}"><span class="fe" aria-hidden="true">${g.emoji}</span><b>${esc(g.name)}</b><span class="fc">${count(g.id)}</span></button>`).join('');
-    const vis = a => grpSel === 'all' || Groups.groupId(a) === grpSel;
-    box.innerHTML = list.filter(vis).map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), `${grpOf(a).emoji} ${a.name}`, typeOf(a),
-      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]], a.name)).join('') + (vpnOk && (grpSel === 'all' || grpSel === 'users') ? vpnCard() : '');
+    const dim = a => grpSel !== 'all' && Groups.groupId(a) !== grpSel;
+    box.classList.toggle('sel', grpSel !== 'all');
+    box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), `${grpOf(a).emoji} ${a.name}`, typeOf(a),
+      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]], a.name)).join('') + (vpnOk ? vpnCard(grpSel !== 'all' && grpSel !== 'users') : '');
   }
   // Optional DHCP DNS for one network (default stays System DNS). Stored per client by network name: project().dhcpDns[name] = { server, domain }.
   function dnsBox(a) {
