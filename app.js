@@ -27,7 +27,6 @@
   let result = null;
   let openSec = 'plan';
   let outView = 'forti';
-  const openCards = new Set();
 
   // ---------- toast ----------
   let toastT;
@@ -49,7 +48,6 @@
     const c = cur();
     Intake.migrate(c);
     Intake.applyIntake(c);
-    openCards.clear();
     renderClientSel(); renderIntake(); recalc();
   }
   function addClient(c) {
@@ -243,14 +241,11 @@
       contractReset(true); cmsg(`Applied ${done.length} field${done.length === 1 ? '' : 's'} to the intake. The contract text has been cleared from this page.`);
     });
   }
-  // Client information panel: slides out from the left. Desktop: a column that closes to give the results the full width. Phone: a drawer over the page.
-  // The open/closed choice is remembered per layout (desktop and phone keep separate choices).
-  const sideKey = () => 'subnetpal-side-' + (isPhone() ? 'm' : 'd');
+  // Client information: a panel that slides down from the top, toggled by the "Client info" button. The choice is remembered per layout.
+  const sideKey = () => 'subnetpal-top-' + (isPhone() ? 'm' : 'd');
   function setSideCollapsed(v, noSave) {
     $('#side').classList.toggle('collapsed', v);
-    document.body.classList.toggle('side-closed', v); document.body.classList.toggle('side-open', !v);
-    $('#sideTab').setAttribute('aria-expanded', String(!v)); $('#sideTabTxt').textContent = v ? 'Client info' : 'Hide';
-    $('#sideBackdrop').hidden = v || !isPhone();
+    $('#sideTab').setAttribute('aria-expanded', String(!v));
     if (!noSave) { try { localStorage.setItem(sideKey(), v ? '0' : '1'); } catch (e) { /* private mode: just not remembered */ } }
   }
   function initSide() {
@@ -259,8 +254,7 @@
   }
   function bindSide() {
     $('#sideTab').addEventListener('click', () => setSideCollapsed(!$('#side').classList.contains('collapsed')));
-    $('#sideBackdrop').addEventListener('click', () => { setSideCollapsed(true); $('#sideTab').focus(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && isPhone() && !$('#side').classList.contains('collapsed') && !$('#clidlg').open) { setSideCollapsed(true); $('#sideTab').focus(); } });
+    $('#side').addEventListener('keydown', e => { if (e.key === 'Escape') { setSideCollapsed(true); $('#sideTab').focus(); } });
     matchMedia('(max-width: 899px)').addEventListener('change', initSide);
   }
   function renderV6Msg() {
@@ -365,47 +359,53 @@
     const i = result.allocations.findIndex(a => a.name === key);
     return i < 0 ? null : Guide.iface(result, project(), i);
   }
+  // Network cards are tiles; clicking one opens a modal with the full detail (built fresh each time).
+  const tile = (key, swatch, name, type, fields) => `<div class="ncard" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
+        <div class="ncsum">
+          <span class="nt"><span class="swatch" style="background:${swatch}"></span><b>${esc(name)}</b><span class="ntype">${esc(type)}</span><span class="chev" aria-hidden="true">›</span></span>
+          <dl class="nf">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${v}</dd></div>`).join('')}</dl>
+        </div>
+      </div>`;
+  const dlRows = rows => `<dl class="nf extra">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${esc(v)}</dd></div>`).join('')}</dl>`;
+  function vpnRows(p) {
+    return [['Remote staff planned', `${p.staff} + ${p.growth}% buffer`], ['Pool size', `${p.size.toLocaleString()} (${p.usable.toLocaleString()} usable)`], ['Placement', p.where === 'inside' ? 'office block, outside every network' : 'separate block']];
+  }
+  function netRows(a) {
+    const rows = [['DHCP range', rng(a.dhcpStart, a.dhcpEnd) || 'None'], ['Static range', rng(a.staticStart, a.staticEnd) || 'None'], ['Broadcast', a.broadcast || 'None'], ['Wildcard', a.wildcard], ['Total / usable hosts', `${a.totalAddresses.toLocaleString()} / ${a.usableHosts.toLocaleString()}`]];
+    if (a.v6) rows.push(['IPv6 subnet', a.v6.cidr], ['IPv6 gateway', a.v6.address]);
+    return rows;
+  }
   function vpnCard() {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
-    return `<details class="ncard" data-name="__vpn"${openCards.has('__vpn') ? ' open' : ''}>
-        <summary>
-          <span class="nt"><span class="swatch" style="background:#37c2a0"></span><b>Remote staff (VPN)</b><span class="ntype">IPsec pool</span><span class="chev" aria-hidden="true">▾</span></span>
-          <dl class="nf">
-            <div><dt>Usable range</dt><dd class="mono">${ipHtml(p.first)} - ${ipHtml(p.last)}</dd></div>
-            <div><dt>Pool</dt><dd class="mono">${esc(p.cidr)}</dd></div>
-            <div><dt>Netmask</dt><dd class="mono">${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}</dd></div>
-          </dl>
-        </summary>
-        <dl class="nf extra"><div><dt>Remote staff planned</dt><dd class="mono">${p.staff} + ${p.growth}% buffer</dd></div><div><dt>Pool size</dt><dd class="mono">${p.size.toLocaleString()} (${p.usable.toLocaleString()} usable)</dd></div><div><dt>Placement</dt><dd class="mono">${p.where === 'inside' ? 'office block, outside every network' : 'separate block'}</dd></div></dl>
-        ${guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate')}
-      </details>`;
+    return tile('__vpn', '#37c2a0', 'Remote staff (VPN)', 'IPsec pool', [['Usable range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`], ['Pool', esc(p.cidr)], ['Netmask', `${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}`]]);
   }
   function renderCards() {
     const box = $('#cards');
     if (!result.ok) { box.innerHTML = '<p class="hint">Fix the problem above to see the networks.</p>'; return; }
     const names = cur().networks.map(n => String(n.name).trim());
     const list = result.allocations.slice().sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
-    box.innerHTML = list.map(a => {
-      const ci = Math.max(0, names.indexOf(a.name));
-      const extra = [
-        ['DHCP range', rng(a.dhcpStart, a.dhcpEnd) || 'None'], ['Static range', rng(a.staticStart, a.staticEnd) || 'None'],
-        ['Broadcast', a.broadcast || 'None'], ['Wildcard', a.wildcard], ['Total / usable hosts', `${a.totalAddresses.toLocaleString()} / ${a.usableHosts.toLocaleString()}`],
-      ];
-      if (a.v6) extra.push(['IPv6 subnet', a.v6.cidr], ['IPv6 gateway', a.v6.address]);
-      return `<details class="ncard" data-name="${esc(a.name)}"${openCards.has(a.name) ? ' open' : ''}>
-        <summary>
-          <span class="nt"><span class="swatch" style="background:${color(ci)}"></span><b>${esc(a.name)}</b><span class="ntype">${esc(typeOf(a))}</span><span class="chev" aria-hidden="true">▾</span></span>
-          <dl class="nf">
-            <div><dt>Usable range</dt><dd class="mono">${rangeHtml(a)}</dd></div>
-            <div><dt>Port / gateway IP</dt><dd class="mono">${ipHtml(a.gateway || a.firstUsable || '-')}</dd></div>
-            <div><dt>Netmask</dt><dd class="mono">${ipHtml(a.netmask)} /${esc(a.prefix)}</dd></div>
-          </dl>
-        </summary>
-        <dl class="nf extra">${extra.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${esc(v)}</dd></div>`).join('')}</dl>
-        ${guidePanel(Guide.iface(result, project(), result.allocations.indexOf(a)), a.name, 'Set it up on the FortiGate')}
-      </details>`;
-    }).join('') + vpnCard();
+    box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), a.name, typeOf(a),
+      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]])).join('') + vpnCard();
   }
+  // The card popup: same detail the card used to drop down, over a darkened page.
+  let cardOpener = null;
+  function openCard(key, opener) {
+    if (!result || !result.ok) return;
+    const dlg = $('#carddlg'), names = cur().networks.map(n => String(n.name).trim());
+    if (key === '__vpn') {
+      const p = Remote.plan(result, project()); if (!p || !p.ok) return;
+      $('#cardsw').style.background = '#37c2a0'; $('#cardtitle').textContent = 'Remote staff (VPN)'; $('#cardtype').textContent = 'IPsec pool';
+      $('#cardbody').innerHTML = dlRows(vpnRows(p)) + guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate');
+    } else {
+      const i = result.allocations.findIndex(a => a.name === key); if (i < 0) return;
+      const a = result.allocations[i];
+      $('#cardsw').style.background = color(Math.max(0, names.indexOf(a.name))); $('#cardtitle').textContent = a.name; $('#cardtype').textContent = typeOf(a);
+      $('#cardbody').innerHTML = dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
+    }
+    cardOpener = opener || null; $('#cardbody').scrollTop = 0;
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+  function closeCard() { const d = $('#carddlg'); if (d.close) d.close(); else d.removeAttribute('open'); if (cardOpener && document.contains(cardOpener)) cardOpener.focus(); }
   function renderGaps() {
     const box = $('#gaps');
     if (!result.ok) { box.innerHTML = ''; return; }
@@ -723,7 +723,12 @@
   function bindAccordion() {
     $$('.rtabs button').forEach(b => b.addEventListener('click', () => setOpen(b.dataset.tab, false)));
     $('#fitUsed').addEventListener('change', renderMap);
-    $('#cards').addEventListener('click', e => {
+    const cardsBox = $('#cards');
+    cardsBox.addEventListener('click', e => { const c = e.target.closest('.ncard'); if (c) openCard(c.dataset.name, c); });
+    cardsBox.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('ncard')) { e.preventDefault(); openCard(e.target.dataset.name, e.target); } });
+    $('#cardclose').addEventListener('click', closeCard);
+    $('#carddlg').addEventListener('click', e => {
+      if (e.target === $('#carddlg')) { closeCard(); return; }                    // backdrop click (Esc is native)
       const b = e.target.closest('[data-opencli]'); if (!b) return;
       const g = guideFor(b.dataset.opencli); if (!g) return;
       const d = $('#clidlg');
@@ -736,7 +741,6 @@
     $('#cliclose').addEventListener('click', closeDlg);
     dlg.addEventListener('click', e => { if (e.target === dlg) closeDlg(); });   // backdrop click (Esc is native)
     $('#clicopy').addEventListener('click', async () => toast((await copy($('#clitext').value)) ? 'Copied the FortiOS CLI' : 'Copy was blocked. Select the text and copy it.'));
-    $('#cards').addEventListener('toggle', e => { const d = e.target.closest('details'); if (!d) return; if (d.open) openCards.add(d.dataset.name); else openCards.delete(d.dataset.name); }, true);
   }
 
   function recalc() {

@@ -20,12 +20,10 @@
 <body>
 <div class="frame">
 <header class="top">
-  <div class="brand">
-    <span class="logo" aria-hidden="true">S</span>
-    <h1>SubnetPal</h1>
-    <span id="netpill" class="pill" title="Offline status">…</span>
-  </div>
+  <button id="sideTab" class="sidebtn" type="button" aria-controls="side" aria-expanded="true" title="Show or hide the client information"><span>Client info</span><span class="chev" aria-hidden="true">▾</span></button>
+  <h1 class="sr">SubnetPal</h1>
   <div class="tools">
+  <span id="netpill" class="pill" title="Offline status">…</span>
   <details class="themes" id="themes">
     <summary aria-label="Colour theme" title="Colour theme"><span class="dot" aria-hidden="true"></span><span class="tname" id="tname">Indigo</span></summary>
     <div class="tpop" id="tpop" role="radiogroup" aria-label="Colour theme"></div>
@@ -33,12 +31,10 @@
   <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco">☾</span><span id="themeTxt">Dark</span></button>
   </div>
 </header>
+<div class="brandmark" role="img" aria-label="SubnetPal" title="SubnetPal">S</div>
 
-<button id="sideTab" class="sidetab" type="button" aria-controls="side" aria-expanded="true" title="Show or hide the client information"><span id="sideTabTxt">Client info</span></button>
-<div id="sideBackdrop" class="sidebackdrop" hidden></div>
-<div class="app">
-  <!-- LEFT: client intake (a top section on phones) -->
   <aside id="side" class="side" aria-label="Client information">
+<div class="sideclip"><div class="sidein">
     <div id="sidebody">
       <div class="clientbar">
         <select id="clientSel" aria-label="Client"></select>
@@ -149,7 +145,10 @@
 
       <button id="btnDone" class="btn primary block phoneonly" type="button">Done</button>
     </div>
-  </aside>
+  </div></div>
+</aside>
+<div class="app">
+
 
   <!-- RIGHT: results, update live from the left -->
   <main id="right" class="results">
@@ -283,12 +282,16 @@
 </div>
 </div>
 
-<dialog id="clidlg" aria-labelledby="clititle">
+<dialog id="carddlg" class="dlg" aria-labelledby="cardtitle">
+  <div class="dlghead"><span class="swatch" id="cardsw"></span><b id="cardtitle"></b><span class="ntype" id="cardtype"></span><button type="button" class="btn sm" id="cardclose">Close</button></div>
+  <div class="dlgbody" id="cardbody"></div>
+</dialog>
+<dialog id="clidlg" class="dlg" aria-labelledby="clititle"><div class="dlgin">
   <div class="clihead"><b id="clititle">FortiOS CLI</b></div>
   <p class="hint" id="clihelp">Open the FortiGate CLI console, then paste these lines. Lines starting with # are comments.</p>
   <textarea id="clitext" class="code mono" readonly spellcheck="false" aria-label="FortiOS CLI lines"></textarea>
   <div class="cliact"><button type="button" class="btn sm" id="clicopy">Copy</button><button type="button" class="btn sm" id="cliclose">Close</button></div>
-</dialog>
+</div></dialog>
 
 <script src="calc.js"></script>
 <script src="calc6.js"></script>
