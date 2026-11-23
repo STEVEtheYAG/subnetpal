@@ -195,16 +195,10 @@
     <section class="acc" id="sec-policies" role="tabpanel">
       <div class="acc-body" id="body-policies" hidden>
         <p class="sectionsum" id="sum-policies"></p>
-        <label class="fld">Describe a policy in a sentence
-          <textarea id="tagline" rows="2" autocomplete="off" spellcheck="false" placeholder="e.g. Guests can access the internet but nothing else"></textarea>
-        </label>
-        <p class="hint">Understood: "X internet only", "X can't reach Y", "X blocked from Y", "X can reach Y on https". Use network names from the plan. Separate several with a full stop.</p>
         <div class="btnrow">
-          <button id="btnParse" class="btn sm" type="button">Build policies from this</button>
-          <button id="btnAddPol" class="btn sm" type="button">+ Add policy</button>
+          <button id="btnNewPol" class="btn sm primary" type="button" aria-haspopup="dialog">+ Add new policy</button>
           <button id="btnResetPol" class="btn sm" type="button">Reset to defaults</button>
         </div>
-        <p id="parsemsg" class="hint" role="status"></p>
         <details class="more2 cardlib" id="cardlibbox"><summary id="cardlibsum">Policy library</summary>
           <p class="hint" id="sugline"></p>
           <ul class="sugnotes" id="sugnotes"></ul>
@@ -212,7 +206,6 @@
           <div id="cardlist"></div>
         </details>
         <div id="pollist"></div>
-        <div class="polfinal"><b>Last rule:</b> deny everything else (always applied at the bottom).</div>
         <p id="polnote" class="hint warnbox"></p>
         <details class="more2" id="polclibox"><summary>Policy CLI</summary>
           <div class="btnrow">

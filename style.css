@@ -553,3 +553,17 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 .pedit > summary { padding: 6px 0; }
 .polform { padding-top: 8px; }
 @media (max-width: 480px) { .ptable { grid-template-columns: minmax(0, 1fr); } }
+
+/* Snake of policy tiles: row 1 left to right, row 2 right to left, and so on, with arrows in the gaps */
+.snake { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 34px 38px; margin: 6px 0 16px; align-items: stretch; }
+.snk { position: relative; min-width: 0; display: grid; }
+.snk > .ncard { min-width: 0; }
+.snk::after { position: absolute; color: var(--accent-t); font-size: 26px; font-weight: 700; line-height: 1; pointer-events: none; }
+.snk.r::after { content: "\2192"; right: -32px; top: 50%; transform: translateY(-50%); }
+.snk.l::after { content: "\2190"; left: -32px; top: 50%; transform: translateY(-50%); }
+.snk.d::after { content: "\2193"; bottom: -31px; left: 50%; transform: translateX(-50%); }
+.ptile.final { cursor: default; border-style: dashed; }
+.ptile.final .hint { margin: 0; }
+.addpol { padding: 12px 14px 16px; }
+.addpol textarea { width: 100%; min-width: 0; }
+#tagline { width: 100%; }

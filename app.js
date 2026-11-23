@@ -609,6 +609,19 @@
     const al = result.allocations, i = al.findIndex(a => a.name === name);
     return i < 0 ? null : { top: Fmt.ifaceNames(al, ph)[i], sub: name, note: al[i].cidr };
   }
+  const snakeCols = () => { const w = ($('#snake') && $('#snake').clientWidth) || window.innerWidth; return w >= 820 ? 3 : w >= 540 ? 2 : 1; };
+  // Tiles run left to right, then wrap and run right to left, joined by arrows; the Implicit deny tile closes the snake.
+  function renderSnake() {
+    const box = $('#snake'); if (!box || !result || !result.ok) return;
+    const list = Policy.effective(project(), result.allocations), nets = Policy.policyNets(result.allocations), cols = snakeCols(), total = list.length + 1;
+    const tiles = list.map((p, i) => polTile(p, i, nets)).concat(['<div class="ncard ptile deny final"><div class="ncsum"><span class="nt"><span class="swatch" style="background:var(--bad)"></span><b>Implicit deny</b><span class="ntype pdeny">DENY</span></span><p class="hint">Everything not matched above is blocked. Always last (SP_Final_deny).</p></div></div>']);
+    box.innerHTML = tiles.map((t, k) => {
+      const row = Math.floor(k / cols), pos = k % cols, rtl = row % 2 === 1, col = rtl ? cols - pos : pos + 1;
+      const end = pos === cols - 1, dir = k === total - 1 ? '' : (cols === 1 || end) ? 'd' : rtl ? 'l' : 'r';
+      return `<div class="snk ${dir}" style="grid-row:${row + 1};grid-column:${col}">${t}</div>`;
+    }).join('');
+    box.style.setProperty('--cols', cols);
+  }
   function polTile(p, i, nets) {
     const deny = p.action === 'deny';
     return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-pol="${i}">
@@ -645,6 +658,19 @@
     </div>`;
   }
   let polOpen = -1, polEditOpen = false;
+  function openAddPol(opener) {
+    if (!result || !result.ok) return;
+    const dlg = $('#carddlg'); dlg.dataset.kind = 'add'; polOpen = -1;
+    $('#cardsw').style.background = 'var(--accent)'; $('#cardtitle').textContent = 'Add new policy'; $('#cardtype').textContent = 'New';
+    $('#cardbody').innerHTML = `<div class="addpol"><label class="fld">Describe a policy in a sentence
+        <textarea id="tagline" rows="2" autocomplete="off" spellcheck="false" placeholder="e.g. Guests can access the internet but nothing else">${esc(cur().tagline || '')}</textarea></label>
+      <p class="hint">Understood: "X internet only", "X can't reach Y", "X blocked from Y", "X can reach Y on https". Use network names from the plan. Separate several with a full stop.</p>
+      <div class="btnrow"><button type="button" class="btn sm primary" data-padd="parse">Build policies from this</button><button type="button" class="btn sm" data-padd="blank">Or add a blank policy</button></div>
+      <p id="parsemsg" class="hint" role="status"></p></div>`;
+    if (opener) cardOpener = opener;
+    if (!dlg.open) { if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', ''); }
+    $('#tagline').focus();
+  }
   function openPol(i, opener) {
     if (!result || !result.ok) return;
     const list = Policy.effective(project(), result.allocations); const p = list[i]; if (!p) { closeCard(); return; }
@@ -665,7 +691,6 @@
   function renderPolicyCli() { const t = text('polcli'); $('#pre-polcli').textContent = t || 'Fix the problem at the top to enable this output.'; }
   function renderPolicies() {
     const c = cur();
-    if ($('#tagline') !== document.activeElement && $('#tagline').value !== (c.tagline || '')) $('#tagline').value = c.tagline || '';
     $('#polnote').textContent = Policy.NOTE;
     if (!result || !result.ok) { $('#pollist').innerHTML = '<p class="hint">Fix the problem above to edit policies.</p>'; $('#cardlist').innerHTML = ''; $('#pre-polcli').textContent = ''; return; }
     const list = Policy.effective(project(), result.allocations), nets = Policy.policyNets(result.allocations);
@@ -677,7 +702,8 @@
     $('#sugnotes').innerHTML = sg.notes.map(n => `<li>${esc(n)}</li>`).join('');
     $('#cardlist').innerHTML = cardListHtml(lib, !!(c.pol && c.pol.edited));
     $('#pollist').innerHTML = (c.pol && c.pol.edited ? '' : '<p class="hint">These are the default rules for this plan and follow it when the plan changes. Editing anything below keeps your own list.</p>') +
-      (list.length ? '<p class="hint">Tap a policy to see and edit it.</p><div class="cards">' + list.map((p, i) => polTile(p, i, nets)).join('') + '</div>' : '<p class="hint">No policies. Everything is denied. Add one or reset to defaults.</p>');
+      '<p class="hint">Follow the snake: rule 1 is checked first, then each rule in turn. Traffic takes the first rule that matches, and the last tile catches everything else. Tap a policy to see and edit it.</p><div class="snake" id="snake"></div>';
+    renderSnake();
     renderPolicyCli();
     if (polOpen >= 0 && $('#carddlg').dataset.kind === 'pol' && $('#carddlg').open) openPol(polOpen);
   }
@@ -734,28 +760,26 @@
       else { c.pol = c.pol || { edited: false, list: [] }; c.pol.toggles = c.pol.toggles || {}; c.pol.toggles[t.dataset.card] = t.checked; }
       touch(); renderPolicies(); renderSummaries();
     });
-    $('#tagline').addEventListener('input', e => { cur().tagline = e.target.value; touch(); });
-    $('#btnAddPol').addEventListener('click', () => {
-      if (!result.ok) return;
-      const nets = Policy.policyNets(result.allocations); if (!nets.length) return;
-      edit(list => list.push(Policy.mkPolicy({ src: nets[0], dst: 'internet', service: 'ALL', action: 'accept', nat: true })));
-      renderPolicies(); renderSummaries(); polMsg('Added a policy at the bottom (above the final deny). Set it with the dropdowns.');
-    });
-    $('#btnResetPol').addEventListener('click', () => { cur().pol = { edited: false, list: [], toggles: {} }; touch(); renderPolicies(); renderSummaries(); polMsg('Back to the default policies for this plan.'); });
-    $('#btnParse').addEventListener('click', () => {
+    $('#btnNewPol').addEventListener('click', e => openAddPol(e.currentTarget));
+    $('#btnResetPol').addEventListener('click', () => { cur().pol = { edited: false, list: [], toggles: {} }; touch(); renderPolicies(); renderSummaries(); toast('Back to the default policies for this plan'); });
+    pop.addEventListener('input', e => { if (e.target.id === 'tagline') { cur().tagline = e.target.value; touch(); } });
+    pop.addEventListener('click', e => {
+      const b = e.target.closest('[data-padd]'); if (!b || !result.ok) return;
+      if (b.dataset.padd === 'blank') {
+        const nets = Policy.policyNets(result.allocations); if (!nets.length) return;
+        let n = 0; edit(list => { list.push(Policy.mkPolicy({ src: nets[0], dst: 'internet', service: 'ALL', action: 'accept', nat: true })); n = list.length - 1; });
+        polEditOpen = true; renderPolicies(); renderSummaries(); openPol(n); return;
+      }
       const txt = $('#tagline').value.trim(); cur().tagline = txt; touch();
-      if (!txt) { polMsg('Type a sentence first, or use + Add policy.', true); return; }
-      if (!result.ok) { polMsg('Fix the problem at the top first.', true); return; }
+      if (!txt) { polMsg('Type a sentence first, or add a blank policy.', true); return; }
       const parsed = Policy.parse(txt, result.allocations);
       const bad = parsed.unparsed.map(u => `"${u.text}" (${u.why})`).join('; ');
-      if (!parsed.policies.length) {
-        polMsg(`I didn't understand that${bad ? ': ' + bad : ''}. Networks in this plan: ${Policy.policyNets(result.allocations).join(', ')}. Build the policy yourself with + Add policy and the dropdowns.`, true);
-        return;
-      }
+      if (!parsed.policies.length) { polMsg(`I didn't understand that${bad ? ': ' + bad : ''}. Networks in this plan: ${Policy.policyNets(result.allocations).join(', ')}. Or add a blank policy and use the dropdowns.`, true); return; }
       edit(list => { cur().pol.list = Policy.apply(list, parsed); });
-      renderPolicies(); renderSummaries();
-      polMsg(`Added ${parsed.policies.length} polic${parsed.policies.length === 1 ? 'y' : 'ies'} at the top. Check them below.${bad ? ' Not understood: ' + bad + '.' : ''}`, !!bad);
+      renderPolicies(); renderSummaries(); closeCard();
+      toast(`Added ${parsed.policies.length} polic${parsed.policies.length === 1 ? 'y' : 'ies'} at the top. Check them.${bad ? ' Not understood: ' + bad + '.' : ''}`);
     });
+    let rz = 0; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(renderSnake, 120); });
   }
 
   // ---------- remote access ----------

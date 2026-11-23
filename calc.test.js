@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v26'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v27'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v26/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v27/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1645,6 +1645,12 @@ test('policy tiles open the shared popup laid out like the FortiGate policy tabl
   ['HTTPS', 'DNS', 'SMB', 'RDP', 'SSH', 'HTTP', 'PING'].forEach(x => assert.ok(app.includes("['" + x + "'"), 'legend ' + x));
   assert.ok(!/\(\?<[=!]/.test(app) && css.includes('.ptable') && css.includes('.schip'));
   assert.ok(!/--ok: var\(--ok\)/.test(css), 'dark theme has real ok/warn colours');
+});
+test('policies: snake layout with an Implicit deny tile, and Add new policy lives in the popup', () => {
+  const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.ok(app.includes('renderSnake') && app.includes('Implicit deny') && css.includes('.snake') && css.includes('.snk.d::after') && css.includes('.snk.l::after'));
+  assert.ok(html.includes('id="btnNewPol"') && !html.includes('id="tagline"') && !html.includes('id="btnParse"') && !html.includes('polfinal'));
+  assert.ok(app.includes('openAddPol') && app.includes('data-padd="parse"') && app.includes('data-padd="blank"'));
 });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
