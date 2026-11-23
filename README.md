@@ -214,3 +214,9 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 ## Live drag feedback (v30)
 - The lifted plank follows the pointer (shadow, slight scale). Planks it passes slide up or down (CSS transform, 0.18s) to open a gap where it will land, before release; the numbers and arrows stay fixed. The landing slot is the one nearest the plank's centre, never below the Implicit deny. On release the plank glides into the gap, then the list is reordered. Works with touch (same pointer events); edge auto-scroll keeps going while you hold near the top or bottom. Reduced-motion users get no sliding animation.
 - sw.js cache is v30.
+
+## Edit in the popup table (v31)
+- The "Edit this policy" section is gone. Every cell of the popup table is the control: Name (text; empty = automatic name), Incoming/Outgoing interface and Source/Destination (dropdowns; the pairs write the same field, so changing one updates the other), Service (tap chips on/off: ALL, HTTPS, HTTP, DNS, SSH, RDP, SMB, SMTP, PING, FTP, NTP, printing; picking one clears ALL, none selected means ALL), Action (ACCEPT/DENY), NAT on/off plus Log. Websites and applications (web filter) sits under the table for Accept policies.
+- **Save / Cancel:** edits go to a draft copy; nothing changes until **Save**. Cancel, Close and Esc discard it. A click on the dark backdrop with unsaved changes does not close (a toast says to Save or Cancel). "Unsaved changes" shows at the bottom left.
+- A hand-typed name is kept when you change source, destination or action; an automatic name follows them. **Add new policy > blank** opens a draft titled New policy; Save adds it above the Implicit deny, Cancel adds nothing. Open CLI shows the saved version. Move up/down and delete in the popup still act at once (delete asks twice).
+- sw.js cache is v31.
