@@ -405,7 +405,7 @@
     const dim = a => grpSel !== 'all' && Groups.groupId(a) !== grpSel;
     box.classList.toggle('sel', grpSel !== 'all');
     box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), `${grpOf(a).emoji} ${a.name}`, typeOf(a),
-      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]], a.name)).join('') + (vpnOk ? vpnCard(grpSel !== 'all' && grpSel !== 'users') : '');
+      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]], dim(a))).join('') + (vpnOk ? vpnCard(grpSel !== 'all' && grpSel !== 'users') : '');
   }
   // Optional DHCP DNS for one network (default stays System DNS). Stored per client by network name: project().dhcpDns[name] = { server, domain }.
   function dnsBox(a) {
