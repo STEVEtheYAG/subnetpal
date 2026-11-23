@@ -574,7 +574,6 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 .snk.dragging .ncard { box-shadow: 0 0 0 2px var(--accent-t); }
 .dragmode { user-select: none; }
 .dragmode .ncard:hover { transform: none; }
-.snk.dropt .ncard { outline: 2px dashed var(--accent-t); outline-offset: 3px; }
 
 .stack, .snake { display: block; margin: 6px 0 16px; }
 .slot { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; column-gap: 8px; }
@@ -591,3 +590,9 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 .ptile.final .pflow { flex: 1 1 200px; }
 .snk.dragging { z-index: 20; opacity: .92; cursor: grabbing; filter: drop-shadow(0 12px 18px #0006); }
 @media (max-width: 560px) { .ptitle { flex-basis: 110px; } .pdelx { order: 2; } .pflow, .pchipsm, .plk > .ntype { order: 3; } .slot, .sarrow { grid-template-columns: 26px minmax(0, 1fr); column-gap: 4px; } .snum { font-size: 15px; } .plk { padding: 8px; } }
+
+/* live drag: other planks slide to open the gap; the lifted one follows the pointer */
+.snk.shifted { transition: transform .18s ease; }
+.snk.dragging { transition: none; }
+.dragmode .snk.dragging .ncard { box-shadow: 0 0 0 2px var(--accent-t); transform: scale(1.02); }
+@media (prefers-reduced-motion: reduce) { .snk.shifted { transition: none; } }

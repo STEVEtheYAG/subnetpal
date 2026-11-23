@@ -702,7 +702,7 @@
     $('#sugnotes').innerHTML = sg.notes.map(n => `<li>${esc(n)}</li>`).join('');
     $('#cardlist').innerHTML = cardListHtml(lib, !!(c.pol && c.pol.edited));
     $('#pollist').innerHTML = (c.pol && c.pol.edited ? '' : '<p class="hint">These are the default rules for this plan and follow it when the plan changes. Editing anything below keeps your own list.</p>') +
-      '<p class="hint">Follow the snake: rule 1 is checked first, then each rule in turn. Traffic takes the first rule that matches, and the last tile catches everything else. Tap a policy to see and edit it.</p><div class="snake" id="snake"></div>';
+      '<p class="hint">Rule 1 is checked first, then each plank down the stack. Drag the dots to reorder. Traffic takes the first rule that matches, and the last tile catches everything else. Tap a policy to see and edit it.</p><div class="snake" id="snake"></div>';
     renderSnake();
     renderPolicyCli();
     if (polOpen >= 0 && $('#carddlg').dataset.kind === 'pol' && $('#carddlg').open) openPol(polOpen);
@@ -765,46 +765,63 @@
       openPol(i, tile);
     });
     box.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset && e.target.dataset.pol !== undefined) { e.preventDefault(); openPol(Number(e.target.dataset.pol), e.target); } });
-    // Drag to reorder: grab the dots on a tile (mouse or touch), drop on the tile whose place you want. Dropping on Implicit deny sends it to the end of the list.
+    // Drag to reorder with live feedback: the picked-up plank follows the pointer; the planks it passes slide up or down to open a gap where it will land (numbers stay put); letting go snaps it into the gap.
     let drag = null;
     const scrollParent = el => { for (let n = el.parentElement; n; n = n.parentElement) { const o = getComputedStyle(n).overflowY; if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n; } return null; };
-    const endDrag = () => { if (!drag) return; drag.snk.style.transform = ''; drag.snk.classList.remove('dragging'); box.classList.remove('dragmode'); box.querySelectorAll('.dropt').forEach(x => x.classList.remove('dropt')); drag = null; };
+    const clearDrag = () => { if (!drag) return; clearInterval(drag.timer); drag.snks.forEach(x => { x.style.transform = ''; x.classList.remove('dragging', 'shifted'); }); box.classList.remove('dragmode'); drag = null; };
     box.addEventListener('pointerdown', e => {
-      const h = e.target.closest('[data-phandle]'); if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
-      const tile = h.closest('[data-pol]');
-      drag = { i: Number(tile.dataset.pol), id: e.pointerId, snk: tile.closest('.snk'), x0: e.clientX, y0: e.clientY, sy: 0, on: false, over: -1, last: e };
+      const h = e.target.closest('[data-phandle]'); if (!h || (e.pointerType === 'mouse' && e.button !== 0) || drag) return;
+      const tile = h.closest('[data-pol]'), snks = Array.from(box.querySelectorAll('.snk'));
+      drag = { i: Number(tile.dataset.pol), id: e.pointerId, snks, x0: e.clientX, y0: e.clientY, on: false, to: Number(tile.dataset.pol), last: e };
+      drag.snk = snks[drag.i]; drag.n = snks.length - 1;           // the last plank is Implicit deny: it never moves or takes a slot
       try { h.setPointerCapture(e.pointerId); } catch (x) { /* older browsers */ }
       e.preventDefault();
     });
+    const slotsAt = () => { const top = box.getBoundingClientRect().top; return drag.snks.map(x => { const r = x.getBoundingClientRect(); return { top: r.top - top, mid: r.top - top + r.height / 2 }; }); };
     const dragAt = e => {
-      if (!drag.on) return;
-      const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      const top = box.getBoundingClientRect().top, dy = e.clientY - drag.y0 - (top - drag.box0), dx = e.clientX - drag.x0, S = drag.slots, f = drag.i;
       drag.snk.style.transform = `translate(${dx}px, ${dy}px)`;
-      const t = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest && x.closest('.snk')).find(x => x && x !== drag.snk && box.contains(x));
-      box.querySelectorAll('.dropt').forEach(x => x.classList.remove('dropt'));
-      drag.over = t ? Number(t.dataset.k) : -1;
-      if (t) t.classList.add('dropt');
+      const mid = S[f].mid + dy; let t = 0;
+      for (let k = 1; k < drag.n; k++) if (Math.abs(S[k].mid - mid) < Math.abs(S[t].mid - mid)) t = k;
+      drag.to = t;
+      drag.snks.forEach((x, k) => {
+        if (k === f || k >= drag.n) return;
+        const j = t > f && k > f && k <= t ? k - 1 : t < f && k >= t && k < f ? k + 1 : k;   // the slot this plank slides into
+        x.style.transform = j === k ? '' : `translateY(${S[j].top - S[k].top}px)`;
+      });
+    };
+    const tick = () => {
+      if (!drag || !drag.on) return;
+      const e = drag.last, r = drag.sp ? drag.sp.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const d = e.clientY < r.top + 60 ? -12 : e.clientY > r.bottom - 60 ? 12 : 0;
+      if (d) { if (drag.sp) drag.sp.scrollTop += d; else window.scrollBy(0, d); dragAt(e); }
     };
     box.addEventListener('pointermove', e => {
       if (!drag || e.pointerId !== drag.id) return;
       drag.last = e;
-      if (!drag.on) { if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return; drag.on = true; drag.snk.classList.add('dragging'); box.classList.add('dragmode'); const sp = scrollParent(box); drag.sp = sp; drag.sy0 = sp ? sp.scrollTop : window.scrollY; drag.scrolled = 0; }
-      // edge auto-scroll
-      const r = drag.sp ? drag.sp.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
-      const dy = e.clientY < r.top + 50 ? -14 : e.clientY > r.bottom - 50 ? 14 : 0;
-      if (dy) { if (drag.sp) drag.sp.scrollTop += dy; else window.scrollBy(0, dy); }
+      if (!drag.on) {
+        if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return;
+        drag.on = true; drag.slots = slotsAt(); drag.box0 = box.getBoundingClientRect().top; drag.sp = scrollParent(box);
+        drag.snks.forEach((x, k) => x.classList.toggle('shifted', k !== drag.i)); drag.snk.classList.add('dragging'); box.classList.add('dragmode');
+        drag.timer = setInterval(tick, 30);
+      }
       dragAt(e);
     });
     box.addEventListener('pointerup', e => {
       if (!drag || e.pointerId !== drag.id) return;
-      const was = drag.on, from = drag.i, n = Policy.effective(project(), result.allocations).length;
-      const to = drag.over < 0 ? -1 : Math.min(drag.over, n - 1);
-      endDrag();
-      if (!was) return;
+      if (!drag.on) { clearDrag(); return; }
+      const from = drag.i, to = drag.to, d = drag, S = d.slots;
       justDragged = true; setTimeout(() => { justDragged = false; }, 0);
-      if (to >= 0 && to !== from) { edit(list => { const x = list.splice(from, 1)[0]; list.splice(to, 0, x); }); renderPolicies(); renderSummaries(); toast(`Moved to ${to + 1}`); }
+      clearInterval(d.timer); d.snk.classList.add('shifted'); d.snk.classList.remove('dragging');     // glide into the gap, then commit
+      const top = box.getBoundingClientRect().top;
+      d.snk.style.transform = `translateY(${S[to].top - S[from].top - (top - d.box0)}px)`;
+      drag = null;
+      setTimeout(() => {
+        d.snks.forEach(x => { x.style.transform = ''; x.classList.remove('shifted'); }); box.classList.remove('dragmode');
+        if (to !== from) { edit(list => { const x = list.splice(from, 1)[0]; list.splice(to, 0, x); }); renderPolicies(); renderSummaries(); toast(`Moved to ${to + 1}`); }
+      }, 170);
     });
-    box.addEventListener('pointercancel', endDrag);
+    box.addEventListener('pointercancel', clearDrag);
     // Library cards: before the first edit this only records the switch (the list keeps following the plan); after it, the card's rules are added or removed.
     $('#cardlist').addEventListener('change', e => {
       const t = e.target; if (!t.dataset.card || !result.ok) return;

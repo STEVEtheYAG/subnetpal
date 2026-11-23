@@ -210,3 +210,7 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 - **Planks:** one slender plank per row with a small down arrow between each, and Implicit deny as the last plank (dashed, fixed). Each plank shows the name, From → To, service chips, ACCEPT/DENY, a drag handle and ×. Planks taper from 100% width (rule 1) to 82% (Implicit deny); on a phone the plank wraps to two lines.
 - **Fixed numbers:** the numbers sit in a left gutter that never moves. Dragging (mouse or touch, from the dots) moves the policy into another numbered slot; the numbers do not travel with it. The plank title no longer carries a number; the popup title shows the slot number.
 - Delete (× with a confirm on the plank, double-click × in the popup), Add new policy popup and the policy popup are unchanged. sw.js cache is v29. The snake from v27/v28 is gone.
+
+## Live drag feedback (v30)
+- The lifted plank follows the pointer (shadow, slight scale). Planks it passes slide up or down (CSS transform, 0.18s) to open a gap where it will land, before release; the numbers and arrows stay fixed. The landing slot is the one nearest the plank's centre, never below the Implicit deny. On release the plank glides into the gap, then the list is reordered. Works with touch (same pointer events); edge auto-scroll keeps going while you hold near the top or bottom. Reduced-motion users get no sliding animation.
+- sw.js cache is v30.
