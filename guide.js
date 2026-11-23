@@ -1,23 +1,29 @@
 /* SubnetPal - "how to set this up on the FortiGate" guidance for a network card and for the remote-staff VPN card.
    Mirrors the FortiOS interface form (Name, Alias, Type, Role, Address, Administrative Access, DHCP Server, Network, Status). Pure, no DOM. window.Guide / Node.
-   FortiOS menu names and field names are from memory and UNVERIFIED. */
+   Field names, order and values follow Bob's FortiOS 8.0.2 guide (VM capture). Anything not captured from the VM is flagged approx. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./format.js'), require('./remote.js'));
   else root.Guide = factory(root.Access, root.Fmt, root.Remote);
 }(typeof self !== 'undefined' ? self : this, function (Access, Fmt, Remote) {
   'use strict';
 
-  const NOTE = 'Menu and field names are from memory and unverified (FortiOS 8.0). ' + Fmt.FORTI_NOTE;
+  const NOTE = 'Field names and order follow the FortiOS 8.0.2 GUI capture; items tagged "approximate" were not captured. ' + Fmt.FORTI_NOTE;
+  const LOG_NOTE = 'Traffic logging is not an interface option. Set it on the firewall policy that uses this network: Log allowed traffic = All sessions.';
   const ROLE_LABEL = { lan: 'LAN', dmz: 'DMZ', wan: 'WAN', undefined: 'Undefined' };
+  const ipInt = s => String(s).split('.').reduce((n, x) => n * 256 + Number(x), 0);
   // Administrative Access boxes in the order the FortiOS form shows them. HTTP is greyed out on the VM (needs a deliberate choice), so it is never ticked here.
   const ACCESS_OPTS = [['https', 'HTTPS'], ['http', 'HTTP', 1], ['ping', 'PING'], ['fgfm', 'FMG-Access'], ['ssh', 'SSH'], ['snmp', 'SNMP'], ['ftm', 'FTM'], ['radius-acct', 'RADIUS Accounting'], ['probe-response', 'Security Fabric Connection'], ['speed-test', 'Speed Test'], ['scim', 'SCIM']];
-  const DEVICE_DETECT = ['staff', 'lan', 'guest', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos'];
+  const DEVICE_DETECT = ['staff', 'lan', 'guest', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'servers'];
   const R = (k, v, why, extra) => Object.assign({ k, v: String(v), why: why || '' }, extra);
 
   function adminWhy(kind, list) {
-    if (kind === 'mgmt') return 'Administrators manage the firewall from here, so HTTPS and SSH are on. Nothing else.';
+    if (kind === 'mgmt') return 'Administrators manage the firewall from here, so HTTPS, SSH and PING are on. Add SNMP or FMG-Access only if you use them.';
+    if (kind === 'staff' || kind === 'lan') return 'Staff and IT manage the firewall from here (HTTPS, SSH, PING). Lock it down further with trusted hosts on the admin account.';
+    if (kind === 'guest') return 'Guests must never reach the admin GUI. No admin boxes (PING at most).';
+    if (kind === 'printers' || kind === 'iot') return 'None. Weak devices are isolated; tick PING only while troubleshooting.';
+    if (kind === 'wan') return 'WAN = PING only, or nothing. Never HTTP, HTTPS or SSH on the WAN: manage from the LAN.';
     if (!list.length) return 'Nothing on the firewall needs to answer here. Devices on this network only need a gateway and DHCP, which work without any of these boxes.';
-    return 'PING lets you test the gateway. The admin pages (HTTPS, SSH) stay off so only the Management network can log in to the firewall.';
+    return 'PING lets you test the gateway. The admin pages (HTTPS, SSH) stay off here.';
   }
   function dhcpOffWhy(kind) {
     if (kind === 'mgmt') return 'Disabled. Switches, access points and admin PCs on Management are given fixed addresses so you can always find them.';
@@ -25,95 +31,149 @@
     if (kind === 'transit' || kind === 'loopback') return 'Disabled. A point-to-point link or loopback has no devices to configure.';
     return 'Disabled. The plan gives this network no DHCP range, so devices here use fixed addresses.';
   }
-  function leaseOf(a) { return Access.kindOf(a) === 'guest' ? 28800 : 604800; }
+  function leaseOf(a) { return Access.kindOf(a) === 'guest' ? 14400 : 604800; }
 
-  // One network -> { name, groups: [{ title, rows: [{ k, v, why, chips? }] }], cli, note }
+  // Pre-display checks (guide 1.2). -> [{ ok, t }]
+  function checks(allocs, a, ph) {
+    const out = [], kind = Access.kindOf(a), lanLike = ['transit', 'loopback', 'wan'].indexOf(kind) < 0;
+    out.push({ ok: !lanLike || a.prefix <= 30, t: lanLike ? 'LAN prefix is /30 or shorter (a /31 or /32 has no host range for DHCP).' : 'Links and loopbacks may be /31 or /32.' });
+    const clash = allocs.filter(o => o !== a && o.start <= a.end && o.end >= a.start);
+    out.push({ ok: !clash.length, t: clash.length ? `The subnet overlaps ${clash.map(o => o.name).join(', ')}. FortiGate refuses this with "The IP address overlaps with interface X".` : 'The subnet overlaps no other card.' });
+    if (a.vlan !== '' && a.role !== 'Loopback') {
+      const v = Number(a.vlan), dup = allocs.filter(o => o !== a && String(o.vlan) === String(a.vlan) && o.role !== 'Loopback');
+      out.push({ ok: v >= 1 && v <= 4094 && !dup.length, t: v >= 1 && v <= 4094 ? (dup.length ? `VLAN ${a.vlan} is also used by ${dup.map(o => o.name).join(', ')} on the same parent port.` : `VLAN ${a.vlan} is 1-4094 and unique on ${ph}.`) : 'VLAN ID must be 1-4094.' });
+    }
+    if (a.dhcpStart) {
+      const s = ipInt(a.dhcpStart), e = ipInt(a.dhcpEnd), bad = [a.network, a.broadcast, a.gateway].filter(x => x && ipInt(x) >= s && ipInt(x) <= e);
+      out.push({ ok: !bad.length, t: bad.length ? `The DHCP pool contains ${bad.join(', ')}.` : 'The DHCP pool excludes the gateway, network and broadcast addresses.' });
+    }
+    return out;
+  }
+
+  // Common-mistake hints (guide 1.5), picked for this card and filled with its own values.
+  function hints(a, kind, allocs) {
+    const h = [];
+    h.push(`Gateway is network + 1 (${a.gateway || a.firstUsable}), not ${a.network}.`);
+    if (a.dhcpStart) h.push(`Start the pool at gateway + 1 and end it at broadcast - 1 (${a.dhcpStart} - ${a.dhcpEnd}).`);
+    if (a.vlan !== '' && a.role !== 'Loopback') h.push('VLAN ID 1-4094, unique per parent port.');
+    h.push('Each card needs its own subnet.', 'Role: WAN for the uplink, LAN for internal. Never leave it Undefined.', 'Leave "Create address object" on: policies need the subnet object.', 'Name: max 15 characters, no spaces.', 'Logging lives on the policy, not on the interface.');
+    if (kind === 'wan') h.unshift('WAN = PING only. Manage from the LAN.');
+    if (kind === 'guest') h.unshift('Guests: PING only (or nothing), never HTTPS.');
+    if (kind === 'servers') h.unshift('Servers are static: DHCP off.');
+    return h;
+  }
+
+  // One network -> { name, groups: [{ title, rows: [{ k, v, why, chips?, approx? }], approx? }], checks, hints, notes, cli, note }
   function iface(result, project, idx) {
     const allocs = result.allocations, a = allocs[idx];
     if (!a) return null;
     const ph = (project && project.ifName && String(project.ifName).trim()) || 'PORT_CHANGE_ME';
     const name = Fmt.ifaceNames(allocs, ph)[idx], kind = Access.kindOf(a);
-    const isVlan = a.vlan !== '' && a.role !== 'Loopback', isLoop = a.role === 'Loopback';
+    const isVlan = a.vlan !== '' && a.role !== 'Loopback', isLoop = a.role === 'Loopback', isWan = kind === 'wan';
     const role = Fmt.FORTI_ROLE[a.role] || 'lan', acc = Access.adminAccess(a);
     const ip = `${a.gateway ? a.gateway : a.firstUsable}/${a.netmask}`;
     const dev = DEVICE_DETECT.indexOf(kind) >= 0, obj = ('SP_' + (Fmt.fname(a.name) || 'net')).slice(0, 79);
-    const top = [R('Name', name, isVlan ? 'Built from the VLAN ID. You can rename it; keep the same name in the CLI and in policies.' : isLoop ? 'A loopback has its own name.' : `Use the real port name (for example port3) in place of ${ph}.`),
+    const top = [R('Name', name, isVlan ? 'Built from the VLAN ID. You can rename it; keep the same name in the CLI and in policies. Max 15 characters, no spaces.' : isLoop ? 'A loopback has its own name.' : `Use the real port name (for example port3) in place of ${ph}.`),
       R('Alias', a.name, 'The friendly name shown in policies and logs.'),
-      R('Type', isLoop ? 'Loopback' : isVlan ? 'VLAN' : 'Physical interface', isVlan ? 'One cable (trunk) carries several networks, each on its own VLAN.' : '')];
+      R('Type', isLoop ? 'Loopback Interface' : isVlan ? 'VLAN' : 'Physical Interface', isVlan ? 'One cable (trunk) carries several networks, each on its own VLAN.' : isWan ? 'The WAN is the physical port, not a VLAN. Use Edit on the existing port.' : isLoop ? 'Always up, unlike a physical port.' : '')];
     if (isVlan) top.push(R('VLAN protocol', '802.1Q', 'The standard way to tag VLANs. The switch port must carry this VLAN tagged.'), R('Interface', ph, 'The parent port that carries the VLAN. Replace the placeholder with your real port.'), R('VLAN ID', a.vlan, 'Must match the VLAN ID on the switch and access points.'), R('VRF ID', '0', 'Leave at 0 unless you are splitting routing tables.'));
-    top.push(R('Role', ROLE_LABEL[role] || 'LAN', role === 'dmz' ? 'DMZ marks a network that holds public-facing servers.' : role === 'wan' ? 'WAN marks the internet side.' : role === 'undefined' ? 'No special role for links and loopbacks.' : 'LAN marks an internal network. Guests and devices are still kept apart by policy.'));
+    top.push(R('Role', ROLE_LABEL[role] || 'LAN', role === 'dmz' ? 'DMZ marks a network that holds public-facing servers.' : role === 'wan' ? 'WAN enables WAN behaviour and the right policy defaults.' : role === 'undefined' ? 'No special role for links and loopbacks.' : 'LAN marks an internal network. Guests and devices are still kept apart by policy.'));
+    if (!isVlan && !isLoop) top.push(R('Dedicated Management Port', kind === 'mgmt' ? 'On' : 'Off', kind === 'mgmt' ? 'Takes the port out of routing and policies. Physical ports only.' : 'Off. Only a physical management port uses this.'));
     const groups = [{ title: 'Interface', rows: top }];
-    const addr = [R('Addressing mode', 'Manual', 'A fixed address. The firewall is the default gateway for this network.'), R('IP/Netmask', ip, 'First usable address in the range is the firewall; devices use it as their gateway.')];
-    addr.push(R('Create address object matching subnet', 'On', 'Makes a firewall address object for this network so policies can use it.'), R('Name', obj, 'The firewall address object the policies in the export refer to.'), R('Destination', a.cidr, 'The whole network.'));
+    let addr;
+    if (isWan) addr = [R('Addressing mode', 'DHCP', 'Most ISPs hand out the address. Choose Manual instead if the ISP gave a static IP.'),
+      R('Retrieve default gateway from server', 'On', 'Creates the default route.'), R('Distance', '5', 'The default.'), R('Override internal DNS', 'On', 'Uses the ISP DNS (the default).'),
+      R('If Manual: IP/Netmask', ip, 'Use the ISP-supplied address. A static route 0.0.0.0/0 to the ISP gateway is also needed (Network > Static Routes).')];
+    else {
+      addr = [R('Addressing mode', 'Manual', isLoop ? 'A loopback is Manual only.' : 'A fixed address. The firewall is the default gateway for this network.'), R('IP/Netmask', ip, isLoop ? 'A single /32 host address, the one place a /32 is correct.' : 'First usable address (network + 1) is the firewall; devices use it as their gateway. The GUI shows it as address/netmask.')];
+      addr.push(R('Create address object matching subnet', 'On', 'Makes a firewall address object for this network so policies can use it.'), R('Name', obj, 'The firewall address object the policies in the export refer to.'), R('Destination', a.cidr, 'The whole network.'), R('Secondary IP address', 'Off', 'Off. Not needed here.'));
+    }
     if (a.v6) addr.push(R('IPv6', `${a.v6.address}/${a.v6.prefix}`, 'The firewall address in this network’s /64. Enable IPv6 under System > Feature Visibility if the box is hidden.'));
     groups.push({ title: 'Address', rows: addr });
     groups.push({ title: 'Administrative Access', rows: [R('IPv4', acc.length ? acc.map(x => x.toUpperCase()).join(', ') : 'None', adminWhy(kind, acc), { chips: ACCESS_OPTS.map(([k, t, dis]) => ({ t, on: acc.indexOf(k) >= 0, dis: !!dis })) })] });
-    if (!a.dhcpStart) groups.push({ title: 'DHCP Server', rows: [R('DHCP status', 'Disabled', dhcpOffWhy(kind))] });
-    else {
-      groups.push({ title: 'DHCP Server', rows: [R('DHCP status', 'Enabled', 'Hands out addresses so people do not type them in.'),
-        R('Address range', `${a.dhcpStart} - ${a.dhcpEnd}`, 'The pool of addresses given to devices. The rest of the network is kept for static devices.'),
+    if (!a.dhcpStart) {
+      const rows = [R('DHCP status', 'Disabled', dhcpOffWhy(kind))];
+      if (kind === 'servers' || kind === 'dmz') rows.push(R('Static range', a.staticStart ? `${a.staticStart} - ${a.staticEnd}` : `${a.firstUsable} - ${a.lastUsable}`, 'Usable range minus the gateway. Give each server a fixed address here, and create a /32 address object per server.'));
+      groups.push({ title: 'DHCP Server', rows });
+    } else {
+      const lease = leaseOf(a);
+      const rows = [R('DHCP status', 'Enabled', 'Hands out addresses so people do not type them in.'),
+        R('Address range', `${a.dhcpStart} - ${a.dhcpEnd}`, 'Starts after the gateway (or the static block) and ends at broadcast - 1. The rest is kept for static devices.'),
         R('Netmask', a.netmask, 'Same as the interface.'), R('Default gateway', 'Same as Interface IP', 'Devices send their traffic to the firewall.'),
         R('DNS server', 'Same as System DNS', 'Devices use the firewall’s DNS settings (System > DNS). Choose Specify only for a local DNS server.'),
-        R('Lease time', `${leaseOf(a)} seconds`, kind === 'guest' ? '8 hours. Guests come and go, so addresses are handed back quickly.' : '7 days (the FortiOS default). Fine for office devices that stay put.')] });
+        R('Lease time', `${lease} seconds`, kind === 'guest' ? '4 hours (guests: 3600-14400 s). Guests come and go, so short leases free up addresses.' : '7 days (the FortiOS default). Fine for office devices that stay put.')];
+      if (kind === 'printers') rows.push(R('IP address assignment rules', 'Reserve each printer by MAC', `Printers need a fixed IP. Reserve them by MAC, or keep them in the static block${a.staticStart ? ` (${a.staticStart} - ${a.staticEnd})` : ''} and start the pool after it.`, { approx: true }));
+      groups.push({ title: 'DHCP Server', rows, approx: true });
     }
-    groups.push({ title: 'Network', rows: [R('Device detection', dev ? 'On' : 'Off', dev ? 'Lets the firewall name the devices it sees (phones, laptops, printers).' : 'Not useful on a network of servers, equipment or links.'),
-      R('Proxy ARP', 'Off', 'Only needed in special cases.'), R('Security mode', 'Off', kind === 'guest' ? 'Off. Turn on a captive portal only if you want guests to click through a login page.' : 'Off. Not needed here.')] });
+    groups.push({ title: 'Network', rows: [R('Device detection', dev ? 'On' : 'Off', dev ? 'Lets the firewall name the devices it sees (phones, laptops, printers).' : isWan ? 'Off. Do not scan the internet side.' : 'Not useful on a network of equipment or links.'),
+      R('Proxy ARP', 'Off', 'Only needed in special cases.'), R('Security mode', 'Off', kind === 'guest' ? 'Off. Turn on a captive portal only if the client wants a login page; it needs a portal setup (approximate).' : 'Off. Not needed here.', kind === 'guest' ? { approx: true } : undefined)] });
     groups.push({ title: 'Traffic Shaping', rows: [R('Outbound shaping profile', 'Off', kind === 'voice' ? 'Off for now. Phone traffic is best prioritised with a shaping profile once the network is running (see the voice advice on the Policies tab).' : 'Off. Not needed to start with.'), R('Outbound bandwidth', 'Off', 'Off. Set a limit only if this network must not use the whole line.')] });
     const comment = `SubnetPal: ${a.name} ${a.cidr}`;
     groups.push({ title: 'Miscellaneous', rows: [R('Comments', comment, 'Optional note (up to 255 characters) that shows in the interface list.'), R('Status', 'Enabled', 'The interface is up.')] });
 
     const L = ['# ' + NOTE, '', 'config system interface'];
     const lines = Fmt.ifaceLines(a, name, ph);
+    if (isWan) lines.splice(lines.findIndex(x => /^\s+set ip /.test(x)), 1, '        set mode dhcp');
     lines.splice(lines.length - 1, 0, ...(dev ? ['        set device-identification enable'] : []), `        set description ${JSON.stringify(comment)}`);
     L.push(...lines, 'end', '', 'config firewall address', `    edit ${JSON.stringify(obj)}`, `        set subnet ${a.network} ${a.netmask}`, `        set comment ${JSON.stringify(a.name + ' (' + a.cidr + ')')}`, '    next', 'end');
     if (a.dhcpStart) L.push('', 'config system dhcp-server', ...Fmt.dhcpLines(a, name, 100, leaseOf(a)), 'end', '# DHCP server ID 100 is a placeholder: use any free ID on your FortiGate.');
-    return { name, alias: a.name, groups, cli: L.join('\n') + '\n', note: NOTE };
+    return { name, alias: a.name, groups, checks: checks(allocs, a, ph), hints: hints(a, kind, allocs), notes: [LOG_NOTE], cli: L.join('\n') + '\n', note: NOTE };
   }
 
-  // Remote staff VPN -> { steps: [{ title, where, rows, why }], cli, note }
+  // Tunnel name: at most 13 characters, no spaces (the wizard adds suffixes to it). From the client name, else a default.
+  function tunnelName(project) {
+    const w = String((project && project.name) || '').trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]+/g, '');
+    return (w ? w.slice(0, 9) : 'SP') + '-FCT';
+  }
+
+  // Remote staff VPN (FortiClient IPsec) -> { computed, steps: [{ title, where, rows, why, approx? }], table, mistakes, cli, note }
   function vpn(result, project) {
     const pool = Remote.plan(result, project);
     if (!pool || !pool.ok) return null;
     const ph = (project && project.ifName && String(project.ifName).trim()) || 'PORT_CHANGE_ME';
-    const names = Fmt.ifaceNames(result.allocations, ph), reach = Remote.reachList(result, project);
-    const obj = a => 'SP_' + (Fmt.fname(a.name) || 'net');
-    const steps = [];
-    steps.push({ title: '1. Users and group', where: 'User & Authentication > User Definition, then User Groups',
-      why: 'Each remote person gets their own login, so one leaver can be switched off without touching anyone else.',
-      rows: [R('Local users', `${pool.staff || 'One per'} remote staff`, 'Create one local user per person. Use strong passwords and, if you can, two-factor (FortiToken).'),
-        R('Group name', 'VPN_USERS_CHANGE_ME', 'Put all the users in this group. The VPN tunnel only accepts members of it.')] });
-    steps.push({ title: '2. Address objects', where: 'Policy & Objects > Addresses',
-      why: 'Named ranges the tunnel and the policies refer to.',
-      rows: [R('SP_VPN_POOL', `${pool.network}/${pool.netmask}`, 'The pool remote staff are given an address from. It sits outside every office network.')]
-        .concat(reach.map(a => R(obj(a), `${a.network}/${a.netmask}`, `${a.name}: a network remote staff can reach.`)))
-        .concat(reach.length ? [R('SP_VPN_SPLIT (group)', reach.map(obj).join(', '), 'Only these networks go through the tunnel. Everything else stays on the person’s own internet.')] : []) });
-    steps.push({ title: '3. IPsec tunnel', where: 'VPN > IPsec Tunnels > Create New > Custom (the wizard also has a Remote Access template)',
-      why: 'The tunnel remote staff connect to. One dial-up tunnel serves everyone.',
-      rows: [R('Name', 'SP_VPN', 'Used by the policies below.'), R('Remote gateway', 'Dialup User', 'Staff connect from anywhere, so no fixed peer address.'),
-        R('Interface', Fmt.WAN_IF, 'The internet-facing port. Change it if yours is not called ' + Fmt.WAN_IF + '.'),
-        R('Mode config', 'Enabled', 'Lets the firewall hand the client its VPN address and the split-tunnel list.'),
-        R('Client address range', `${pool.first} - ${pool.last}`, `${pool.usable.toLocaleString()} addresses for ${pool.staff || 'the'} remote staff plus ${pool.growth}% growth. Netmask ${pool.netmask}.`),
-        R('Split tunnel', reach.length ? 'SP_VPN_SPLIT' : 'None', reach.length ? 'Only office traffic goes through the VPN.' : 'No office network is ticked on the Remote tab, so nothing is sent through the tunnel.'),
-        R('IKE version', '2', 'The current, more reliable version of the key exchange.'),
-        R('Authentication method', 'Pre-shared key (PSK_CHANGE_ME)', 'Replace with a long random key. Staff need it in FortiClient.'),
-        R('User group', 'VPN_USERS_CHANGE_ME', 'Only this group may connect.'),
-        R('Phase 1 proposal', 'aes256-sha256, DH group 14', 'Strong encryption that FortiClient supports.'),
-        R('Phase 2 proposal', 'aes256-sha256', 'Same strength for the data tunnel.'),
-        R('Dead peer detection', 'On idle', 'Tidies up when a laptop vanishes without disconnecting.')] });
-    steps.push({ title: '4. Firewall policy', where: 'Policy & Objects > Firewall Policy',
-      why: 'The tunnel only brings people to the firewall. Policies decide what they can reach.',
-      rows: reach.length ? reach.map(a => R(`SP_VPN to ${a.name}`, `SP_VPN > ${names[result.allocations.indexOf(a)]}`, `Source SP_VPN_POOL, destination ${obj(a)}, service ALL, NAT off, log all traffic.`))
-        : [R('No policy', 'None', 'Tick at least one network on the Remote tab to give remote staff somewhere to go.')] });
-    steps.push({ title: '5. FortiClient on the laptop', where: 'FortiClient > Remote Access > Configure VPN',
-      why: 'What each remote person enters once.',
-      rows: [R('VPN', 'IPsec VPN', ''), R('Connection name', 'Office VPN', 'Anything the person will recognise.'),
-        R('Remote gateway', 'Your WAN IP or domain name', 'The public address of the FortiGate.'),
-        R('Authentication method', 'Pre-shared key', 'Enter the same key as the tunnel.'),
-        R('Authentication', 'Prompt on login', 'The person types their own username and password.'),
-        R('Advanced', 'IKE version 2, mode config', 'Must match the tunnel. Phase 1 and 2 proposals: aes256 / sha256 / DH 14.'),
-        R('Test', `Address from ${pool.first} - ${pool.last}`, 'Connect, check the assigned address, then ping the gateway of an allowed network.')] });
-    return { steps, cli: Fmt.toRemoteFortiOS(result, project, project && project.ifName), note: NOTE };
+    const reach = Remote.reachList(result, project), tn = tunnelName(project);
+    const subnets = reach.map(a => a.cidr).join(', ') || 'None ticked';
+    const first = reach[0], grp = 'RemoteStaff', staff = pool.staff || 'One per';
+    const computed = { title: 'Values to use', rows: [
+      R('Tunnel name', tn, 'At most 13 characters, no spaces: the wizard adds suffixes to it.'),
+      R('Client address range', `${pool.first} - ${pool.last}`, `A new block that overlaps no office network: ${pool.usable.toLocaleString()} addresses for ${pool.staff || 'the'} remote staff plus ${pool.growth}% growth.`),
+      R('Pre-shared key', 'Generate 12+ random characters', 'Share it securely. SubnetPal never stores it.'),
+      R('Local subnets', subnets, 'Only what remote staff need, not everything.'),
+      R('Users', `${staff} remote staff`, 'One local user per person.')] };
+    const steps = [
+      { title: '1. Users', where: 'User & Authentication > User Definition > Create new', why: 'Run the Users/Groups Creation Wizard once per person, so one leaver can be switched off alone.',
+        rows: [R('Step 1: User Type', 'Local User', ''), R('Step 2', 'Username + Password', 'Strong password for each person.'), R('Steps 3-4', 'Contact Info optional, User Account Status Enabled, two-factor if licensed', 'Not captured from the VM.', { approx: true })] },
+      { title: '2. User group', where: 'User & Authentication > User Groups > Create new', why: 'The tunnel only accepts members of this group.',
+        rows: [R('Name', grp, ''), R('Type', 'Firewall', ''), R('Members', 'The users from step 1', '')] },
+      { title: '3. VPN Wizard', where: 'VPN > VPN Wizard', why: 'Start the tunnel.',
+        rows: [R('Tunnel name', tn, 'At most 13 characters.'), R('Template', 'FortiClient remote access', ''), R('Then', 'Click Begin', '')] },
+      { title: '4. Wizard: Authentication', where: 'VPN Wizard, Authentication step', approx: true, why: 'Who connects and how. Not captured from the VM.',
+        rows: [R('Incoming Interface', `WAN port (${Fmt.WAN_IF})`, 'Change it if your internet port is called something else.'), R('Authentication method', 'Pre-shared Key', 'Use the key from "Values to use".'), R('User Group', grp, '')] },
+      { title: '5. Wizard: Policy & Routing', where: 'VPN Wizard, Policy & Routing step', approx: true, why: 'What they can reach. Not captured from the VM.',
+        rows: [R('Local interface', first ? first.name : 'The servers (or staff) network', 'The network remote staff need most.'), R('Local subnets', subnets, 'Only what is needed.'), R('Client address range', `${pool.first} - ${pool.last}`, `Netmask ${pool.netmask}.`),
+          R('Enable IPv4 split tunnel', reach.length ? 'On' : 'On (no office network is ticked on the Remote tab)', 'Only company traffic goes through the tunnel; the rest stays on the person’s own internet.')] },
+      { title: '6. Wizard: Review', where: 'VPN Wizard, Review', why: 'Check, then create.',
+        rows: [R('The table lists', 'Tunnel, address objects (<name>_local, <name>_range), firewall policy, routes', ''), R('Then', 'Click Create', '')] },
+      { title: '7. Harden phase 1', where: 'VPN > VPN Tunnels > edit the tunnel', why: 'The wizard defaults are wide. Tighten them.',
+        rows: [R('Phase 1 proposal', 'Remove anything with DES, 3DES, MD5, SHA1', 'Keep e.g. AES256-SHA256 / AES256GCM-PRFSHA384.'), R('Diffie-Hellman groups', '20, 21', 'Nothing below 14.'), R('IKE version', 'Leave what the wizard chose', 'Do not force a version.')] },
+      { title: '8. Tighten the policy', where: 'Policy & Objects > Firewall Policy', why: 'The wizard policy is too wide.',
+        rows: [R('Name', 'RemoteStaff-to-' + (first ? Fmt.fname(first.name) : 'Servers'), ''), R('Source', `${pool.first} - ${pool.last} + ${grp}`, 'Client range plus the group.'), R('Destination', subnets, 'The local subnets.'),
+          R('Service', 'Only what is needed (e.g. SMB, HTTPS, RDP)', 'Not ALL.'), R('Action / NAT', 'ACCEPT / NAT off', ''), R('Log allowed traffic', 'All sessions', 'Logging is set on the policy.')] },
+      { title: '9. WAN interface', where: 'Network > Interfaces (WAN)', why: 'No change needed.',
+        rows: [R('Administrative Access', 'PING only', 'IPsec does not need HTTPS or SSH on the WAN.')] },
+      { title: '10. FortiClient on each laptop', where: 'FortiClient, new connection', approx: true, why: 'What each remote person enters once. Not captured from the VM.',
+        rows: [R('VPN', 'IPsec VPN', ''), R('Remote Gateway', 'WAN public IP (or DDNS name)', 'The public address of the FortiGate.'), R('Authentication', 'Pre-shared key', 'The key from the checklist.'), R('Then', 'Username + password from step 1', ''),
+          R('Test', `Address from ${pool.first} - ${pool.last}`, 'Connect, check the assigned address, then reach an allowed network.')] }];
+    const table = { title: 'What to check', rows: [
+      R('Tunnel is up when a user connects', 'VPN > VPN Tunnels', 'Status Up, the user is listed.'),
+      R('IKE/IPsec SAs', 'get vpn ipsec tunnel summary; diagnose vpn ike gateway list', 'The tunnel is shown with selectors up.'),
+      R('User can reach the server', 'diagnose debug flow (filter on the client IP), or Policy Match', 'Matches the RemoteStaff policy, not the implicit deny (0).'),
+      R('No access beyond scope', 'Policy Match: client IP to staff/guest subnet', 'Denied.'),
+      R('Logs recorded', 'Log & Report > Forward Traffic; System Events (VPN events)', 'Sessions show the policy ID and the user.', { approx: true }),
+      R('Weak crypto gone', 'Edit tunnel > Phase 1 proposal', 'No SHA1/DES/MD5, DH 14 or higher.')] };
+    const mistakes = ['The client range overlaps a LAN: pick an unused block.', 'Split tunnel off by accident: all home traffic goes through the office.', 'The policy service is left as ALL: narrow it to what staff use.', 'The user is not in the group: the user cannot log in.', 'A short pre-shared key: use 12+ random characters.'];
+    return { computed, steps, table, mistakes, cli: Fmt.toRemoteFortiOS(result, project, project && project.ifName), note: NOTE };
   }
 
-  return { NOTE, iface, vpn };
+  return { NOTE, iface, vpn, checks, tunnelName };
 }));

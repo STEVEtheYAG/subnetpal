@@ -344,13 +344,21 @@
     document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('ip')) { e.preventDefault(); copyIp(e.target); } });
   }
   // "Set it up on the FortiGate" panel: grouped like the FortiOS form, a plain-English why per field, and a copy button for the CLI.
+  const apx = on => on ? ' <span class="apx" title="Not captured from the FortiOS VM; from the FortiOS docs">approximate</span>' : '';
   function guideRows(rows) {
-    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw">${esc(r.why)}</span>` : ''}</div>`).join('');
+    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}${apx(r.approx)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw">${esc(r.why)}</span>` : ''}</div>`).join('');
   }
+  const guideList = (title, items) => `<h4 class="fgh">${esc(title)}</h4><ul class="fgl">${items.map(i => { const o = typeof i === 'string' ? { t: i, ok: true } : i; return `<li class="${o.ok ? '' : 'bad'}">${o.ok ? '' : '⚠ '}${esc(o.t)}</li>`; }).join('')}</ul>`;
   function guidePanel(g, key, title) {
     if (!g) return '';
-    const body = g.groups ? g.groups.map(x => `<h4 class="fgh">${esc(x.title)}</h4>${guideRows(x.rows)}`).join('')
-      : g.steps.map(s => `<h4 class="fgh">${esc(s.title)}</h4><p class="fgw"><span class="dim">${esc(s.where)}.</span> ${esc(s.why)}</p>${guideRows(s.rows)}`).join('');
+    const head = x => `<h4 class="fgh">${esc(x.title)}${apx(x.approx)}</h4>`;
+    const body = (g.computed ? head(g.computed) + guideRows(g.computed.rows) : '')
+      + (g.groups ? g.groups.map(x => head(x) + guideRows(x.rows)).join('')
+        : g.steps.map(s => `${head(s)}<p class="fgw"><span class="dim">${esc(s.where)}.</span> ${esc(s.why)}</p>${guideRows(s.rows)}`).join(''))
+      + (g.table ? head(g.table) + guideRows(g.table.rows) : '')
+      + (g.checks ? guideList('Checks', g.checks) : '')
+      + (g.hints ? guideList('Common mistakes', g.hints) : g.mistakes ? guideList('Common mistakes', g.mistakes) : '')
+      + (g.notes || []).map(n => `<p class="hint">${esc(n)}</p>`).join('');
     return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button></div>${body}<p class="hint">${esc(g.note)}</p></div>`;
   }
   function guideFor(key) {

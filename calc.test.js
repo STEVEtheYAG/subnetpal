@@ -809,7 +809,7 @@ test('split tunnel: an empty tick map means nothing is reachable (no policies), 
   const { r, p, c } = remoteClient('10'); c.intake.remote.reach = {};
   assert.deepStrictEqual(R.plan(r, I.toProject(c)).reach, []);
   const f = F.toRemoteFortiOS(r, I.toProject(c), 'port5');
-  assert.ok(!f.includes('SP_VPN_SPLIT') && !f.includes('SP_VPN_to_') && f.includes('No office networks are ticked'));
+  assert.ok(!f.includes('SP_VPN_SPLIT') && !f.includes('RemoteStaff-to-') && f.includes('No office networks are ticked'));
 });
 test('home-range clash warning: existing ranges, manual office block, and only when remote staff are ticked', () => {
   const a = remoteClient('10', c => { c.intake.existing = '192.168.1.0/24, 10.1.0.0/16'; });
@@ -827,7 +827,10 @@ test('IPsec remote access CLI: pool, split tunnel, matching policy, placeholders
   assert.ok(f.includes('config vpn ipsec phase1-interface') && f.includes('config vpn ipsec phase2-interface'));
   assert.ok(f.includes(`set ipv4-start-ip ${pool.first}`) && f.includes(`set ipv4-end-ip ${pool.last}`) && f.includes('set ipv4-split-include "SP_VPN_SPLIT"'));
   assert.ok(/set member "SP_Staff_LAN" "SP_Servers"/.test(f) && /set srcintf "SP_VPN"[\s\S]*set dstintf "vlan20"/.test(f) && /set dstintf "vlan30"/.test(f));
-  assert.ok(f.includes('PSK_CHANGE_ME') && f.includes('VPN_USERS_CHANGE_ME') && f.includes(F.FORTI_NOTE) && f.includes('lab VM'));
+  assert.ok(f.includes('PSK_CHANGE_ME') && f.includes('set authusrgrp "RemoteStaff"') && f.includes(F.FORTI_NOTE));
+  // Bob's guide: IKE version not forced, DH 20/21, narrow services, group in the policy, NAT off, all sessions logged
+  assert.ok(!/ike-version/.test(f.replace(/^#.*$/gm, '')) && f.includes('set dhgrp 20 21') && f.includes('set service "SMB" "HTTPS" "RDP"') && !f.includes('set service "ALL"'));
+  assert.ok(f.includes('set groups "RemoteStaff"') && f.includes('set nat disable') && f.includes('set logtraffic all') && f.includes('RemoteStaff-to-Servers'));
   assert.strictEqual(F.toRemoteFortiOS(remoteClient('5', c => { c.intake.remote.on = false; }).r, remoteClient('5', c => { c.intake.remote.on = false; }).p), '');
 });
 test('plan diagram and client report include the VPN pool in plain language', () => {
@@ -1394,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v23'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v24'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1446,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v23/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v24/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1461,7 +1464,9 @@ const gRow = (g, k) => g.groups.reduce((x, y) => x.concat(y.rows), []).find(r =>
 test('guide: least-privilege admin access per kind, and the main CLI uses the same', () => {
   assert.deepStrictEqual(A.adminAccess({ kind: 'mgmt' }), ['https', 'ping', 'ssh']);
   ['guest', 'iot', 'cameras', 'pos', 'other'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), [], k));
-  ['staff', 'servers', 'voice', 'printers', 'dmz'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['ping'], k));
+  ['servers', 'voice', 'dmz'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['ping'], k));
+  ['staff', 'lan'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['https', 'ping', 'ssh'], k)); // guide 1.4: Staff = HTTPS, SSH, PING
+  assert.deepStrictEqual(A.adminAccess({ kind: 'printers' }), []); // guide 1.4: Printers/IoT = none
   const p = guideProj(), r = C.plan(p), cli = F.toFortiOS(r, p, 'port2');
   assert.ok(/edit "vlan10"[\s\S]*?set allowaccess https ping ssh[\s\S]*?next/.test(cli));
   assert.ok(/edit "vlan30"[\s\S]*?unset allowaccess[\s\S]*?next/.test(cli));
@@ -1476,37 +1481,76 @@ test('guide: interface card mirrors the FortiOS form and carries a why for every
   assert.strictEqual(gRow(g, 'Lease time').v, '604800 seconds');
   g.groups.forEach(x => x.rows.forEach(row => { if (row.k !== 'VPN') assert.ok(row.v !== '', row.k); }));
   assert.ok(g.cli.includes('set ip ' + a.gateway) && g.cli.includes('set vlanid 20') && g.cli.includes('set device-identification enable') && g.cli.includes('set lease-time 604800'));
-  assert.ok(g.cli.includes(F.FORTI_NOTE) && g.note.includes(F.FORTI_NOTE) && /unverified/.test(g.note));
+  assert.ok(g.cli.includes(F.FORTI_NOTE) && g.note.includes(F.FORTI_NOTE) && !/unverified/.test(g.note) && /approximate/.test(g.note));
 });
 test('guide: management, guest and cameras differ sensibly', () => {
   const p = guideProj(), r = C.plan(p), at = n => G.iface(r, p, r.allocations.findIndex(a => a.name === n));
   assert.deepStrictEqual(gRow(at('Management'), 'IPv4').chips.filter(c => c.on).map(c => c.t), ['HTTPS', 'PING', 'SSH']);
-  assert.deepStrictEqual(gRow(at('Guest'), 'IPv4').chips.filter(c => c.on), []); assert.strictEqual(gRow(at('Guest'), 'Lease time').v, '28800 seconds');
-  assert.strictEqual(gRow(at('Cameras'), 'Device detection').v, 'On'); assert.strictEqual(gRow(at('Servers'), 'Device detection').v, 'Off');
-  assert.ok(!/set device-identification/.test(at('Servers').cli));
+  assert.deepStrictEqual(gRow(at('Guest'), 'IPv4').chips.filter(c => c.on), []); assert.strictEqual(gRow(at('Guest'), 'Lease time').v, '14400 seconds'); // guide: guests 3600-14400 s
+  assert.strictEqual(gRow(at('Servers'), 'Device detection').v, 'On');
+  assert.strictEqual(gRow(at('Cameras'), 'Device detection').v, 'On'); assert.strictEqual(gRow(at('Management'), 'Device detection').v, 'Off');
+  assert.ok(!/set device-identification/.test(at('Management').cli) && /set device-identification/.test(at('Servers').cli));
 });
 test('guide: a non-VLAN port and a loopback have no VLAN rows', () => {
   const p = { parent: '10.5.0.0/24', networks: [{ name: 'Office', hosts: 20, vlan: '', role: 'LAN', kind: 'staff' }, { name: 'Lo', hosts: 1, vlan: '', role: 'Loopback', kind: 'loopback' }], opts: {}, existing: [] }, r = C.plan(p);
   const g = G.iface(r, p, r.allocations.findIndex(a => a.name === 'Office'));
-  assert.strictEqual(gRow(g, 'Type').v, 'Physical interface'); assert.strictEqual(gRow(g, 'VLAN ID'), undefined); assert.ok(!/vlanid/.test(g.cli));
-  assert.strictEqual(gRow(G.iface(r, p, r.allocations.findIndex(a => a.name === 'Lo')), 'Type').v, 'Loopback');
+  assert.strictEqual(gRow(g, 'Type').v, 'Physical Interface'); assert.strictEqual(gRow(g, 'VLAN ID'), undefined); assert.ok(!/vlanid/.test(g.cli));
+  assert.strictEqual(gRow(G.iface(r, p, r.allocations.findIndex(a => a.name === 'Lo')), 'Type').v, 'Loopback Interface');
   assert.strictEqual(G.iface(r, p, 99), null);
 });
-test('guide: VPN steps use the plan values and agree with the remote CLI', () => {
+test('guide: VPN card is Bob\'s 10-step checklist with the plan values, computed values, check table and mistakes', () => {
   const p = guideProj(), r = C.plan(p), v = G.vpn(r, p), pool = R.plan(r, p);
-  assert.strictEqual(v.steps.length, 5);
-  const rows = v.steps.reduce((x, s) => x.concat(s.rows), []), rowOf = k => rows.find(x => x.k === k);
-  assert.strictEqual(rowOf('SP_VPN_POOL').v, `${pool.network}/${pool.netmask}`);
-  assert.strictEqual(rowOf('Client address range').v, `${pool.first} - ${pool.last}`);
-  assert.strictEqual(rowOf('Split tunnel').v, 'SP_VPN_SPLIT');
-  ['SP_VPN', 'aes256-sha256', 'VPN_USERS_CHANGE_ME', 'PSK_CHANGE_ME', 'set ike-version 2', 'set dhgrp 14', 'set ipv4-start-ip ' + pool.first].forEach(t => assert.ok(v.cli.includes(t.replace(/^set /, '')) , t));
-  assert.ok(v.cli.includes(`set ipv4-start-ip ${pool.first}`) && v.cli.includes(F.FORTI_NOTE) && /unverified/.test(v.note));
-  pool.reach.forEach(n => assert.ok(rows.some(x => x.k === 'SP_VPN to ' + n), n));
+  assert.strictEqual(v.steps.length, 10);
+  assert.deepStrictEqual(v.steps.map(s => s.title.replace(/^\d+\. /, '')), ['Users', 'User group', 'VPN Wizard', 'Wizard: Authentication', 'Wizard: Policy & Routing', 'Wizard: Review', 'Harden phase 1', 'Tighten the policy', 'WAN interface', 'FortiClient on each laptop']);
+  assert.deepStrictEqual(v.steps.filter(s => s.approx).map(s => s.title[0] + (s.title[1] === '0' ? '0' : '')), ['4', '5', '10']);
+  const rows = v.steps.reduce((x, s) => x.concat(s.rows), []), rowOf = k => rows.find(x => x.k === k), cv = k => v.computed.rows.find(x => x.k === k);
+  assert.strictEqual(cv('Client address range').v, `${pool.first} - ${pool.last}`);
+  assert.ok(cv('Tunnel name').v.length <= 13 && !/\s/.test(cv('Tunnel name').v) && /^[A-Za-z0-9-]+$/.test(cv('Tunnel name').v));
+  assert.ok(/12\+ random/.test(cv('Pre-shared key').v) && !/PSK_CHANGE_ME/.test(JSON.stringify(v.computed)), 'the key is never stored or shown');
+  assert.strictEqual(cv('Local subnets').v, pool.reach.map(n => r.allocations.find(a => a.name === n).cidr).join(', '));
+  assert.strictEqual(rowOf('Enable IPv4 split tunnel').v, 'On'); assert.strictEqual(rowOf('Template').v, 'FortiClient remote access');
+  assert.ok(/DES, 3DES, MD5, SHA1/.test(rowOf('Phase 1 proposal').v) && rowOf('Diffie-Hellman groups').v === '20, 21' && /Leave what the wizard chose/.test(rowOf('IKE version').v));
+  assert.strictEqual(rowOf('Log allowed traffic').v, 'All sessions'); assert.strictEqual(rowOf('Action / NAT').v, 'ACCEPT / NAT off');
+  assert.strictEqual(v.table.rows.length, 6); assert.ok(v.table.rows.find(x => x.k === 'Logs recorded').approx);
+  assert.strictEqual(v.mistakes.length, 5);
+  ['SP_VPN', 'aes256-sha256', 'RemoteStaff', 'PSK_CHANGE_ME', 'set dhgrp 20 21', 'set ipv4-start-ip ' + pool.first].forEach(t => assert.ok(v.cli.includes(t), t));
+  assert.ok(!/set ike-version/.test(v.cli) && v.cli.includes(F.FORTI_NOTE) && !/unverified/.test(v.note));
 });
-test('guide: no VPN guide unless remote staff is ticked; no reach networks gives no policy rows', () => {
+test('guide: tunnel name is at most 13 characters with no spaces', () => {
+  assert.strictEqual(G.tunnelName({ name: 'Halden Legal' }), 'Halden-FCT'); assert.strictEqual(G.tunnelName({}), 'SP-FCT');
+  assert.ok(G.tunnelName({ name: 'Extraordinarily Long Name Pty' }).length <= 13 && G.tunnelName({ name: '!!! ???' }) === 'SP-FCT');
+});
+test('guide: no VPN guide unless remote staff is ticked; no reach networks still renders all ten steps', () => {
   const p = guideProj(), r = C.plan(p); p.intake.remote.on = false; assert.strictEqual(G.vpn(r, p), null);
   p.intake.remote = { on: true, count: 3, reach: {} }; const v = G.vpn(r, p);
-  assert.strictEqual(v.steps[3].rows[0].k, 'No policy'); assert.strictEqual(v.steps[2].rows.find(x => x.k === 'Split tunnel').v, 'None');
+  assert.strictEqual(v.steps.length, 10); assert.strictEqual(v.computed.rows.find(x => x.k === 'Local subnets').v, 'None ticked');
+});
+test('guide: field order follows the FortiOS form (guide 1.3) and the card carries checks, hints and the logging note', () => {
+  const p = guideProj(), r = C.plan(p), g = G.iface(r, p, r.allocations.findIndex(a => a.name === 'Staff'));
+  const ks = g.groups.reduce((x, y) => x.concat(y.rows.map(z => z.k)), []), at = k => ks.indexOf(k);
+  ['Name', 'Alias', 'Type', 'VLAN protocol', 'Interface', 'VLAN ID', 'VRF ID', 'Role', 'Addressing mode', 'IP/Netmask', 'Create address object matching subnet', 'Secondary IP address', 'IPv4', 'DHCP status', 'Device detection', 'Proxy ARP', 'Security mode', 'Outbound shaping profile', 'Comments', 'Status']
+    .reduce((prev, k) => { assert.ok(at(k) > prev, k); return at(k); }, -1);
+  assert.ok(g.checks.length >= 4 && g.checks.every(c => c.ok), 'a clean plan passes every pre-display check');
+  assert.ok(g.hints.some(h => /Gateway is network \+ 1/.test(h)) && g.hints.some(h => /max 15 characters/i.test(h)) && g.hints.some(h => /Logging lives on the policy/.test(h)));
+  assert.ok(g.notes.some(n => /Log allowed traffic = All sessions/.test(n)) && !g.groups.some(x => x.rows.some(y => /logging/i.test(y.k))), 'logging is a note, not a field');
+  assert.strictEqual(gRow(g, 'DHCP status').v, 'Enabled'); assert.ok(g.groups.find(x => x.title === 'DHCP Server').approx, 'DHCP layout is approximate');
+});
+test('guide: per-role values (WAN, guest, servers, printers, management) and failing checks', () => {
+  const mk = nets => { const p = { parent: '10.60.0.0/16', networks: nets, opts: {}, existing: [], ifName: 'port2' }; return { p, r: C.plan(p) }; };
+  const { p, r } = mk([{ name: 'Internet', hosts: 1, vlan: '', role: 'WAN', kind: 'wan' }, { name: 'Printers', hosts: 10, vlan: 40, role: 'LAN', kind: 'printers' }, { name: 'Servers', hosts: 10, vlan: 30, role: 'LAN', kind: 'servers', dhcp: false }, { name: 'Mgmt', hosts: 5, vlan: 99, role: 'Mgmt', kind: 'mgmt' }]);
+  const at = n => G.iface(r, p, r.allocations.findIndex(a => a.name === n));
+  const w = at('Internet');
+  assert.strictEqual(gRow(w, 'Type').v, 'Physical Interface'); assert.strictEqual(gRow(w, 'Role').v, 'WAN'); assert.strictEqual(gRow(w, 'Addressing mode').v, 'DHCP');
+  assert.deepStrictEqual(gRow(w, 'IPv4').chips.filter(c => c.on).map(c => c.t), ['PING']); assert.strictEqual(gRow(w, 'DHCP status').v, 'Disabled'); assert.strictEqual(gRow(w, 'Device detection').v, 'Off');
+  assert.ok(gRow(w, 'Distance') && gRow(w, 'Override internal DNS') && !gRow(w, 'Create address object matching subnet') && /set mode dhcp/.test(w.cli) && !/set ip /.test(w.cli) && /WAN = PING only/.test(w.hints[0]));
+  const pr = at('Printers'); assert.deepStrictEqual(gRow(pr, 'IPv4').chips.filter(c => c.on), []); assert.strictEqual(gRow(pr, 'Lease time').v, '604800 seconds'); assert.ok(gRow(pr, 'IP address assignment rules').approx);
+  const sv = at('Servers'); assert.strictEqual(gRow(sv, 'DHCP status').v, 'Disabled'); assert.ok(gRow(sv, 'Static range') && !gRow(sv, 'Address range')); assert.ok(/Servers are static/.test(sv.hints[0]));
+  assert.strictEqual(gRow(at('Mgmt'), 'Device detection').v, 'Off'); assert.strictEqual(gRow(at('Mgmt'), 'DHCP status').v, 'Disabled');
+  // checks fail on a bad card
+  const a = Object.assign({}, r.allocations.find(x => x.name === 'Printers')), bad = G.checks(r.allocations.concat([Object.assign({}, a, { name: 'Dup' })]), a, 'port2');
+  assert.ok(bad.some(c => !c.ok && /VLAN 40 is also used by .*Dup/.test(c.t)) && bad.some(c => !c.ok && /overlaps .*Dup/.test(c.t)));
+  assert.ok(G.checks(r.allocations, Object.assign({}, a, { dhcpStart: a.network, dhcpEnd: a.broadcast }), 'port2').some(c => !c.ok && /DHCP pool contains/.test(c.t)));
+  assert.ok(G.checks(r.allocations, Object.assign({}, a, { prefix: 31 }), 'port2').some(c => !c.ok && /\/30 or shorter/.test(c.t)));
 });
 test('guide: sw.js precaches guide.js, index loads it after format.js and the card styles keep the layout guards', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');

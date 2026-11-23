@@ -316,7 +316,7 @@
     const pool = Remote.plan(result, project);
     if (!pool) return '';
     const ph = (ifName && String(ifName).trim()) || 'PORT_CHANGE_ME';
-    const L = ['# ===== SubnetPal IPsec remote access snippet =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE, '# Verify on the lab VM before applying. PSK_CHANGE_ME, VPN_USERS_CHANGE_ME and the proposals below are placeholders.'];
+    const L = ['# ===== SubnetPal IPsec remote access snippet =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE, '# Test before applying. PSK_CHANGE_ME is a placeholder: use a random key of 12+ characters and share it securely (the app never stores it). Create the users and the RemoteStaff group first (steps 1-2 on the card).'];
     if (!pool.ok) { L.push('# ' + pool.error); return L.join('\n') + '\n'; }
     const names = ifaceNames(result.allocations, ph);
     const reach = Remote.reachList(result, project);
@@ -329,18 +329,18 @@
     L.push('end');
     if (reach.length) L.push('', 'config firewall addrgrp', '    edit "SP_VPN_SPLIT"', '        set member ' + reach.map(a => q(objOf(a))).join(' '), '    next', 'end');
     else L.push('', '# No office networks are ticked for remote staff, so there is no split-tunnel list or policy.');
-    L.push('', '# Phase 1: IKEv2 dial-up. Local users in a group, authenticated with a pre-shared key and XAuth (placeholders).',
-      'config vpn ipsec phase1-interface', '    edit "SP_VPN"', '        set type dynamic', `        set interface ${q(WAN_IF)}`, '        set ike-version 2',
-      '        set peertype any', '        set net-device disable', '        set mode-cfg enable', '        set proposal aes256-sha256', '        set dhgrp 14',
-      '        set dpd on-idle', '        set xauthtype auto', '        set authusrgrp "VPN_USERS_CHANGE_ME"',
+    L.push('', '# Phase 1: dial-up. IKE version is NOT forced: leave what the VPN Wizard (FortiClient template) chose. XAuth belongs to IKEv1; if your wizard chose IKEv2, delete the xauthtype line. Weak crypto is left out (no DES, 3DES, MD5, SHA1); DH 20 and 21.',
+      'config vpn ipsec phase1-interface', '    edit "SP_VPN"', '        set type dynamic', `        set interface ${q(WAN_IF)}`,
+      '        set peertype any', '        set net-device disable', '        set mode-cfg enable', '        set proposal aes256-sha256', '        set dhgrp 20 21',
+      '        set dpd on-idle', '        set xauthtype auto', '        set authusrgrp "RemoteStaff"',
       `        set ipv4-start-ip ${pool.first}`, `        set ipv4-end-ip ${pool.last}`, `        set ipv4-netmask ${pool.netmask}`);
     if (reach.length) L.push('        set ipv4-split-include "SP_VPN_SPLIT"');
     L.push('        set add-route enable', '        set psksecret PSK_CHANGE_ME', '    next', 'end',
       '', '# Phase 2', 'config vpn ipsec phase2-interface', '    edit "SP_VPN"', '        set phase1name "SP_VPN"', '        set proposal aes256-sha256', '    next', 'end');
     if (reach.length) {
-      L.push('', '# Policy: VPN users reach only the ticked office networks.', 'config firewall policy');
-      reach.forEach(a => L.push('    edit 0', `        set name ${q(('SP_VPN_to_' + fname(a.name)).slice(0, 35))}`, '        set srcintf "SP_VPN"', `        set dstintf ${q(names[idx(a)])}`,
-        '        set action accept', '        set srcaddr "SP_VPN_POOL"', `        set dstaddr ${q(objOf(a))}`, '        set schedule "always"', '        set service "ALL"', '        set logtraffic all',
+      L.push('', '# Policy: only the RemoteStaff group, only the ticked networks, narrow services (trim SMB/HTTPS/RDP to what staff use), NAT off, log all sessions.', 'config firewall policy');
+      reach.forEach(a => L.push('    edit 0', `        set name ${q(('RemoteStaff-to-' + fname(a.name)).slice(0, 35))}`, '        set srcintf "SP_VPN"', `        set dstintf ${q(names[idx(a)])}`,
+        '        set action accept', '        set srcaddr "SP_VPN_POOL"', '        set groups "RemoteStaff"', `        set dstaddr ${q(objOf(a))}`, '        set schedule "always"', '        set service "SMB" "HTTPS" "RDP"', '        set nat disable', '        set logtraffic all',
         `        set comments ${q('SubnetPal remote access')}`, '    next'));
       L.push('end');
     }

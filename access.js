@@ -62,8 +62,8 @@
     };
   }
 
-  // Least-privilege administrative access (FortiGate allowaccess) per network kind. Only Management gets the admin pages.
-  const ADMIN = { mgmt: ['https', 'ping', 'ssh'], staff: ['ping'], lan: ['ping'], servers: ['ping'], voice: ['ping'], printers: ['ping'], dmz: ['ping'], wan: ['ping'], transit: ['ping'], loopback: ['ping'], cameras: [], iot: [], other: [], guest: [], pos: [] };
+  // Administrative access (FortiGate allowaccess) per network kind, per the FortiOS 8.0.2 guide: Management and Staff get HTTPS+SSH+PING, servers and links PING only, guests/printers/IoT/cameras none.
+  const ADMIN = { mgmt: ['https', 'ping', 'ssh'], staff: ['https', 'ping', 'ssh'], lan: ['https', 'ping', 'ssh'], servers: ['ping'], voice: ['ping'], printers: [], dmz: ['ping'], wan: ['ping'], transit: ['ping'], loopback: ['ping'], cameras: [], iot: [], other: [], guest: [], pos: [] };
   const adminAccess = a => (ADMIN[kindOf(a)] || ['ping']).slice();
 
   const n0 = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; };
