@@ -9,7 +9,8 @@
 
   const NOTE = 'Menu and field names are from memory and unverified (FortiOS 8.0). ' + Fmt.FORTI_NOTE;
   const ROLE_LABEL = { lan: 'LAN', dmz: 'DMZ', wan: 'WAN', undefined: 'Undefined' };
-  const ACCESS_OPTS = [['https', 'HTTPS'], ['ping', 'PING'], ['ssh', 'SSH']];
+  // Administrative Access boxes in the order the FortiOS form shows them. HTTP is greyed out on the VM (needs a deliberate choice), so it is never ticked here.
+  const ACCESS_OPTS = [['https', 'HTTPS'], ['http', 'HTTP', 1], ['ping', 'PING'], ['fgfm', 'FMG-Access'], ['ssh', 'SSH'], ['snmp', 'SNMP'], ['ftm', 'FTM'], ['radius-acct', 'RADIUS Accounting'], ['probe-response', 'Security Fabric Connection'], ['speed-test', 'Speed Test'], ['scim', 'SCIM']];
   const DEVICE_DETECT = ['staff', 'lan', 'guest', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos'];
   const R = (k, v, why, extra) => Object.assign({ k, v: String(v), why: why || '' }, extra);
 
@@ -17,6 +18,12 @@
     if (kind === 'mgmt') return 'Administrators manage the firewall from here, so HTTPS and SSH are on. Nothing else.';
     if (!list.length) return 'Nothing on the firewall needs to answer here. Devices on this network only need a gateway and DHCP, which work without any of these boxes.';
     return 'PING lets you test the gateway. The admin pages (HTTPS, SSH) stay off so only the Management network can log in to the firewall.';
+  }
+  function dhcpOffWhy(kind) {
+    if (kind === 'mgmt') return 'Disabled. Switches, access points and admin PCs on Management are given fixed addresses so you can always find them.';
+    if (kind === 'servers' || kind === 'dmz') return 'Disabled. Servers use fixed addresses, so nothing should hand them out.';
+    if (kind === 'transit' || kind === 'loopback') return 'Disabled. A point-to-point link or loopback has no devices to configure.';
+    return 'Disabled. The plan gives this network no DHCP range, so devices here use fixed addresses.';
   }
   function leaseOf(a) { return Access.kindOf(a) === 'guest' ? 28800 : 604800; }
 
@@ -29,7 +36,7 @@
     const isVlan = a.vlan !== '' && a.role !== 'Loopback', isLoop = a.role === 'Loopback';
     const role = Fmt.FORTI_ROLE[a.role] || 'lan', acc = Access.adminAccess(a);
     const ip = `${a.gateway ? a.gateway : a.firstUsable}/${a.netmask}`;
-    const dev = DEVICE_DETECT.indexOf(kind) >= 0;
+    const dev = DEVICE_DETECT.indexOf(kind) >= 0, obj = ('SP_' + (Fmt.fname(a.name) || 'net')).slice(0, 79);
     const top = [R('Name', name, isVlan ? 'Built from the VLAN ID. You can rename it; keep the same name in the CLI and in policies.' : isLoop ? 'A loopback has its own name.' : `Use the real port name (for example port3) in place of ${ph}.`),
       R('Alias', a.name, 'The friendly name shown in policies and logs.'),
       R('Type', isLoop ? 'Loopback' : isVlan ? 'VLAN' : 'Physical interface', isVlan ? 'One cable (trunk) carries several networks, each on its own VLAN.' : '')];
@@ -37,10 +44,12 @@
     top.push(R('Role', ROLE_LABEL[role] || 'LAN', role === 'dmz' ? 'DMZ marks a network that holds public-facing servers.' : role === 'wan' ? 'WAN marks the internet side.' : role === 'undefined' ? 'No special role for links and loopbacks.' : 'LAN marks an internal network. Guests and devices are still kept apart by policy.'));
     const groups = [{ title: 'Interface', rows: top }];
     const addr = [R('Addressing mode', 'Manual', 'A fixed address. The firewall is the default gateway for this network.'), R('IP/Netmask', ip, 'First usable address in the range is the firewall; devices use it as their gateway.')];
+    addr.push(R('Create address object matching subnet', 'On', 'Makes a firewall address object for this network so policies can use it.'), R('Name', obj, 'The firewall address object the policies in the export refer to.'), R('Destination', a.cidr, 'The whole network.'));
     if (a.v6) addr.push(R('IPv6', `${a.v6.address}/${a.v6.prefix}`, 'The firewall address in this network’s /64. Enable IPv6 under System > Feature Visibility if the box is hidden.'));
     groups.push({ title: 'Address', rows: addr });
-    groups.push({ title: 'Administrative Access', rows: [R('IPv4', acc.length ? acc.map(x => x.toUpperCase()).join(', ') : 'None', adminWhy(kind, acc), { chips: ACCESS_OPTS.map(([k, t]) => ({ t, on: acc.indexOf(k) >= 0 })) })] });
-    if (a.dhcpStart) {
+    groups.push({ title: 'Administrative Access', rows: [R('IPv4', acc.length ? acc.map(x => x.toUpperCase()).join(', ') : 'None', adminWhy(kind, acc), { chips: ACCESS_OPTS.map(([k, t, dis]) => ({ t, on: acc.indexOf(k) >= 0, dis: !!dis })) })] });
+    if (!a.dhcpStart) groups.push({ title: 'DHCP Server', rows: [R('DHCP status', 'Disabled', dhcpOffWhy(kind))] });
+    else {
       groups.push({ title: 'DHCP Server', rows: [R('DHCP status', 'Enabled', 'Hands out addresses so people do not type them in.'),
         R('Address range', `${a.dhcpStart} - ${a.dhcpEnd}`, 'The pool of addresses given to devices. The rest of the network is kept for static devices.'),
         R('Netmask', a.netmask, 'Same as the interface.'), R('Default gateway', 'Same as Interface IP', 'Devices send their traffic to the firewall.'),
@@ -49,12 +58,14 @@
     }
     groups.push({ title: 'Network', rows: [R('Device detection', dev ? 'On' : 'Off', dev ? 'Lets the firewall name the devices it sees (phones, laptops, printers).' : 'Not useful on a network of servers, equipment or links.'),
       R('Proxy ARP', 'Off', 'Only needed in special cases.'), R('Security mode', 'Off', kind === 'guest' ? 'Off. Turn on a captive portal only if you want guests to click through a login page.' : 'Off. Not needed here.')] });
-    groups.push({ title: 'Status', rows: [R('Status', 'Enabled', 'The interface is up.')] });
+    groups.push({ title: 'Traffic Shaping', rows: [R('Outbound shaping profile', 'Off', kind === 'voice' ? 'Off for now. Phone traffic is best prioritised with a shaping profile once the network is running (see the voice advice on the Policies tab).' : 'Off. Not needed to start with.'), R('Outbound bandwidth', 'Off', 'Off. Set a limit only if this network must not use the whole line.')] });
+    const comment = `SubnetPal: ${a.name} ${a.cidr}`;
+    groups.push({ title: 'Miscellaneous', rows: [R('Comments', comment, 'Optional note (up to 255 characters) that shows in the interface list.'), R('Status', 'Enabled', 'The interface is up.')] });
 
     const L = ['# ' + NOTE, '', 'config system interface'];
     const lines = Fmt.ifaceLines(a, name, ph);
-    if (dev) lines.splice(lines.length - 1, 0, '        set device-identification enable');
-    L.push(...lines, 'end');
+    lines.splice(lines.length - 1, 0, ...(dev ? ['        set device-identification enable'] : []), `        set description ${JSON.stringify(comment)}`);
+    L.push(...lines, 'end', '', 'config firewall address', `    edit ${JSON.stringify(obj)}`, `        set subnet ${a.network} ${a.netmask}`, `        set comment ${JSON.stringify(a.name + ' (' + a.cidr + ')')}`, '    next', 'end');
     if (a.dhcpStart) L.push('', 'config system dhcp-server', ...Fmt.dhcpLines(a, name, 100, leaseOf(a)), 'end', '# DHCP server ID 100 is a placeholder: use any free ID on your FortiGate.');
     return { name, alias: a.name, groups, cli: L.join('\n') + '\n', note: NOTE };
   }

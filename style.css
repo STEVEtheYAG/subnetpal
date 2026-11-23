@@ -495,3 +495,12 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 .chip.on { color: var(--accent-t); border-color: var(--accent-t); font-weight: 600; }
 @media (max-width: 560px) { .fgr { grid-template-columns: minmax(0, 1fr); } .fw { grid-column: 1; } }
 @media print { .fg { display: none; } }
+
+/* ---- Open CLI popup ---- */
+#clidlg { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-up, 0 20px 60px #0006); }
+#clidlg::backdrop { background: #0008; }
+#clidlg[open] { display: flex; flex-direction: column; gap: 8px; }
+#clitext { width: 100%; min-width: 0; box-sizing: border-box; height: min(60vh, 420px); resize: vertical; padding: 10px; font-size: 12.5px; line-height: 1.45; white-space: pre; overflow: auto; color: inherit; }
+.cliact { display: flex; gap: 8px; justify-content: flex-end; }
+@media print { #clidlg { display: none !important; } }
+.chip.dis { opacity: .5; }

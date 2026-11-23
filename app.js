@@ -340,13 +340,13 @@
   }
   // "Set it up on the FortiGate" panel: grouped like the FortiOS form, a plain-English why per field, and a copy button for the CLI.
   function guideRows(rows) {
-    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw">${esc(r.why)}</span>` : ''}</div>`).join('');
+    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw">${esc(r.why)}</span>` : ''}</div>`).join('');
   }
   function guidePanel(g, key, title) {
     if (!g) return '';
     const body = g.groups ? g.groups.map(x => `<h4 class="fgh">${esc(x.title)}</h4>${guideRows(x.rows)}`).join('')
       : g.steps.map(s => `<h4 class="fgh">${esc(s.title)}</h4><p class="fgw"><span class="dim">${esc(s.where)}.</span> ${esc(s.why)}</p>${guideRows(s.rows)}`).join('');
-    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-copycli="${esc(key)}">Copy CLI</button></div>${body}<p class="hint">${esc(g.note)}</p></div>`;
+    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button></div>${body}<p class="hint">${esc(g.note)}</p></div>`;
   }
   function guideFor(key) {
     if (!result || !result.ok) return null;
@@ -712,11 +712,19 @@
   function bindAccordion() {
     $$('.rtabs button').forEach(b => b.addEventListener('click', () => setOpen(b.dataset.tab, false)));
     $('#fitUsed').addEventListener('change', renderMap);
-    $('#cards').addEventListener('click', async e => {
-      const b = e.target.closest('[data-copycli]'); if (!b) return;
-      const g = guideFor(b.dataset.copycli);
-      toast(g && await copy(g.cli) ? 'Copied the FortiOS CLI for this card' : 'Copy was blocked. Use the Export tab instead.');
+    $('#cards').addEventListener('click', e => {
+      const b = e.target.closest('[data-opencli]'); if (!b) return;
+      const g = guideFor(b.dataset.opencli); if (!g) return;
+      const d = $('#clidlg');
+      $('#clititle').textContent = 'FortiOS CLI: ' + (g.alias || 'Remote staff VPN');
+      $('#clitext').value = g.cli; d.returnFocusTo = b;
+      if (d.showModal) d.showModal(); else d.setAttribute('open', '');
+      $('#clitext').focus(); $('#clitext').select();
     });
+    const dlg = $('#clidlg'), closeDlg = () => { if (dlg.close) dlg.close(); else dlg.removeAttribute('open'); if (dlg.returnFocusTo) dlg.returnFocusTo.focus(); };
+    $('#cliclose').addEventListener('click', closeDlg);
+    dlg.addEventListener('click', e => { if (e.target === dlg) closeDlg(); });   // backdrop click (Esc is native)
+    $('#clicopy').addEventListener('click', async () => toast((await copy($('#clitext').value)) ? 'Copied the FortiOS CLI' : 'Copy was blocked. Select the text and copy it.'));
     $('#cards').addEventListener('toggle', e => { const d = e.target.closest('details'); if (!d) return; if (d.open) openCards.add(d.dataset.name); else openCards.delete(d.dataset.name); }, true);
   }
 

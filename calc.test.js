@@ -1394,7 +1394,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v19'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v21'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1446,7 +1446,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v19/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v21/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1468,7 +1468,7 @@ test('guide: least-privilege admin access per kind, and the main CLI uses the sa
 });
 test('guide: interface card mirrors the FortiOS form and carries a why for every field', () => {
   const p = guideProj(), r = C.plan(p), i = r.allocations.findIndex(a => a.name === 'Staff'), a = r.allocations[i], g = G.iface(r, p, i);
-  assert.deepStrictEqual(g.groups.map(x => x.title), ['Interface', 'Address', 'Administrative Access', 'DHCP Server', 'Network', 'Status']);
+  assert.deepStrictEqual(g.groups.map(x => x.title), ['Interface', 'Address', 'Administrative Access', 'DHCP Server', 'Network', 'Traffic Shaping', 'Miscellaneous']);
   assert.strictEqual(gRow(g, 'Name').v, 'vlan20'); assert.strictEqual(gRow(g, 'Alias').v, 'Staff');
   assert.strictEqual(gRow(g, 'VLAN ID').v, '20'); assert.strictEqual(gRow(g, 'Interface').v, 'port2'); assert.strictEqual(gRow(g, 'Role').v, 'LAN');
   assert.strictEqual(gRow(g, 'IP/Netmask').v, `${a.gateway}/${a.netmask}`);
@@ -1514,6 +1514,22 @@ test('guide: sw.js precaches guide.js, index loads it after format.js and the ca
   assert.ok(css.includes('.fgr') && css.includes('grid-column: 1 / -1') && /@media print \{ \.fg \{ display: none/.test(css));
   assert.ok(!/\(\?<[=!]/.test(fs.readFileSync(__dirname + '/guide.js', 'utf8')), 'no regex lookbehind');
 });
-
+test('guide: Open CLI popup is wired (dialog, textarea, Copy, Close, backdrop) and no Copy CLI buttons remain', () => {
+  const fs = require('fs'), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
+  ['<dialog id="clidlg"', 'id="clitext"', 'id="clicopy"', 'id="cliclose"'].forEach(t => assert.ok(html.includes(t), t));
+  assert.ok(app.includes('data-opencli') && app.includes('Open CLI') && !app.includes('Copy CLI') && app.includes('e.target === dlg') && app.includes('showModal'));
+  assert.ok(css.includes('#clidlg') && css.includes('#clidlg::backdrop'));
+});test('guide: every card has a DHCP Server group (Disabled where the plan has no range), address object, full access boxes, shaping and misc', () => {
+  const p = guideProj(), r = C.plan(p), at = n => G.iface(r, p, r.allocations.findIndex(a => a.name === n));
+  r.allocations.forEach((a, i) => { const g = G.iface(r, p, i); assert.ok(g.groups.some(x => x.title === 'DHCP Server'), a.name); assert.strictEqual(gRow(g, 'DHCP status').v, a.dhcpStart ? 'Enabled' : 'Disabled', a.name); });
+  const m = at('Management'), s = at('Staff'); assert.strictEqual(gRow(m, 'DHCP status').v, 'Disabled'); assert.strictEqual(gRow(m, 'Address range'), undefined);
+  assert.strictEqual(gRow(s, 'Create address object matching subnet').v, 'On'); assert.strictEqual(gRow(s, 'Name').v, 'vlan20'); // Name appears first for the interface
+  assert.strictEqual(gRow(s, 'Destination').v, by(r, 'Staff').cidr);
+  assert.deepStrictEqual(gRow(s, 'IPv4').chips.map(c => c.t), ['HTTPS', 'HTTP', 'PING', 'FMG-Access', 'SSH', 'SNMP', 'FTM', 'RADIUS Accounting', 'Security Fabric Connection', 'Speed Test', 'SCIM']);
+  assert.ok(gRow(s, 'IPv4').chips.find(c => c.t === 'HTTP').dis && !gRow(s, 'IPv4').chips.find(c => c.t === 'HTTP').on);
+  assert.ok(s.cli.includes('config firewall address') && s.cli.includes('set subnet ' + by(r, 'Staff').network) && s.cli.includes('set description'));
+  assert.ok(!/dhcp-server/.test(m.cli) && /config firewall address/.test(m.cli));
+  ['Outbound shaping profile', 'Outbound bandwidth', 'Comments'].forEach(k => assert.ok(gRow(s, k), k));
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
