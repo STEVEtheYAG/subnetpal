@@ -1388,7 +1388,7 @@ test('contract text stays on the device: nothing returned or stored holds the te
   assert.ok(!/\(\?<[=!]/.test(code), 'regex lookbehind is not supported on older iPhones');
   const app = src('app.js'); assert.ok(!/(localStorage|save\(|store\.)[^\n]*contract/i.test(app) && !/contract[^\n]*(localStorage|save\(\)|store\[)/i.test(app.replace(/contractReset|bindContract|renderContractReview|contractControl|contractFound|\$\('#contract-[a-z]+'\)/g, '')), 'app.js stores contract text');
   assert.ok(/contractFound = null/.test(app) && /\$\('#contract-text'\)\.value = ''/.test(app));          // cleared on apply, cancel and clear
-  assert.ok(/not saved, not uploaded and not sent/.test(src('index.html')) && /PDF and Word files are not supported/.test(src('index.html')));
+  assert.ok(/not saved, not uploaded and not sent/.test(src('index.html')) && /Old \.doc files/.test(src('index.html')));
   const fields = K.extract(ACC_TEXT).fields; assert.ok(fields.every(f => f.snippet.length <= 260));          // only short snippets leave extract()
 });
 test('PWA: every script and stylesheet the page loads is precached by the service worker, and the cache was bumped', () => {
@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v36'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v37'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v36/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v37/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1689,5 +1689,54 @@ test('Groups: UI passes dim(a) (not the name) so only other groups grey out', ()
   assert.ok(app.includes('dim(a))).join'), 'tile gets dim(a) as its off flag');
   assert.ok(!/\]\], a\.name\)\)\.join/.test(app), 'a.name must not be passed as the off flag');
 });
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+console.log('PDF / Word import (docread.js)');
+const D = require('./docread.js'), zlib = require('zlib');
+function crc32(b) { let c, crc = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) { c = (crc ^ b[i]) & 0xFF; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xEDB88320 : c >>> 1; crc = (crc >>> 8) ^ c; } return (crc ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files, method) {      // files: {name: string}; method 8 = deflate, 0 = stored
+  const parts = [], cen = []; let off = 0;
+  for (const [name, str] of Object.entries(files)) {
+    const raw = Buffer.from(str, 'utf8'), data = method === 8 ? zlib.deflateRawSync(raw) : raw, nm = Buffer.from(name);
+    const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(method, 8); lh.writeUInt32LE(crc32(raw), 14); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(nm.length, 26);
+    const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(method, 10); ch.writeUInt32LE(crc32(raw), 16); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(nm.length, 28); ch.writeUInt32LE(off, 42);
+    parts.push(lh, nm, data); cen.push(ch, nm); off += 30 + nm.length + data.length;
+  }
+  const cd = Buffer.concat(cen), eo = Buffer.alloc(22); eo.writeUInt32LE(0x06054b50, 0); eo.writeUInt16LE(cen.length / 2, 8); eo.writeUInt16LE(cen.length / 2, 10); eo.writeUInt32LE(cd.length, 12); eo.writeUInt32LE(off, 16);
+  return new Uint8Array(Buffer.concat([...parts, cd, eo]));
+}
+const WX = '<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Site: 5 Smith &amp; Co, Sydney</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">We have 25 staff</w:t></w:r><w:r><w:tab/><w:t>on site.</w:t></w:r></w:p><w:p><w:r><w:t>Guest Wi-Fi is required.</w:t></w:r></w:p></w:body></w:document>';
+(async () => {
+  async function atest(name, fn) { try { await fn(); passed++; console.log('  ok   ' + name); } catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e).split('\n').slice(0, 4).join('\n       ')); } }
+  await atest('docread: file kinds are told apart by their first bytes, then the name', async () => {
+    assert.strictEqual(D.kind([0x25, 0x50, 0x44, 0x46], 'x.bin'), 'pdf');
+    assert.strictEqual(D.kind([0x50, 0x4B, 3, 4], 'c.docx'), 'docx');
+    assert.strictEqual(D.kind([0x50, 0x4B, 3, 4], 'c.odt'), 'unknown');
+    assert.strictEqual(D.kind([0xD0, 0xCF, 0x11, 0xE0], 'old.doc'), 'doc');
+    assert.strictEqual(D.kind([104, 105], 'a.txt'), 'text');
+    assert.ok(/Save As \.docx or PDF/.test(D.OLD_DOC_MSG));
+  });
+  await atest('docread: .docx text is read (deflated and stored), entities and tabs decoded, paragraphs kept', async () => {
+    for (const m of [8, 0]) {
+      const t = await D.docxText(makeZip({ '[Content_Types].xml': '<x/>', 'word/document.xml': WX }, m));
+      assert.ok(t.includes('Site: 5 Smith & Co, Sydney\nWe have 25 staff\ton site.\nGuest Wi-Fi is required.'), t);
+    }
+  });
+  await atest('docread: a .docx goes through the contract scanner', async () => {
+    const t = await D.docxText(makeZip({ 'word/document.xml': WX }, 8)), r = require('./contract.js').extract(t);
+    assert.ok(r.ok && r.fields.some(f => f.key === 'staff'), JSON.stringify(r.fields.map(f => f.key)));
+  });
+  await atest('docread: bad zips, missing document.xml and empty documents give friendly errors', async () => {
+    await assert.rejects(() => D.docxText(new Uint8Array([1, 2, 3])), /Word \.docx/);
+    await assert.rejects(() => D.docxText(makeZip({ 'other.xml': '<x/>' }, 8)), /Word \.docx/);
+    await assert.rejects(() => D.docxText(makeZip({ 'word/document.xml': '<w:document><w:p></w:p></w:document>' }, 8)), /No text found/);
+  });
+  await atest('docread: wiring (PDF.js vendored and cached for offline, no network, no storage)', async () => {
+    const fs = require('fs'), sw = fs.readFileSync('./sw.js', 'utf8'), app = fs.readFileSync('./app.js', 'utf8'), html = fs.readFileSync('./index.html', 'utf8'), src = fs.readFileSync('./docread.js', 'utf8');
+    for (const f of ['./docread.js', './vendor/pdf.min.mjs', './vendor/pdf.worker.min.mjs']) assert.ok(sw.includes(f) && fs.existsSync(f), f);
+    assert.ok(html.includes('docread.js') && html.includes('.pdf,.docx') && app.includes("import('./vendor/pdf.min.mjs')"));
+    assert.ok(!/localStorage|sessionStorage|fetch\(|XMLHttpRequest|document\.(get|create|query|body)/.test(src), 'docread.js stays pure');
+    assert.ok(!/\(\?<[=!]/.test(src + app), 'no regex lookbehind');
+  });
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();
+

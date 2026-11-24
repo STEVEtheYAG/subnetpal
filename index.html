@@ -55,11 +55,11 @@
 
       <details class="more contractbox" id="contractbox">
         <summary>Import from contract</summary>
-        <p class="hint"><b>Stays on this device.</b> The contract text is read here in the browser only: it is not saved, not uploaded and not sent anywhere, and it is cleared when you apply or cancel. Paste text or choose a .txt file. PDF and Word files are not supported yet: copy the text out of them and paste it here.</p>
+        <p class="hint"><b>Stays on this device.</b> The contract text is read here in the browser only: it is not saved, not uploaded and not sent anywhere, and it is cleared when you apply or cancel. Paste text or choose a .pdf, .docx or .txt file. Old .doc files: save as .docx or PDF first. Scanned PDFs (pictures of pages) have no text to read.</p>
         <textarea id="contract-text" rows="6" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the contract text here"></textarea>
         <div class="btnrow">
-          <label class="btn sm filebtn" for="contract-file">Choose .txt file</label>
-          <input type="file" id="contract-file" accept=".txt,text/plain" hidden>
+          <label class="btn sm filebtn" for="contract-file">Choose PDF, Word or .txt</label>
+          <input type="file" id="contract-file" accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden>
           <button id="btnContractScan" class="btn sm primary" type="button">Find intake fields</button>
           <button id="btnContractClear" class="btn sm" type="button">Clear</button>
         </div>
@@ -304,6 +304,7 @@
 <script src="calc6.js"></script>
 <script src="access.js"></script>
 <script src="contract.js"></script>
+<script src="docread.js"></script>
 <script src="webcat.js"></script>
 <script src="cards.js"></script>
 <script src="suggest.js"></script>

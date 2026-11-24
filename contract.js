@@ -1,4 +1,4 @@
-/* SubnetPal - contract text -> intake fields. Rule-based and offline: pasted text or a .txt file only (PDF and Word are not supported in v1).
+/* SubnetPal - contract text -> intake fields. Rule-based and offline: takes plain text (pasted, .txt, or text pulled from .pdf/.docx by app.js and docread.js).
    Pure functions, no DOM, no storage, no network. The text is never kept: extract() returns only short snippets for the review screen.
    Never guesses: a field with no clear statement is simply not returned. window.Contract / Node. */
 (function (root, factory) {

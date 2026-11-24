@@ -208,6 +208,24 @@
       (res.missing.length ? `<details class="more2"><summary>Not found, left blank (${res.missing.length})</summary><p class="hint">${esc(res.missing.map(m => m.label).join(', '))}</p></details>` : '');
   }
   function contractReset(keepMsg) { contractFound = null; $('#contract-text').value = ''; $('#contract-file').value = ''; $('#contract-review').innerHTML = ''; if (!keepMsg) cmsg(''); }
+  // PDF text via the vendored PDF.js (./vendor, cached for offline use). Loaded only when a PDF is chosen. Text only: nothing is rendered or sent anywhere.
+  async function pdfText(bytes) {
+    let lib;
+    try { lib = await import('./vendor/pdf.min.mjs'); } catch (_) { throw new Error('The PDF reader could not load. Reload the page (Ctrl+Shift+R) or paste the text.'); }
+    lib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
+    let doc;
+    try { doc = await lib.getDocument({ data: bytes, isEvalSupported: false }).promise; }
+    catch (err) { throw new Error(err && err.name === 'PasswordException' ? 'That PDF is password protected. Remove the password or paste the text.' : 'That PDF could not be read. Paste the text instead.'); }
+    let out = '';
+    for (let i = 1; i <= Math.min(doc.numPages, 200) && out.length < Contract.MAX_CHARS; i++) {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      out += tc.items.map(it => (it.str || '') + (it.hasEOL ? '\n' : ' ')).join('') + '\n';
+    }
+    try { doc.destroy(); } catch (_) {}
+    out = out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!out) throw new Error('No text found in that PDF. It may be a scan (pictures of pages). Paste the text instead.');
+    return out;
+  }
   function bindContract() {
     $('#btnContractScan').addEventListener('click', () => {
       const res = Contract.extract($('#contract-text').value);
@@ -216,14 +234,20 @@
       cmsg(res.fields.length ? `Found ${res.fields.length} field${res.fields.length === 1 ? '' : 's'}. Review them below.` : 'Nothing found.', !res.fields.length);
     });
     $('#btnContractClear').addEventListener('click', () => contractReset());
-    $('#contract-file').addEventListener('change', e => {
+    $('#contract-file').addEventListener('change', async e => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
-      if (/\.(pdf|docx?|rtf|odt)$/i.test(f.name) || /pdf|word|officedocument|rtf/i.test(f.type)) { e.target.value = ''; cmsg('PDF and Word files are not supported yet. Copy the text out of the file and paste it into the box.', true); return; }
-      if (f.size > 2 * 1024 * 1024) { e.target.value = ''; cmsg('That file is over 2 MB. Paste just the relevant parts.', true); return; }
-      const rd = new FileReader();
-      rd.onload = () => { $('#contract-text').value = String(rd.result || ''); cmsg('File read on this device. Press Find intake fields.'); };
-      rd.onerror = () => cmsg('The file could not be read. Paste the text instead.', true);
-      rd.readAsText(f);
+      const reset = () => { e.target.value = ''; };
+      if (f.size > DocRead.MAX_BYTES) { reset(); cmsg('That file is over 25 MB. Paste just the relevant parts.', true); return; }
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer()), kind = DocRead.kind(bytes, f.name);
+        let text;
+        if (kind === 'doc') { reset(); cmsg(DocRead.OLD_DOC_MSG, true); return; }
+        if (kind === 'unknown') { reset(); cmsg('That file type is not supported. Choose a .pdf, .docx or .txt file, or paste the text.', true); return; }
+        if (kind === 'docx') { cmsg('Reading the Word file on this device...'); text = await DocRead.docxText(bytes); }
+        else if (kind === 'pdf') { cmsg('Reading the PDF on this device...'); text = await pdfText(bytes); }
+        else { if (f.size > 2 * 1024 * 1024) { reset(); cmsg('That file is over 2 MB. Paste just the relevant parts.', true); return; } text = new TextDecoder('utf-8').decode(bytes); }
+        $('#contract-text').value = text; cmsg('File read on this device. Press Find intake fields.');
+      } catch (err) { reset(); cmsg((err && err.message) || 'The file could not be read. Paste the text instead.', true); }
     });
     $('#contract-review').addEventListener('click', e => {
       if (e.target.closest('#btnContractCancel')) { contractReset(); return; }
