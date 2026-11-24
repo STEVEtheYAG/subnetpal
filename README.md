@@ -222,3 +222,6 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 - **Save / Cancel:** edits go to a draft copy; nothing changes until **Save**. Cancel, Close and Esc discard it. A click on the dark backdrop with unsaved changes does not close (a toast says to Save or Cancel). "Unsaved changes" shows at the bottom left.
 - A hand-typed name is kept when you change source, destination or action; an automatic name follows them. **Add new policy > blank** opens a draft titled New policy; Save adds it above the Implicit deny, Cancel adds nothing. Open CLI shows the saved version. Move up/down and delete in the popup still act at once (delete asks twice).
 - sw.js cache is v31.
+
+## Mirrored taper (v36)
+- Planks share one straight right edge; the left edge steps inward going down (100% to 82% width). The number gutter stays fixed on the far left, and the small arrows sit under the right end of each plank. sw.js cache is v36.

@@ -615,7 +615,7 @@
     const list = Policy.effective(project(), result.allocations), nets = Policy.policyNets(result.allocations), total = list.length + 1;
     const final = '<div class="ncard ptile deny final"><div class="plk"><span class="swatch" style="background:var(--bad)"></span><b class="ptitle">Implicit deny</b><span class="pflow">everything not matched above is blocked (SP_Final_deny)</span><span class="ntype pdeny">DENY</span></div></div>';
     box.innerHTML = list.map((p, i) => polTile(p, i, nets)).concat([final]).map((t, k) => {
-      const sc = (1 - 0.18 * k / Math.max(1, total - 1)).toFixed(3);   // planks taper from 100% (rule 1) to 82% (Implicit deny)
+      const sc = (1 - 0.18 * k / Math.max(1, total - 1)).toFixed(3);   // planks taper from 100% (rule 1) to 82% (Implicit deny), with the right edge straight and the left edge stepping in
       return `<div class="slot"><span class="snum">${k < total - 1 ? k + 1 : '\u2022'}</span><div class="snk" data-k="${k}" style="--s:${sc}">${t}</div></div>` + (k < total - 1 ? '<div class="sarrow" aria-hidden="true"><span>\u2193</span></div>' : '');
     }).join('');
   }
