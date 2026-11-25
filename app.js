@@ -417,7 +417,7 @@
   }
   function vpnCard(off) {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
-    return tile('__vpn', '#37c2a0', '👤 Remote staff (VPN)', 'IPsec pool', [['Pool', esc(p.cidr)], ['Range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`]], off);
+    return tile('__vpn', '#37c2a0', '👤 Remote VPN', 'IPsec pool', [['Pool', esc(p.cidr)], ['Range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`]], off);
   }
   // Folders: tap one to show only its cards. 'all' shows everything. Remembered per page load only.
   let grpSel = 'all';
