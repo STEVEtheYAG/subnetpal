@@ -292,7 +292,7 @@
       }
       infra.sort((a, b) => b.size - a.size || a.i - b.i);
       for (const it of infra) {
-        let pos = p.start, found = -1;
+        let pos = p.start + (it.size === 1 ? 1 : 0), found = -1;   // a /32 never takes the .0.0 address (looks like a network address)
         while (pos + it.size - 1 <= p.start + 255) {
           const end = pos + it.size - 1;
           if (!occupied.some(o => o.start <= end && o.end >= pos) && !spots.some(s => s.infra && s.at <= end && s.at + sizeOf(s.prefix) - 1 >= pos)) { found = pos; break; }

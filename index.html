@@ -116,6 +116,9 @@
           <span class="portrow"><input id="i-ports" type="number" min="0" max="48" inputmode="numeric" autocomplete="off" placeholder="e.g. 4" aria-label="Number of LAN ports"><input id="i-portprefix" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="port" aria-label="Port name prefix"></span>
           <span class="hint" id="portsum"></span>
         </label>
+        <label class="fld">Internet (WAN) port
+          <input id="i-wanport" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="auto: port1 on a VM, else wan1" aria-label="Internet (WAN) port">
+        </label>
         <label class="check"><input type="checkbox" id="i-dualwan"> Dual WAN (two internet lines)</label>
         <label class="check"><input type="checkbox" id="i-sitevpn"> Site-to-site VPN</label>
         <label class="check"><input type="checkbox" id="i-webfilter"> Web filtering (FortiGuard categories) on internet policies</label>
@@ -282,7 +285,10 @@
               <li>Create the RemoteStaff group and users first, and set the real pre-shared key (replace PSK_CHANGE_ME).</li>
               <li>Paste the VLAN interfaces before the policies.</li>
               <li>Every object has a fixed name or ID (policies 1000+), so pasting twice overwrites and never adds copies.</li>
-              <li>Dual WAN: use the SD-WAN zone in policies, not wan1.</li>
+              <li>WAN is port1 when ports available is set (wan1 otherwise): DHCP unless you enter the ISP address under Suggested static routes. Do not manage the firewall through it.</li>
+              <li>Admin lock-out check: the paste limits admin login to the Management network (trusted hosts) and turns HTTPS/SSH off on Staff. Be on Management, or add your PC as trusthost2, before pasting.</li>
+              <li>Turn on MFA for the admin account: System > Administrators > admin > Two-factor authentication (FortiToken).</li>
+              <li>Dual WAN: use the SD-WAN zone in policies, not the single WAN port.</li>
               <li>Have a rollback plan: console or out-of-band access, and a way to restore the backup.</li>
             </ol>
           </details>

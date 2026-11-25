@@ -64,7 +64,12 @@
 
   // Administrative access (FortiGate allowaccess) per network kind, per the FortiOS 8.0.2 guide: Management and Staff get HTTPS+SSH+PING, servers and links PING only, guests/printers/IoT/cameras none.
   const ADMIN = { mgmt: ['https', 'ping', 'ssh'], staff: ['https', 'ping', 'ssh'], lan: ['https', 'ping', 'ssh'], servers: ['ping'], voice: ['ping'], printers: [], dmz: ['ping'], wan: ['ping'], transit: ['ping'], loopback: ['ping'], cameras: [], iot: [], other: [], guest: [], pos: [] };
-  const adminAccess = a => (ADMIN[kindOf(a)] || ['ping']).slice();
+  // With a Management network in the plan, only Management answers HTTPS/SSH; Staff keeps PING (Bob's review). Without one, Staff keeps admin access so nobody is locked out.
+  const adminAccess = (a, allocs) => {
+    const k = kindOf(a);
+    if ((k === 'staff' || k === 'lan') && (allocs || []).some(x => kindOf(x) === 'mgmt')) return ['ping'];
+    return (ADMIN[k] || ['ping']).slice();
+  };
 
   const n0 = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; };
 

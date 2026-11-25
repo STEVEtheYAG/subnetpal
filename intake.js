@@ -80,7 +80,8 @@
       if (!n) notes.push(`${name} had no device count, so it was sized for 2 devices.`);
       nets.push(mk('other', name, Math.max(n, 2), 'LAN', { vlan: 90 + 10 * i }));
     });
-    nets.push(mk('transit', 'Transit', 2, 'Transit'), mk('loopback', 'Loopback', 1, 'Loopback'));
+    // No Transit /31 by default: the internet port is WAN (DHCP or the ISP address), not a transit link. Add a Transit network by hand when there is an upstream router.
+    nets.push(mk('loopback', 'Loopback', 1, 'Loopback'));
     return { networks: nets, notes };
   }
 
@@ -119,6 +120,8 @@
     if (!client.v6) client.v6 = { enabled: false, prefix: '' };
     client.opts = Object.assign({}, Calc.DEFAULT_OPTS, client.opts);
     if (!client.opts.style) client.opts.style = 'vlan24';
+    // Older plans always carried an auto "Transit" /31, which landed on port1 (Bob's review). Drop it while the plan is still the generated one.
+    if (!client.planEdited && Array.isArray(client.networks)) client.networks = client.networks.filter(n => !(n && n.kind === 'transit' && n.name === 'Transit'));
     return client;
   }
 

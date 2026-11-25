@@ -18,7 +18,8 @@
 
   function adminWhy(kind, list) {
     if (kind === 'mgmt') return 'Administrators manage the firewall from here, so HTTPS, SSH and PING are on. Add SNMP or FMG-Access only if you use them.';
-    if (kind === 'staff' || kind === 'lan') return 'Staff and IT manage the firewall from here (HTTPS, SSH, PING). Lock it down further with trusted hosts on the admin account.';
+    if ((kind === 'staff' || kind === 'lan') && list.indexOf('https') < 0) return 'PING only. Admins manage the firewall from the Management network (HTTPS, SSH there, plus trusted hosts on the admin account).';
+    if (kind === 'staff' || kind === 'lan') return 'No Management network in this plan, so staff and IT manage the firewall from here (HTTPS, SSH, PING). Add a Management network to take admin access off Staff.';
     if (kind === 'guest') return 'Guests must never reach the admin GUI. No admin boxes (PING at most).';
     if (kind === 'printers' || kind === 'iot') return 'None. Weak devices are isolated; tick PING only while troubleshooting.';
     if (kind === 'wan') return 'WAN = PING only, or nothing. Never HTTP, HTTPS or SSH on the WAN: manage from the LAN.';
@@ -56,7 +57,7 @@
     h.push(`Gateway is network + 1 (${a.gateway || a.firstUsable}), not ${a.network}.`);
     if (a.dhcpStart) h.push(`Start the pool at gateway + 1 and end it at broadcast - 1 (${a.dhcpStart} - ${a.dhcpEnd}).`);
     if (a.vlan !== '' && a.role !== 'Loopback') h.push('VLAN ID 1-4094, unique per parent port.');
-    if (kind === 'staff' || kind === 'lan') h.push('Caution: consider HTTPS/SSH on the Management network only, plus trusted hosts on the admin account, instead of the whole staff network.');
+    if ((kind === 'staff' || kind === 'lan') && !(allocs || []).some(x => Access.kindOf(x) === 'mgmt')) h.push('Caution: consider a Management network for HTTPS/SSH, plus trusted hosts on the admin account, instead of the whole staff network.');
     if (kind === 'servers') h.push('Caution: category web blocking on the Servers network can break OS and vendor updates. Test updates, and allow update sites if needed.');
     if (kind === 'voice') h.push('Phones usually need DHCP option 66 (provisioning server) or 150 (Cisco TFTP): add it to this DHCP server if the phone system provisions that way.');
     if (a.dhcpStart && kind !== 'guest') h.push('DNS: if devices join a Windows domain, set the domain controller as the DHCP DNS server (box at the top of this card), not System DNS.');
@@ -74,7 +75,7 @@
     const ph0 = (project && project.ifName && String(project.ifName).trim()) || 'PORT_CHANGE_ME';
     const ph = Fmt.parentPort(allocs, ph0, project), name = Fmt.ifaceNames(allocs, ph0, project)[idx], kind = Access.kindOf(a);
     const isVlan = a.vlan !== '' && a.role !== 'Loopback', isLoop = a.role === 'Loopback', isWan = kind === 'wan';
-    const role = Fmt.FORTI_ROLE[a.role] || 'lan', acc = Access.adminAccess(a);
+    const role = Fmt.FORTI_ROLE[a.role] || 'lan', acc = Access.adminAccess(a, allocs);
     const ip = `${a.gateway ? a.gateway : a.firstUsable}/${a.netmask}`;
     const dev = DEVICE_DETECT.indexOf(kind) >= 0, obj = ('SP_' + (Fmt.fname(a.name) || 'net')).slice(0, 79);
     const top = [R('Name', name, isVlan ? 'Built from the VLAN ID. You can rename it; keep the same name in the CLI and in policies. Max 15 characters, no spaces.' : isLoop ? 'A loopback has its own name.' : (Fmt.portPool(project).length ? `Assigned from the ports available. Change it with the Port picker at the top of this card.` : `Use the real port name (for example port3) in place of ${ph}.`)),
@@ -153,7 +154,7 @@
       { title: '3. VPN Wizard', where: 'VPN > VPN Wizard', why: 'Start the tunnel.',
         rows: [R('Tunnel name', tn, 'At most 13 characters.'), R('Template', 'FortiClient remote access', ''), R('Then', 'Click Begin', '')] },
       { title: '4. Wizard: Authentication', where: 'VPN Wizard, Authentication step', approx: true, why: 'Who connects and how. Not captured from the VM.',
-        rows: [R('Incoming Interface', `WAN port (${Fmt.WAN_IF})`, 'Change it if your internet port is called something else.'), R('Authentication method', 'Pre-shared Key', 'Use the key from "Values to use".'), R('User Group', grp, '')] },
+        rows: [R('Incoming Interface', `WAN port (${Fmt.wanIf(project)})`, 'Change it if your internet port is called something else.'), R('Authentication method', 'Pre-shared Key', 'Use the key from "Values to use".'), R('User Group', grp, '')] },
       { title: '5. Wizard: Policy & Routing', where: 'VPN Wizard, Policy & Routing step', approx: true, why: 'What they can reach. Not captured from the VM.',
         rows: [R('Local interface', first ? first.name : 'The servers (or staff) network', 'The network remote staff need most.'), R('Local subnets', subnets, 'Only what is needed.'), R('Client address range', `${pool.first} - ${pool.last}`, `Netmask ${pool.netmask}.`),
           R('Enable IPv4 split tunnel', reach.length ? 'On' : 'On (no office network is ticked on the Remote tab)', 'Only company traffic goes through the tunnel; the rest stays on the person’s own internet.')] },

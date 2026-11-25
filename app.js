@@ -113,7 +113,7 @@
     $('#rem-on').checked = !!rm.on; $('#rem-count').hidden = !rm.on; $('#rem-count').value = rm.count || '';
     $('#i-industry').value = it.industry || ''; $('#i-serverswhere').value = it.serversWhere || ''; $('#i-wifi').value = it.wifi || ''; $('#i-voip').value = it.voip || '';
     $('#i-dualwan').checked = !!it.dualWan; $('#i-sitevpn').checked = !!it.siteVpn; $('#i-webfilter').checked = !!it.webFilter;
-    $('#i-ports').value = c.portCount || ''; $('#i-portprefix').value = c.portPrefix || '';
+    $('#i-ports').value = c.portCount || ''; $('#i-portprefix').value = c.portPrefix || ''; $('#i-wanport').value = c.wanPort || '';
     $('#i-existing').value = it.existing || ''; $('#i-wan').value = it.wanNote || '';
     $('#i-style').value = c.opts.style === 'packed' ? 'packed' : 'vlan24';
     $('#i-parent').value = c.parentAuto === false ? c.parent : '';
@@ -142,6 +142,7 @@
     else if (t.id === 'i-webfilter') it.webFilter = t.checked;
     else if (t.id === 'i-ports') { const n = Math.floor(Number(t.value)); c.portCount = n > 0 ? Math.min(48, n) : ''; }
     else if (t.id === 'i-portprefix') c.portPrefix = t.value.trim();
+    else if (t.id === 'i-wanport') c.wanPort = t.value.trim();
     else if (t.id === 'rem-on') {
       it.remote = it.remote || { on: false, count: '', reach: null }; it.remote.on = t.checked;
       $('#rem-count').hidden = !t.checked; if (t.checked) $('#rem-count').focus();
@@ -309,7 +310,7 @@
     const vp = Remote.plan(result, project()); if (vp && !vp.ok) items.push('Remote access: ' + vp.error);
     const pp = result.ok ? Fmt.portPlan(result.allocations, phOf(), project()) : null;
     if (pp && pp.short.length) items.push(`Not enough ports: ${pp.pool.length} available, none left for ${pp.short.join(', ')}. Add ports, or give that network a VLAN ID so it shares the VLAN trunk port.`);
-    $('#portsum').textContent = pp && pp.pool.length ? `Ports: ${pp.pool.length} available (${pp.pool[0]} to ${pp.pool[pp.pool.length - 1]}), ${pp.free.length} free${pp.vlans ? '. VLANs ride on ' + pp.parent : ''}.` : 'Optional. Leave empty and the CLI keeps a PORT_CHANGE_ME placeholder.';
+    $('#portsum').textContent = pp && pp.pool.length ? `Ports: ${pp.pool.length} available (${pp.pool[0]} to ${pp.pool[pp.pool.length - 1]}), ${pp.free.length} free${pp.wans && pp.wans.length ? '. WAN: ' + pp.wans.join(', ') : ''}${pp.vlans ? '. VLANs ride on ' + pp.parent : ''}.` : 'Optional. Leave empty and the CLI keeps a PORT_CHANGE_ME placeholder.';
     $('#warn').innerHTML = items.length ? `<div class="banner"><b>Things to review</b><ul>${items.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>` : '';
   }
   function renderSummaries() {
@@ -694,7 +695,7 @@
   const polBad = (p, nets) => [p.src, p.dst].some(x => nets.indexOf(x) < 0 && x !== 'internet' && x !== 'internal');
   // For a network name: its interface name (same rule as the CLI) and subnet, or null if it is not in the plan.
   function polEnd(name, ph) {
-    if (name === 'internet') return { top: Fmt.WAN_IF, sub: 'the internet side', note: 'all' };
+    if (name === 'internet') return { top: Fmt.wanIf(project()), sub: 'the internet side', note: 'all' };
     if (name === 'internal') return { top: 'any', sub: 'All internal networks', note: 'SP_INTERNAL' };
     const al = result.allocations, i = al.findIndex(a => a.name === name);
     return i < 0 ? null : { top: Fmt.ifaceNames(al, ph, project())[i], sub: name, note: al[i].cidr };
@@ -731,7 +732,7 @@
     const o = (v, l, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(l)}</option>`;
     const miss = x => (nets.indexOf(x) < 0 && x !== 'internet' && x !== 'internal');
     const srcOpts = lab => (miss(p.src) ? o(p.src, '(not in plan) ' + p.src, true) : '') + nets.map(x => o(x, lab ? `${polEnd(x, ph).top} \u00b7 ${x}` : x, p.src === x)).join('');
-    const dstOpts = lab => o('internet', lab ? `${Fmt.WAN_IF} \u00b7 Internet` : 'Internet (all)', p.dst === 'internet') + o('internal', lab ? 'any \u00b7 All internal networks' : 'All internal networks', p.dst === 'internal') + (miss(p.dst) ? o(p.dst, '(not in plan) ' + p.dst, true) : '') + nets.map(x => o(x, lab ? `${polEnd(x, ph).top} \u00b7 ${x}` : x, p.dst === x)).join('');
+    const dstOpts = lab => o('internet', lab ? `${Fmt.wanIf(project())} \u00b7 Internet` : 'Internet (all)', p.dst === 'internet') + o('internal', lab ? 'any \u00b7 All internal networks' : 'All internal networks', p.dst === 'internal') + (miss(p.dst) ? o(p.dst, '(not in plan) ' + p.dst, true) : '') + nets.map(x => o(x, lab ? `${polEnd(x, ph).top} \u00b7 ${x}` : x, p.dst === x)).join('');
     const names = SVC_CHIPS.concat(svcs.filter(x => SVC_CHIPS.indexOf(x) < 0));
     const chips = names.map(x => `<button type="button" class="schip tog${svcs.indexOf(x) >= 0 ? ' on' : ''}" data-psvc="${esc(x)}" aria-pressed="${svcs.indexOf(x) >= 0}">${esc(x)}</button>`).join('');
     const used = svcs.filter(x => x !== 'ALL');
@@ -760,7 +761,7 @@
         <div class="frow sub"><span class="flab">Source port translation</span>${seg('snat', [['always', 'Always'], ['conflict', 'When port conflicts'], ['never', 'Never']], ['always', 'never'].indexOf(p.snat) >= 0 ? p.snat : 'conflict')}</div>` : ''}
         <div class="frow"><span class="flab">Protocol options</span><select data-pf="prot" aria-label="Protocol options">${o('default', 'default', true)}</select></div>
         <div class="fhead">Security Profiles</div>
-        ${UTM.map(([k, l]) => `<div class="frow"><span class="flab">${l}</span>${tog('utm.' + k, !!(p.utm && p.utm[k]))}</div>`).join('')}
+        ${UTM.map(([k, l]) => `<div class="frow"><span class="flab">${l}</span>${tog('utm.' + k, !!Policy.utmOf(p)[k])}</div>`).join('')}
         <div class="frow"><span class="flab">SSL inspection</span><select data-pf="ssl" aria-label="SSL inspection">${['no-inspection', 'certificate-inspection', 'deep-inspection'].map(x => o(x, x, sslOf(p) === x)).join('')}</select></div>`}
         <div class="fhead">Logging Options</div>
         <div class="frow"><span class="flab">Log allowed traffic</span><div>${tog('log', p.log !== false)}</div></div>
@@ -815,7 +816,7 @@
   function polFoot() { const m = $('#cardbody').querySelector('.dirtymsg'); if (m) m.textContent = polDirty() ? 'Unsaved changes' : ''; }
   // One policy as a standalone snippet: the full generator run with just this policy in the list.
   // idOffset keeps this policy's firewall ID the same as in the full export (its position in the list), so pasting either one overwrites the other.
-  const polOne = (i, fn) => { const p = project(), list = Policy.effective(p, result.allocations); return list[i] ? fn(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName, { idOffset: i, only: true }) : ''; };
+  const polOne = (i, fn) => { const p = project(), list = Policy.effective(p, result.allocations); return list[i] ? fn(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName, { idOffset: i, only: true, total: list.length }) : ''; };
   function polCli(i) { return polOne(i, Fmt.toPolicyFortiOS); }
   function polNotes(i) { return polOne(i, Fmt.policyNotes); }
   function renderPolicyCli() { const t = text('polcli'); $('#pre-polcli').textContent = t || 'Fix the problem at the top to enable this output.'; $('#notes-polcli').textContent = notes('polcli'); }
@@ -840,11 +841,12 @@
   function setPath(p, path, v) {
     if (path === 'web.mode' || path === 'web.sites') { p.web = p.web || { mode: '', sites: '', cats: [] }; p.web[path.split('.')[1]] = v; }
     else if (path === 'app.mode') { p.app = p.app || { mode: '', cats: [] }; p.app.mode = v; }
-    else if (path.indexOf('utm.') === 0) { p.utm = p.utm || {}; p.utm[path.slice(4)] = v; }
+    else if (path.indexOf('utm.') === 0) { p.utm = Policy.utmOf(p); p.utm[path.slice(4)] = v; }
     else p[path] = v;
     if (path === 'src' || path === 'dst' || path === 'action') p.name = '';
     if (path === 'action' && v === 'deny') p.nat = false;
     if (path === 'dst' && v === 'internet' && p.action === 'accept') p.nat = true;
+    if (path === 'dst' && v !== 'internet') p.nat = false;                       // NAT only towards the internet
   }
   function bindPolicies() {
     const box = $('#pollist'), pop = $('#cardbody');
@@ -1025,9 +1027,11 @@
     if (!result || !result.ok) { box.hidden = true; return; }
     box.hidden = false;
     const p = project(), rs = Routes.suggest(result, p), c = cur().routes || {}, dual = !!p.intake.dualWan;
-    const gw = (key, label) => `<label class="fld">${label}<input data-rgw="${key}" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 203.0.113.1" value="${esc(c[key] || '')}"></label>`;
-    const gwBox = $('#routegw');
-    if (gwBox.dataset.fp !== String(dual)) { gwBox.dataset.fp = String(dual); gwBox.innerHTML = gw('gw1', 'wan1 ISP gateway') + (dual ? gw('gw2', 'wan2 ISP gateway') : ''); }
+    const gw = (key, label, ph) => `<label class="fld">${label}<input data-rgw="${key}" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${ph || 'e.g. 203.0.113.1'}" value="${esc(c[key] || '')}"></label>`;
+    const gwBox = $('#routegw'), wans = Routes.wanIfs(p), fp = wans.join(',');
+    // WAN address: empty = DHCP from the ISP (the usual case); a static ISP address also needs its gateway.
+    const pair = (w, n) => gw('ip' + n, `${w} ISP address (empty = DHCP)`, 'e.g. 203.0.113.10/29') + gw('gw' + n, `${w} ISP gateway`);
+    if (gwBox.dataset.fp !== fp) { gwBox.dataset.fp = fp; gwBox.innerHTML = wans.map((w, i) => pair(w, i + 1)).join(''); }
     $('#routelist').innerHTML = rs.map(r => `<label class="check route"><input type="checkbox" data-route="${r.id}"${r.on ? ' checked' : ''}> <span><b>${esc(r.title)}</b> <span class="dim mono">${esc(routeLine(r))}</span><span class="exp routewhy">${esc(r.reason)}</span></span></label>`).join('');
     $('#pre-routes').textContent = text('routes'); $('#notes-routes').textContent = notes('routes');
   }
@@ -1041,7 +1045,7 @@
       const t = e.target; if (!t.dataset.rgw) return;
       const c = cur(); c.routes = c.routes || {}; c.routes[t.dataset.rgw] = t.value.trim(); touch();
       const rs = Routes.suggest(result, project());
-      $$('#routelist label.route').forEach((l, i) => { if (rs[i]) l.querySelector('.mono').textContent = routeLine(rs[i]); });
+      $$('#routelist label.route').forEach((l, i) => { if (rs[i]) { l.querySelector('.mono').textContent = routeLine(rs[i]); l.querySelector('input').checked = rs[i].on; } });
       $('#pre-routes').textContent = text('routes'); $('#notes-routes').textContent = notes('routes');
     });
   }

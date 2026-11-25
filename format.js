@@ -6,7 +6,8 @@
   'use strict';
 
   const FORTI_NOTE = 'Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules.';
-  const WAN_IF = 'wan1';
+  const WAN_IF = 'wan1';                                        // desktop-model default; with a port pool WAN is port1 (see Routes.wanIfs)
+  const wanIf = project => Routes.wanIfs(project)[0];
   const FORTI_ROLE = { LAN: 'lan', Guest: 'lan', Mgmt: 'lan', DMZ: 'dmz', WAN: 'wan', Transit: 'undefined', Loopback: 'undefined', '': 'lan' };
   const EXP_LABEL = { none: 'None', soon: 'Soon', big: 'Big growth' };
   const COUNT_LABEL = { staff: 'staff', wired: 'wired devices', wifi: 'Wi-Fi devices', voice: 'phones', cameras: 'cameras', iot: 'IoT devices', servers: 'servers', guest: 'guest users', dmz: 'public servers (DMZ)', printers: 'printers', pos: 'card terminals' };
@@ -107,13 +108,15 @@
     const pool = portPool(project);
     const names = [], short = [], usedV = new Set();
     if (!pool.length) {
-      let plain = 0;
+      let plain = 0, wan = 0;
       const plainCount = allocs.filter(a => a.vlan === '' && a.role !== 'Loopback').length;
-      allocs.forEach(a => names.push(a.role === 'Loopback' ? sanitizeIf('lo_' + a.name) : a.vlan !== '' ? vlanIf(a, usedV) : plainCount > 1 ? sanitizeIf(ph + (++plain)) : sanitizeIf(ph)));
-      return { pool, names, parent: ph, short, free: [] };
+      const wl = Routes.wanIfs(project);
+      allocs.forEach(a => names.push(a.role === 'Loopback' ? sanitizeIf('lo_' + a.name) : a.vlan !== '' ? vlanIf(a, usedV) : a.role === 'WAN' ? (wl[wan++] || 'wan' + wan) : plainCount > 1 ? sanitizeIf(ph + (++plain)) : sanitizeIf(ph)));
+      return { pool, names, parent: ph, short, free: [], wans: [] };
     }
     const map = (project && project.portMap) || {};
-    const taken = new Set(), explicit = ph !== PH ? ph : '';
+    const wans = Routes.wanIfs(project).filter(w => pool.indexOf(w) >= 0);
+    const taken = new Set(wans), explicit = ph !== PH && wans.indexOf(ph) < 0 ? ph : '';
     if (explicit && pool.indexOf(explicit) >= 0) taken.add(explicit);
     allocs.forEach(a => { const p = map[a.name]; if (isPlain(a) && pool.indexOf(p) >= 0 && p !== explicit) taken.add(p); });
     const nextLow = () => pool.find(p => !taken.has(p));
@@ -121,7 +124,7 @@
     allocs.forEach(a => {
       if (a.role === 'Loopback') return names.push(sanitizeIf('lo_' + a.name));
       if (a.vlan !== '') return names.push(vlanIf(a, usedV));
-      if (a.role === 'WAN') return names.push('wan' + (++wan));
+      if (a.role === 'WAN') { wan++; return names.push(wans[wan - 1] || 'wan' + wan); }
       let p = map[a.name];
       if (!(pool.indexOf(p) >= 0 && p !== explicit)) { p = nextLow(); if (p) taken.add(p); }
       if (!p) { short.push(a.name); p = ph; }
@@ -130,7 +133,7 @@
     let parent = explicit;
     if (!parent) { const f = pool.slice().reverse().find(p => !taken.has(p)); parent = f || ph; if (f && allocs.some(a => a.vlan !== '' && a.role !== 'Loopback')) taken.add(f); }
     const vlans = allocs.some(a => a.vlan !== '' && a.role !== 'Loopback');
-    return { pool, names, parent, short, free: pool.filter(p => !taken.has(p)), vlans };
+    return { pool, names, parent, short, free: pool.filter(p => !taken.has(p)), vlans, wans };
   }
   const ifaceNames = (allocs, ph, project) => portPlan(allocs, ph, project).names;
   const parentPort = (allocs, ph, project) => portPlan(allocs, ph, project).parent;
@@ -141,7 +144,7 @@
     const out = new Map(), webs = [], apps = [], wsig = new Map();
     pols.forEach(p => {
       const wf = p.webf && Webcat.entries(p.webf.groups).length ? p.webf : null;  // a profile that allows everything adds nothing
-      if (p.action !== 'accept' || (!p.web && !p.app && !wf)) return;            // profiles only ever attach to Accept policies
+      if (p.action !== 'accept' || (!p.web && !p.app && !wf)) return;            // (a deny policy never carries a profile)            // profiles only ever attach to Accept policies
       const e = {}; out.set(p.id, e);
       if (p.web || wf) {                                                         // identical profiles are shared between policies
         const sig = JSON.stringify([p.web || null, wf ? wf.groups : null]);
@@ -152,7 +155,7 @@
     });
     if (webs.length) {
       L.push('', '# Website filtering. Verify profile and setting names against the FortiOS 8.0 docs and the lab VM. FortiGuard category IDs are UNVERIFIED (from memory). SAFER: build the profile in the GUI (Security Profiles > Web Filter), then read the real IDs back with: show webfilter profile. Do not paste these IDs blind.');
-      L.push('# Web filtering needs a FortiGuard licence. Blocking HTTPS sites by category with certificate inspection is done from the site name; a block or warning page may only display with deep inspection (unverified; Warn pages probably need deep inspection over HTTPS). Only a web filter profile is generated here: no IPS, antivirus or SSL inspection profiles. Category blocking on the Servers network can break OS and vendor updates.');
+      L.push('# Web filtering needs a FortiGuard licence. Blocking HTTPS sites by category with certificate inspection is done from the site name; a block or warning page may only display with deep inspection (unverified; Warn pages probably need deep inspection over HTTPS). Antivirus, IPS and DNS filter use the built-in "default" profiles. Category blocking on the Servers network can break OS and vendor updates.');
       if (webs.some(x => x.w)) {
         L.push('config webfilter urlfilter');
         webs.forEach(({ name, w }, i) => {
@@ -207,11 +210,11 @@
   }
 
   // Access list for one network, as FortiOS CLI. Empty means the interface answers nothing.
-  const accessCLI = (a, ind) => { const v = Access.adminAccess(a); return v.length ? `${ind}set allowaccess ${v.join(' ')}` : `${ind}unset allowaccess`; };
-  const ifaceLines = (a, name, ph) => {
-    const L = [`    edit ${q(name)}`, '        set vdom "root"', `        set ip ${a.gateway ? a.gateway : a.firstUsable} ${a.netmask}`, accessCLI(a, '        ')];
+  const accessCLI = (a, ind, allocs) => { const v = Access.adminAccess(a, allocs); return v.length ? `${ind}set allowaccess ${v.join(' ')}` : `${ind}unset allowaccess`; };
+  const ifaceLines = (a, name, ph, allocs) => {
+    const L = [`    edit ${q(name)}`, '        set vdom "root"', `        set ip ${a.gateway ? a.gateway : a.firstUsable} ${a.netmask}`, accessCLI(a, '        ', allocs)];
     if (a.v6) {
-      L.push('        config ipv6', '            set ip6-mode static', `            set ip6-address ${a.v6.address}/${a.v6.prefix}`, accessCLI(a, '            ').replace('allowaccess', 'ip6-allowaccess'));
+      L.push('        config ipv6', '            set ip6-mode static', `            set ip6-address ${a.v6.address}/${a.v6.prefix}`, accessCLI(a, '            ', allocs).replace('allowaccess', 'ip6-allowaccess'));
       if (a.dhcpStart) L.push('            set ip6-send-adv enable'); // client networks: advertise the /64 so devices self-configure (SLAAC)
       L.push('        end');
     }
@@ -220,6 +223,16 @@
     L.push(`        set role ${FORTI_ROLE[a.role] || 'lan'}`, `        set alias ${q(a.name)}`, '    next');
     return L;
   };
+  // Internet-facing port: DHCP from the ISP unless a static address is entered (Routes box), PING only, role WAN, alias WAN / WAN2.
+  const wanLines = (project, name, n) => {
+    const w = Routes.wanAddr(project, n);
+    return [`    edit ${q(name)}`, '        set vdom "root"', ...(w.mode === 'static' ? ['        set mode static', `        set ip ${w.ip} ${w.mask}`] : ['        set mode dhcp']),
+      '        set allowaccess ping', '        set role wan', `        set alias ${q(n === 1 ? 'WAN' : 'WAN' + n)}`, `        set description ${q('Internet (ISP ' + n + ')')}`, '    next'];
+  };
+  // Admin hardening: the admin account may only log in from the Management network. MFA needs a FortiToken, so it is a checklist step, not CLI.
+  const adminLines = mg => ['', `# ADMIN HARDENING: admin may only log in from ${mg.name} (${mg.cidr}). !! LOCK-OUT RISK: if you are managing from any other address (another VLAN, the VM host network, port1), your next login is refused. Before pasting, connect a PC to ${mg.name} or add your own address as trusthost2. Assumes the account is called "admin" (check: show system admin).`,
+    '# MFA: give the admin account a FortiToken (System > Administrators > admin > Two-factor authentication). Not scripted: it needs a token serial number.',
+    'config system admin', '    edit "admin"', `        set trusthost1 ${mg.network} ${mg.netmask}`, '    next', 'end'];
   // Optional per-network DNS: dns = { server, domain }. Empty = "Same as System DNS". Only a plain IPv4 address is accepted.
   const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
   const okIp = s => { const m = IPV4.exec(String(s || '').trim()); return !!m && m.slice(1).every(x => Number(x) <= 255); };
@@ -233,7 +246,7 @@
   // Shared warnings: the parent port must never be the port you are managing through; dual WAN needs the SD-WAN zone.
   const lockWarn = ph => [`# !! WARNING: "${ph}" must NOT be the port you are managing the firewall through. Changing its address or VLAN mid-paste locks you out. Use a spare port, or have console access ready.`];
   const wanWarn = project => (project && project.intake && project.intake.dualWan) ? [
-    `# !! DUAL WAN: every policy and the VPN below use "${WAN_IF}" only. If wan1 and wan2 are SD-WAN members, policies cannot use a member port: replace "${WAN_IF}" in each dstintf line with your SD-WAN zone (default name "virtual-wan-link"; check: show system sdwan). Create the zone and members first, and keep the VPN on a physical WAN port.`] : [];
+    `# !! DUAL WAN: every policy and the VPN below use "${wanIf(project)}" only. If ${Routes.wanIfs(project).join(' and ')} are SD-WAN members, policies cannot use a member port: replace "${wanIf(project)}" in each dstintf line with your SD-WAN zone (default name "virtual-wan-link"; check: show system sdwan). Create the zone and members first, and keep the VPN on a physical WAN port.`] : [];
 
   // ifName: the single interface-name placeholder the user edits.
   function buildFortiOS(result, project, ifName, opts) {
@@ -248,13 +261,16 @@
     L.push('# ' + FORTI_NOTE);
     if (!portPool(project).length || ph !== PH) L.push(`# >>> INTERFACE NAME PLACEHOLDER: "${ph}"  <<<  Replace every occurrence with your real port/aggregate name.`);
     if (portPool(project).length) L.push('# Ports: assigned from the ports available in the plan (port picker on each network card). Check each name against System > Network > Interfaces.');
+    const wans = Routes.wanIfs(project);
     L.push(...lockWarn(parent), ...portWarn(allocs, ph, project), ...wanWarn(project));
+    L.push(`# WAN: "${wans.join('", "')}" ${wans.length > 1 ? 'are' : 'is'} the internet port${wans.length > 1 ? 's' : ''} (DHCP unless a static ISP address is entered in Suggested static routes), PING only. If you manage the firewall through ${wans[0]}, this paste turns its HTTPS off: manage from ${allocs.some(a => Access.kindOf(a) === 'mgmt') ? 'the Management network' : 'a LAN port'} first.`);
     if (result.v6) L.push(`# IPv6: site prefix ${result.v6.cidr} (${result.v6.kind}). Each network is a /64 (SLAAC via router advertisements on client networks). If IPv6 is hidden in the GUI, enable it under System > Feature Visibility.`);
     L.push('# VLAN sub-interfaces use the placeholder as their parent port. Non-VLAN networks use it as the interface name itself.');
-    L.push(`# Policies assume the internet-facing interface is "${WAN_IF}". Change it if yours differs.`);
+    L.push(`# Internet policies and the VPN use "${wans[0]}". Change it if your internet port differs.`);
     L.push('');
     L.push('config system interface');
-    info.forEach(({ a, name }) => L.push(...ifaceLines(a, name, parent)));
+    wans.forEach((w, i) => { if (names.indexOf(w) < 0) L.push(...wanLines(project, w, i + 1)); });
+    info.forEach(({ a, name }) => L.push(...ifaceLines(a, name, parent, allocs)));
     L.push('end');
 
     const dhcp = info.filter(({ a }) => a.dhcpStart);
@@ -301,27 +317,31 @@
     const customSvc = Object.keys(Policy.CUSTOM_SERVICES || {}).filter(n => pols.some(p => p.services.indexOf(n) >= 0));
     if (customSvc.length) {
       L.push('', 'config firewall service custom');
-      customSvc.forEach(n => { const s = Policy.CUSTOM_SERVICES[n]; L.push(`    edit ${q(n)}`, `        set tcp-portrange ${s.tcp}`, `        set comment ${q(s.comment)}`, '    next'); });
+      customSvc.forEach(n => { const s = Policy.CUSTOM_SERVICES[n]; L.push(`    edit ${q(n)}`, ...(s.tcp ? [`        set tcp-portrange ${s.tcp}`] : []), ...(s.udp ? [`        set udp-portrange ${s.udp}`] : []), `        set comment ${q(s.comment)}`, '    next'); });
       L.push('end');
     }
     L.push('', '# ' + Policy.NOTE);
     L.push('# Policies are ordered top to bottom (first match wins); the last one denies everything else.');
+    L.push('# Each policy is deleted and rebuilt, so nothing from an earlier paste or GUI edit (NAT, profiles, services) survives. First paste: "entry not found" after each delete is expected. Re-pasting briefly drops sessions on these policies.');
+    L.push('# Internet policies: NAT on, certificate inspection, antivirus, web filter, IPS and DNS filter ("default" profiles unless a web filter preset is chosen; FortiGuard licence needed). Policies between your own networks: NAT off, no profiles.');
     L.push('config firewall policy');
     pols.forEach((p, k) => {
       const f = byAlloc.get(p.from);
       const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
-      L.push('    edit ' + (POL_ID0 + 1 + idOff + k));
+      const pid = POL_ID0 + 1 + idOff + k;
+      L.push('    delete ' + pid, '    edit ' + pid);
       L.push(`        set name ${q(polName('SP_', p))}`);
       if (!p.enabled) L.push('        set status disable');
       L.push(`        set srcintf ${q(f.name)}`);
-      L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
+      L.push(`        set dstintf ${q(p.to === 'internet' ? wans[0] : p.to === 'internal' ? 'any' : t.name)}`);
       L.push(`        set action ${p.action}`);
       if (p.insp === 'proxy') L.push('        set inspection-mode proxy');
       L.push(`        set srcaddr ${q(f.obj)}`);
       L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP_INTERNAL' : t.obj)}`);
       L.push(`        set schedule ${q(p.sched)}`);
       L.push(`        set service ${p.services.map(q).join(' ')}`);
-      if (p.action === 'accept' && p.nat) {
+      if (p.action === 'accept' && !(p.nat && p.to === 'internet')) L.push('        set nat disable');   // NAT only ever towards the internet
+      if (p.action === 'accept' && p.nat && p.to === 'internet') {
         L.push('        set nat enable');
         if (p.ippool === 'dynamic') L.push('        set ippool enable', '        set poolname "POOL_NAME_CHANGE_ME"   # create it first: Policy & Objects > IP Pools');
         if (p.snat === 'never') L.push('        set fixedport enable');
@@ -344,7 +364,7 @@
       L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`);
       L.push('    next');
     });
-    L.push('    edit ' + POL_ID0, '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
+    L.push('    delete ' + POL_ID0, '    edit ' + POL_ID0, '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
       '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', `        set comments ${q('SubnetPal final deny')}`, '    next', 'end');
     res.skipped.forEach(n => L.push(`# Skipped (network not in the current plan): ${n}`));
     if (result.v6) {
@@ -365,7 +385,7 @@
           const f = byAlloc.get(p.from);
           const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
           L.push('    edit ' + (POL6_ID0 + 1 + idOff + k), `        set name ${q(polName('SP6_', p))}`, `        set srcintf ${q(f.name)}`);
-          L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
+          L.push(`        set dstintf ${q(p.to === 'internet' ? wans[0] : p.to === 'internal' ? 'any' : t.name)}`);
           L.push(`        set action ${p.action}`, `        set srcaddr ${q(f.obj6)}`);
           L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
           L.push(`        set schedule ${q(p.sched)}`, `        set service ${p.services.map(q).join(' ')}`, `        set logtraffic ${p.log ? p.logmode : 'disable'}`);
@@ -376,6 +396,8 @@
           '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', 'end');
       }
     }
+    const mg = allocs.find(a => Access.kindOf(a) === 'mgmt');
+    if (mg) L.push(...adminLines(mg));
     L.push('', '# ' + FORTI_NOTE);
     return L.join('\n') + '\n';
   }
@@ -397,25 +419,37 @@
     const full = buildFortiOS(result, project, ifName, opts);
     const i = full.indexOf('config firewall address\n');
     const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
-      `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies have fixed IDs, so pasting twice overwrites them instead of adding copies.', ''];
-    const body = i >= 0 ? full.slice(i) : full;
-    return head.join('\n') + '\n' + (opts && opts.only ? onlyNeeded(body) : body);
+      `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${wanIf(project)}".`, ...wanWarn(project), '# Paste the interfaces first. Policies have fixed IDs, so pasting twice overwrites them instead of adding copies.', ''];
+    let body = i >= 0 ? full.slice(i) : full;
+    const k = body.indexOf('\n# ADMIN HARDENING');                                 // admin hardening belongs to the main snippet only
+    if (k >= 0) body = body.slice(0, k) + '\n' + body.slice(body.indexOf('\nend\n', k) + 5);
+    // One policy alone: rebuilt policies land at the bottom, so move it back above the next one in the full list (or the final deny when it is the last).
+    const off = (opts && opts.idOffset) || 0, nextId = opts && opts.total > off + 1 ? POL_ID0 + 2 + off : POL_ID0;
+    if (opts && opts.only) head.splice(head.length - 1, 0, `# This policy is deleted and rebuilt, then moved back above policy ${nextId}. If ${nextId} is not on the firewall yet, paste the full policies instead.`);
+    return head.join('\n') + '\n' + (opts && opts.only ? onlyNeeded(body, nextId) : body);
   }
 
   // One policy on its own: keep its policy block(s) and only the objects it points to (addresses, groups, services, profiles, url tables), and drop the
   // final deny and every unused object. Entry IDs and names are untouched, so pasting it on top of the full export overwrites the same entries.
-  function onlyNeeded(text) {
+  function onlyNeeded(text, nextId) {
     const blocks = []; let cur = null, pend = [];
     text.split('\n').forEach(l => {
       if (!cur) { if (/^config /.test(l)) cur = { head: l, pre: pend, entries: [] }, pend = []; else if (l.trim()) pend.push(l); return; }
       if (l === 'end') { blocks.push(cur); cur = null; return; }
+      if (/^    delete /.test(l)) { cur.del = l; return; }
       const m = /^    edit (.+)$/.exec(l);
-      if (m) cur.entries.push({ key: m[1].replace(/^"|"$/g, ''), lines: [l] }); else if (cur.entries.length) cur.entries[cur.entries.length - 1].lines.push(l);
+      if (m) { cur.entries.push({ key: m[1].replace(/^"|"$/g, ''), lines: cur.del ? [cur.del, l] : [l] }); cur.del = null; } else if (cur.entries.length) cur.entries[cur.entries.length - 1].lines.push(l);
     });
     const isPol = b => /^config firewall policy6?$/.test(b.head);
     const keep = new Set();
     let need = '';
-    blocks.filter(isPol).forEach(b => b.entries.forEach(e => { if (Number(e.key) % 1000 !== 0) { keep.add(e); need += e.lines.join('\n') + '\n'; } }));
+    // A rebuilt policy lands at the bottom of the list, so it is moved back above the next one (the last one above the final deny).
+    blocks.filter(isPol).forEach(b => b.entries.forEach((e, i) => {
+      if (Number(e.key) % 1000 === 0) return;
+      const nx = nextId || (b.entries[i + 1] && b.entries[i + 1].key);
+      if (nx && e.lines[0].indexOf('    delete ') === 0) e.lines = e.lines.concat('    move ' + e.key + ' before ' + nx);
+      keep.add(e); need += e.lines.join('\n') + '\n';
+    }));
     for (let again = true; again;) {
       again = false;
       blocks.filter(b => !isPol(b)).forEach(b => b.entries.forEach(e => {
@@ -450,7 +484,7 @@
     const idx = a => result.allocations.indexOf(a);
     const objOf = a => 'SP_' + (fname(a.name) || 'net');
     L.push(...lockWarn(parentPort(result.allocations, ph, project)), ...wanWarn(project));
-    L.push(`# Internet-facing interface is assumed to be "${WAN_IF}". Interface names for office networks use the placeholder "${ph}" like the main snippet.`);
+    L.push(`# Internet-facing interface is assumed to be "${wanIf(project)}". Interface names for office networks use the placeholder "${ph}" like the main snippet.`);
     pool.notes.forEach(n => L.push('# ' + n));
     L.push('', 'config firewall address', '    edit "SP_VPN_POOL"', `        set subnet ${pool.network} ${pool.netmask}`, `        set comment ${q('VPN user pool ' + pool.cidr)}`, '    next');
     reach.forEach(a => L.push(`    edit ${q(objOf(a))}`, `        set subnet ${a.network} ${a.netmask}`, `        set comment ${q(a.name + ' (' + a.cidr + ')')}`, '    next'));
@@ -458,7 +492,7 @@
     if (reach.length) L.push('', 'config firewall addrgrp', '    edit "SP_VPN_SPLIT"', '        set member ' + reach.map(a => q(objOf(a))).join(' '), '    next', 'end');
     else L.push('', '# No office networks are ticked for remote staff, so there is no split-tunnel list or policy.');
     L.push('', '# Phase 1: dial-up. IKE version is NOT forced: leave what the VPN Wizard (FortiClient template) chose. This snippet is the IKEv1 + XAuth dial-up (FortiClient IPsec): xauthtype is an IKEv1 feature. If your wizard chose IKEv2, delete the xauthtype line and use EAP instead. CONFIRM ON THE VM. Weak crypto is left out (no DES, 3DES, MD5, SHA1); DH 20 and 21.',
-      'config vpn ipsec phase1-interface', '    edit "SP_VPN"', '        set type dynamic', `        set interface ${q(WAN_IF)}`,
+      'config vpn ipsec phase1-interface', '    edit "SP_VPN"', '        set type dynamic', `        set interface ${q(wanIf(project))}`,
       '        set peertype any', '        set net-device disable', '        set mode-cfg enable', '        set proposal aes256-sha256', '        set dhgrp 20 21',
       '        set dpd on-idle', '        set xauthtype auto', '        set authusrgrp "RemoteStaff"',
       `        set ipv4-start-ip ${pool.first}`, `        set ipv4-end-ip ${pool.last}`, `        set ipv4-netmask ${pool.netmask}`);
@@ -575,7 +609,7 @@
         'foreach ($l in $lines) {', "  $e = $l -replace '([+^%~(){}\\[\\]])', '{$1}'", "  [System.Windows.Forms.SendKeys]::SendWait($e + '{ENTER}')", '  Start-Sleep -Milliseconds 250', '}', 'Write-Host "Done."']).join('\r\n') + '\r\n';
   };
   return {
-    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, toRoutesFortiOS, routesNotes, toFortiOSRaw, toPolicyFortiOSRaw, toRemoteFortiOSRaw, fortiNotes, policyNotes, remoteNotes, cliOnly, notesOnly, dhcpId, POL_ID0, POL6_ID0, VPNPOL_ID0, dnsOf, okIp, handoverRows, handoverCells,
+    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, wanIf, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, toRoutesFortiOS, routesNotes, toFortiOSRaw, toPolicyFortiOSRaw, toRemoteFortiOSRaw, fortiNotes, policyNotes, remoteNotes, cliOnly, notesOnly, dhcpId, POL_ID0, POL6_ID0, VPNPOL_ID0, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));

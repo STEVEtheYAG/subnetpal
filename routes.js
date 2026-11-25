@@ -8,6 +8,24 @@
   const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
   const okIp = s => { const m = IPV4.exec(String(s || '').trim()); return !!m && m.slice(1).every(x => Number(x) <= 255); };
   const gwOf = (project, key) => { const v = String(((project && project.routes) || {})[key] || '').trim(); return okIp(v) ? v : ''; };
+  // Internet-facing ports. project.wanPort wins (e.g. "port1", "wan1"); dual WAN adds the next number (port1 -> port2).
+  // Auto: with "LAN ports available" named portN (a VM, or a model without wan ports) WAN is port1, so LAN networks start at port2.
+  // Otherwise wan1 / wan2 (desktop models). A WAN port inside the pool is reserved and never handed to a LAN network.
+  function wanIfs(project) {
+    const dual = !!(project && project.intake && project.intake.dualWan);
+    const set = String((project && project.wanPort) || '').trim().replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 15);
+    const n = Math.min(48, Math.max(0, Math.floor(Number(project && project.portCount)) || 0));
+    const pre = String((project && project.portPrefix && String(project.portPrefix).trim()) || 'port');
+    const first = set || (n && pre === 'port' ? 'port1' : 'wan1');
+    const m = /^(.*?)(\d+)$/.exec(first);
+    return dual ? [first, m ? m[1] + (Number(m[2]) + 1) : 'wan2'] : [first];
+  }
+  // WAN address per link: a static ISP address "a.b.c.d/nn" (key ip1 / ip2), else DHCP from the ISP.
+  function wanAddr(project, n) {
+    const v = String((((project && project.routes) || {})['ip' + n]) || '').trim(), m = /^([\d.]+)\/(\d{1,2})$/.exec(v);
+    if (!m || !okIp(m[1]) || Number(m[2]) < 8 || Number(m[2]) > 30) return { mode: 'dhcp' };
+    return { mode: 'static', ip: m[1], mask: Calc.intToIp(Calc.prefixToMask(Number(m[2]))), cidr: v };
+  }
   const split = cidr => { const p = Calc.parseCidr(cidr); return p.error ? null : { net: Calc.intToIp(p.start), mask: Calc.intToIp(Calc.prefixToMask(p.prefix)) }; };
 
   // Every route this plan suggests. on = ticked (the engineer's choice wins over the default).
@@ -15,11 +33,11 @@
   function suggest(result, project) {
     if (!result || !result.ok) return [];
     const it = (project && project.intake) || {}, sel = ((project && project.routes) || {}).sel || {};
-    const out = [];
+    const out = [], wan = wanIfs(project), dhcp1 = wanAddr(project, 1).mode === 'dhcp' && !gwOf(project, 'gw1');
     const add = r => { r.on = typeof sel[r.id] === 'boolean' ? sel[r.id] : r.def; out.push(r); };
-    add({ id: 'def1', seq: 101, title: 'Default route out wan1', dst: '0.0.0.0', dstMask: '0.0.0.0', cidr: '0.0.0.0/0', device: 'wan1', gwKey: 'gw1', gateway: gwOf(project, 'gw1'), distance: 10, blackhole: false, def: true,
-      reason: 'Sends everything that is not an office network to the internet provider. A factory unit may already have one (check: show router static).' });
-    if (it.dualWan) add({ id: 'def2', seq: 102, title: 'Backup default route out wan2', dst: '0.0.0.0', dstMask: '0.0.0.0', cidr: '0.0.0.0/0', device: 'wan2', gwKey: 'gw2', gateway: gwOf(project, 'gw2'), distance: 20, blackhole: false, def: true,
+    add({ id: 'def1', seq: 101, title: `Default route out ${wan[0]}`, dst: '0.0.0.0', dstMask: '0.0.0.0', cidr: '0.0.0.0/0', device: wan[0], gwKey: 'gw1', gateway: gwOf(project, 'gw1'), distance: 10, blackhole: false, def: !dhcp1,
+      reason: dhcp1 ? 'Not needed while the WAN uses DHCP: the ISP hands out the default route. Enter a static WAN address and gateway to add it.' : 'Sends everything that is not an office network to the internet provider. A factory unit may already have one (check: show router static).' });
+    if (it.dualWan) add({ id: 'def2', seq: 102, title: `Backup default route out ${wan[1] || 'wan2'}`, dst: '0.0.0.0', dstMask: '0.0.0.0', cidr: '0.0.0.0/0', device: wan[1] || 'wan2', gwKey: 'gw2', gateway: gwOf(project, 'gw2'), distance: 20, blackhole: false, def: true,
       reason: 'Same destination with a higher distance, so wan2 only takes over when the wan1 link goes down. It does not notice a dead provider behind a live link. If you use SD-WAN, untick it and use the SD-WAN zone instead.' });
     const par = split(result.parent.cidr);
     if (par) add({ id: 'bh', seq: 103, title: `Blackhole for ${result.parent.cidr}`, dst: par.net, dstMask: par.mask, cidr: result.parent.cidr, device: '', gwKey: '', gateway: '', distance: 254, blackhole: true, def: true,
@@ -35,7 +53,7 @@
     const on = suggest(result, project).filter(r => r.on);
     if (!on.length) return [];
     const L = ['# Static routes use fixed IDs (101 and up), so pasting twice overwrites. Check first for clashes: show router static.'];
-    if (project && project.intake && project.intake.dualWan) L.push('# !! DUAL WAN: if wan1 and wan2 are SD-WAN members, do not add the two default routes below. Use one static route with the SD-WAN zone instead.');
+    if (project && project.intake && project.intake.dualWan) L.push('# !! DUAL WAN: if ' + wanIfs(project).join(' and ') + ' are SD-WAN members, do not add the two default routes below. Use one static route with the SD-WAN zone instead.');
     const missing = [], body = [];
     on.forEach(r => {
       const cm = `        set comment ${JSON.stringify(('SubnetPal ' + r.title).slice(0, 255))}`;
@@ -57,5 +75,5 @@
       : `${r.title} (${r.cidr} via ${r.gateway || 'ISP gateway to be entered'}, distance ${r.distance}): ${r.reason}`);
   }
 
-  return { suggest, lines, summary, okIp };
+  return { suggest, lines, summary, okIp, wanIfs, wanAddr };
 }));

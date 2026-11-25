@@ -14,6 +14,7 @@
   const ST = ['staff', 'lan'];
   // A policy card: src is a list of network kinds; dst is a list of kinds, 'internet' or 'internal' (every internal network).
   // exception: a narrow, optional allow that must sit above the deny rules it would otherwise be shadowed by.
+  // service: real FortiOS service names for every allow; only deny rules use ALL (Bob's review: no ALL on an allow).
   const P = (id, name, o) => Object.assign({ id, name, type: 'policy', action: 'accept', service: 'ALL', tier: 'recommended', risk: 'low', tags: [], why: '', exception: false }, o);
   // An advice card never becomes a policy. It is shown in the library when its condition holds.
   const D = (id, name, o) => Object.assign({ id, name, type: 'advice', tier: 'recommended', risk: 'low', tags: [], why: '', text: '' }, o);
@@ -42,39 +43,39 @@
       why: 'Switch, access point and firewall admin pages are reachable from the Management network only. Guests, IoT, printers and card terminals are already refused by their own rules; this covers phones and cameras.' }),
 
     // ---- common allows ----
-    P('staff-internet', 'Staff to the internet', { src: ST, dst: 'internet', tier: 'baseline', tags: ['staff-lan'],
+    P('staff-internet', 'Staff to the internet', { service: 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC', src: ST, dst: 'internet', tier: 'baseline', tags: ['staff-lan'],
       why: 'Staff need web, email and cloud apps to do their jobs.' }),
-    P('staff-servers', 'Staff to servers', { src: ST, dst: ['servers'], tier: 'baseline', tags: ['staff-lan', 'servers-dmz'],
+    P('staff-servers', 'Staff to servers', { service: 'DNS,HTTPS,SMB,RDP,KERBEROS,LDAP,NTP,DCE-RPC', src: ST, dst: ['servers'], tier: 'baseline', tags: ['staff-lan', 'servers-dmz'],
       why: 'Staff open shared files, line-of-business apps and databases on the on-site servers.' }),
-    P('staff-dmz', 'Staff to public servers', { src: ST, dst: ['dmz'], tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
+    P('staff-dmz', 'Staff to public servers', { service: 'HTTP,HTTPS,SSH,RDP', src: ST, dst: ['dmz'], tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
       why: 'Staff and administrators look after the public-facing servers.' }),
     P('staff-printers', 'Staff to printers', { src: ST, dst: ['printers'], service: 'SP_PRINT', tags: ['printers', 'staff-lan'],
       why: 'Staff can send work to the printers. The printers cannot start a connection back, so this is a one-way door.' }),
-    P('servers-internet', 'Servers to the internet', { src: ['servers'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
+    P('servers-internet', 'Servers to the internet', { service: 'DNS,HTTP,HTTPS,NTP', src: ['servers'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
       why: 'Servers fetch updates, licences and cloud services.' }),
-    P('voice-internet', 'Phones to the internet', { src: ['voice'], dst: 'internet', tier: 'baseline', tags: ['voip'],
+    P('voice-internet', 'Phones to the internet', { service: 'DNS,HTTPS,NTP,SIP,SP_RTP', src: ['voice'], dst: 'internet', tier: 'baseline', tags: ['voip'],
       why: 'Hosted phone systems and SIP trunks live on the internet, so the handsets must reach them.' }),
-    P('voice-servers', 'Phones to servers', { src: ['voice'], dst: ['servers'], tags: ['voip'],
+    P('voice-servers', 'Phones to servers', { service: 'SIP,SP_RTP,HTTP,HTTPS', src: ['voice'], dst: ['servers'], tags: ['voip'],
       why: 'The handsets connect to a phone system that runs on your on-site servers.' }),
-    P('cameras-servers', 'Cameras to servers', { src: ['cameras'], dst: ['servers'], tier: 'baseline', tags: ['iot'],
+    P('cameras-servers', 'Cameras to servers', { service: 'RTSP,HTTP,HTTPS', src: ['cameras'], dst: ['servers'], tier: 'baseline', tags: ['iot'],
       why: 'Cameras send their video to the recorder on the servers network and nowhere else.' }),
-    P('iot-internet', 'IoT devices to the internet', { src: ['iot'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['iot'],
+    P('iot-internet', 'IoT devices to the internet', { service: 'DNS,HTTP,HTTPS,NTP', src: ['iot'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['iot'],
       why: 'Smart devices usually need their vendor cloud to work.' }),
-    P('other-internet', 'Custom device pools to the internet', { src: ['other'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['iot'],
+    P('other-internet', 'Custom device pools to the internet', { service: 'DNS,HTTP,HTTPS,NTP', src: ['other'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['iot'],
       why: 'Extra device pools get internet access only.' }),
     P('guest-internet', 'Guests to the internet', { src: ['guest'], dst: 'internet', service: 'DNS,HTTP,HTTPS', tier: 'baseline', tags: ['guest', 'wifi-ap'],
       why: 'Guests can browse the web and nothing else.' }),
-    P('dmz-internet', 'Public servers to the internet', { src: ['dmz'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
+    P('dmz-internet', 'Public servers to the internet', { service: 'DNS,HTTP,HTTPS,NTP', src: ['dmz'], dst: 'internet', tier: 'baseline', risk: 'medium', tags: ['servers-dmz'],
       why: 'Public servers fetch updates and call out to cloud services.' }),
     P('pos-internet', 'Card terminals to the payment provider', { src: ['pos'], dst: 'internet', service: 'DNS,HTTPS,NTP', risk: 'medium', tags: ['pos-pci'],
       why: 'The terminals only need name lookups, secure web access and time sync, so that is all they get. It is not limited to one provider address yet: ask the provider which addresses it uses and narrow it once known.' }),
-    P('mgmt-internet', 'Management to the internet', { src: ['mgmt'], dst: 'internet', tier: 'baseline', tags: ['management', 'wifi-ap'],
+    P('mgmt-internet', 'Management to the internet', { service: 'DNS,HTTP,HTTPS,NTP,PING', src: ['mgmt'], dst: 'internet', tier: 'baseline', tags: ['management', 'wifi-ap'],
       why: 'Switches, access points and the firewall fetch firmware, licences and cloud-managed settings.' }),
-    P('mgmt-admin', 'Management to internal networks', { src: ['mgmt'], dst: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'dmz'], tier: 'baseline', risk: 'high', tags: ['management'],
+    P('mgmt-admin', 'Management to internal networks', { service: 'HTTPS,SSH,RDP,PING,SNMP', src: ['mgmt'], dst: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'dmz'], tier: 'baseline', risk: 'high', tags: ['management'],
       why: 'Administrators on the Management network reach every device they look after. This is the one network allowed to do that.' }),
 
     // ---- optional extras (off by default) ----
-    P('pos-servers', 'Card terminals to servers', { src: ['pos'], dst: ['servers'], tier: 'optional', risk: 'medium', exception: true, tags: ['pos-pci'],
+    P('pos-servers', 'Card terminals to servers', { service: 'HTTPS', src: ['pos'], dst: ['servers'], tier: 'optional', risk: 'medium', exception: true, tags: ['pos-pci'],
       why: 'Only if the till software needs a back-office server. It widens what has to be protected for card payments, so leave it off if the tills work on their own.' }),
     P('dmz-backend', 'Public servers to a back-end database', { src: ['dmz'], dst: ['servers'], service: 'MYSQL,MS-SQL', tier: 'optional', risk: 'high', exception: true, tags: ['servers-dmz'],
       why: 'Only if a public web server needs a database on your internal servers. It is safer to keep that database next to the public server.' }),
@@ -82,7 +83,7 @@
       why: 'Lets administrators manage switches and access points from the staff LAN. Leave it off if admins connect to the Management network directly.' }),
     P('printers-internet', 'Printers to the internet', { src: ['printers'], dst: 'internet', service: 'DNS,HTTP,HTTPS,NTP', tier: 'optional', risk: 'medium', tags: ['printers'],
       why: 'Only for cloud printing or automatic firmware updates. Printers are otherwise kept off the internet.' }),
-    P('staff-voice', 'Staff LAN to phones', { src: ST, dst: ['voice'], tier: 'optional', risk: 'medium', tags: ['voip'],
+    P('staff-voice', 'Staff LAN to phones', { service: 'HTTP,HTTPS', src: ST, dst: ['voice'], tier: 'optional', risk: 'medium', tags: ['voip'],
       why: 'Only if staff need to open the settings pages of the phones.' }),
 
     // ---- advice (nothing is generated; shown when it applies) ----

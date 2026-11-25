@@ -13,9 +13,17 @@
     { v: 'DNS', l: 'DNS' }, { v: 'HTTP', l: 'HTTP' }, { v: 'HTTPS', l: 'HTTPS' }, { v: 'SSH', l: 'SSH' }, { v: 'RDP', l: 'RDP' },
     { v: 'SMB', l: 'SMB (file sharing)' }, { v: 'SMTP', l: 'SMTP (email)' }, { v: 'PING', l: 'Ping' }, { v: 'FTP', l: 'FTP' }, { v: 'NTP', l: 'NTP' },
     { v: 'SP_PRINT', l: 'Printing (TCP 9100, 631, 515)' },
+    { v: 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC', l: 'Internet basics (web, QUIC, DNS, NTP, ping)' },
   ];
   // Custom service objects SubnetPal creates itself (no FortiOS predefined service covers them). Emitted by format.js.
-  const CUSTOM_SERVICES = { SP_PRINT: { tcp: '9100 631 515', comment: 'Raw/JetDirect, IPP, LPD printing' } };
+  const CUSTOM_SERVICES = {
+    SP_PRINT: { tcp: '9100 631 515', comment: 'Raw/JetDirect, IPP, LPD printing' },
+    SP_QUIC: { udp: '443', comment: 'QUIC / HTTP3 (Google, Microsoft 365, video calls)' },
+    SP_RTP: { udp: '10000-20000', comment: 'RTP voice media (check the phone system range)' },
+  };
+  // Security profiles every Accept-to-internet policy gets unless the engineer turns one off (built-in "default" profiles, certificate inspection).
+  const OUT_UTM = { av: true, web: true, dns: true, ips: true };
+  const utmOf = p => (p.action === 'deny' ? {} : p.utm ? Object.assign({}, p.utm) : p.dst === 'internet' || p.to === 'internet' ? Object.assign({}, OUT_UTM) : {});
   // FortiGuard web category and application category IDs. Unverified: check them on the lab VM.
   const WEB_CATS = [
     { id: 26, l: 'Malicious Websites' }, { id: 61, l: 'Phishing' }, { id: 59, l: 'Proxy Avoidance' }, { id: 37, l: 'Social Networking' },
@@ -149,7 +157,7 @@
       const netOk = t => (allocs || []).some(a => a.name === t && Access.hasPolicy(a));
       if (/internet only|only (?:the )?internet|only (?:access|reach|get|go to) (?:the )?internet|nothing else|no (?:other|internal) access/.test(clause) && hasNet.length && netOk(hasNet[0])) {
         const n = hasNet[0], k = Access.kindOf((allocs || []).find(a => a.name === n));
-        policies.push(mkPolicy({ src: n, dst: 'internet', service: k === 'guest' ? 'DNS,HTTP,HTTPS' : 'ALL', action: 'accept', nat: true, replaceSrc: true }));
+        policies.push(mkPolicy({ src: n, dst: 'internet', service: k === 'guest' ? 'DNS,HTTP,HTTPS' : 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC', action: 'accept', nat: true, replaceSrc: true }));
         policies.push(mkPolicy({ src: n, dst: 'internal', service: 'ALL', action: 'deny', nat: false, name: `${n} to internal (block)` }));
         return;
       }
@@ -186,11 +194,11 @@
       if (!from || !to) { skipped.push(policyName(p)); return; }
       pols.push({
         id: p.id, card: p.card || '', name: policyName(p), action: p.action === 'deny' ? 'deny' : 'accept', from, to,
-        services: String(p.service || 'ALL').split(',').map(s => s.trim()).filter(Boolean), nat: !!p.nat, log: p.log !== false,
+        services: String(p.service || 'ALL').split(',').map(s => s.trim()).filter(Boolean), nat: !!p.nat && p.action !== 'deny' && p.dst === 'internet', log: p.log !== false,
         sched: p.sched || 'always', insp: p.insp === 'proxy' ? 'proxy' : 'flow', ippool: p.ippool === 'dynamic' ? 'dynamic' : 'outgoing',
         snat: ['always', 'never'].indexOf(p.snat) >= 0 ? p.snat : 'conflict', logmode: p.logmode === 'utm' ? 'utm' : 'all', logstart: !!p.logstart, capture: !!p.capture,
         comments: String(p.comments || '').slice(0, 1023), enabled: p.enabled !== false, ssl: p.ssl || '',
-        utm: p.action === 'deny' ? {} : Object.assign({}, p.utm || {}),
+        utm: utmOf(p),
         web: p.web && p.web.mode ? p.web : null, app: p.app && p.app.mode ? p.app : null,
         webf: p.action !== 'deny' && p.webf && p.webf.groups ? { preset: p.webf.preset || 'custom', groups: Webcat.normGroups(p.webf.groups) } : null,
       });
@@ -198,5 +206,5 @@
     return { pols, skipped };
   }
 
-  return { NOTE, SERVICES, CUSTOM_SERVICES, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile };
+  return { NOTE, SERVICES, CUSTOM_SERVICES, OUT_UTM, utmOf, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile };
 }));
