@@ -1,8 +1,8 @@
 /* SubnetPal - exporters (CSV, Markdown, text, FortiOS, client handover doc). Pure, no DOM. window.Fmt / Node. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./policy.js'), require('./remote.js'), require('./webcat.js'));
-  else root.Fmt = factory(root.Access, root.Policy, root.Remote, root.Webcat);
-}(typeof self !== 'undefined' ? self : this, function (Access, Policy, Remote, Webcat) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./access.js'), require('./policy.js'), require('./remote.js'), require('./webcat.js'), require('./routes.js'));
+  else root.Fmt = factory(root.Access, root.Policy, root.Remote, root.Webcat, root.Routes);
+}(typeof self !== 'undefined' ? self : this, function (Access, Policy, Remote, Webcat, Routes) {
   'use strict';
 
   const FORTI_NOTE = 'Generated, untested. Verify against FortiOS 8.0 docs and the lab VM before applying. Starter policies are not production rules.';
@@ -265,6 +265,10 @@
       L.push('end');
     }
 
+    // Suggested static routes the engineer has ticked (default route, blackhole). Before the policies so the paste order stays logical.
+    const rt = Routes.lines(result, project);
+    if (rt.length) L.push('', ...rt);
+
     // Firewall address objects: one per subnet.
     const used = new Set();
     info.forEach(x => {
@@ -385,6 +389,7 @@
   const toFortiOSRaw = buildFortiOS, toPolicyFortiOSRaw = buildPolicyFortiOS, toRemoteFortiOSRaw = buildRemoteFortiOS;
   const toFortiOS = (...x) => cliOnly(buildFortiOS(...x)), fortiNotes = (...x) => notesOnly(buildFortiOS(...x));
   const toPolicyFortiOS = (...x) => cliOnly(buildPolicyFortiOS(...x)), policyNotes = (...x) => notesOnly(buildPolicyFortiOS(...x));
+  const toRoutesFortiOS = (...x) => cliOnly(buildRoutesFortiOS(...x)), routesNotes = (...x) => notesOnly(buildRoutesFortiOS(...x));
   const toRemoteFortiOS = (...x) => cliOnly(buildRemoteFortiOS(...x)), remoteNotes = (...x) => notesOnly(buildRemoteFortiOS(...x));
 
   // Just the address objects, profiles and policies from the main snippet (interfaces and DHCP left out).
@@ -394,6 +399,12 @@
     const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
       `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies have fixed IDs, so pasting twice overwrites them instead of adding copies.', ''];
     return head.join('\n') + '\n' + (i >= 0 ? full.slice(i) : full);
+  }
+
+  // Just the static routes (the same lines the main snippet carries).
+  function buildRoutesFortiOS(result, project) {
+    const rt = Routes.lines(result, project);
+    return ['# ===== SubnetPal static routes =====', '# ' + FORTI_NOTE, ...(rt.length ? rt : ['# No static routes are ticked.'])].join('\n') + '\n';
   }
 
   // ---------- IPsec remote access (dial-up) ----------
@@ -484,7 +495,7 @@
         ? { head: HANDOVER_HEAD.concat(['IPv6 subnet', 'IPv6 gateway']), rows: handoverRows(result).map(r => handoverCells(r).concat([r.subnet6, r.gateway6])) }
         : { head: HANDOVER_HEAD, rows: handoverRows(result).map(handoverCells) },
       matrixNote: 'Based on the starter firewall policies. Guest and DMZ networks have no route to internal networks, and only the Management network can reach other internal networks to administer them. Final rules to be agreed with the client.',
-      growthLines, wan: (it.wanNote || '').trim() || 'None provided.',
+      growthLines, wan: (it.wanNote || '').trim() || 'None provided.', routes: Routes.summary(result, project),
     };
   }
 
@@ -499,6 +510,7 @@
     o.push('## 5. Growth notes', '');
     d.growthLines.forEach(l => o.push(`- ${l}`));
     o.push('', '## 6. WAN / VPN notes', '', d.wan.replace(/\r?\n/g, '  \n'), '');
+    if (d.routes.length) { o.push('## 7. Static routes', ''); d.routes.forEach(l => o.push(`- ${l}`)); o.push(''); }
     return o.join('\n');
   }
 
@@ -515,7 +527,8 @@
       '<h2>3. Why each network exists</h2><ul>' + d.why.map(w => `<li><b>${esc(w.name)}</b> (<span class="mono">${esc(w.cidr)}</span>): ${esc(w.text)}</li>`).join('') + '</ul>' +
       '<h2>4. Who can talk to who</h2>' + htmlTable(d.matrix.head, d.matrix.rows) + `<p class="hint">${esc(d.matrixNote)}</p>` +
       '<h2>5. Growth notes</h2><ul>' + d.growthLines.map(l => `<li>${esc(l)}</li>`).join('') + '</ul>' +
-      `<h2>6. WAN / VPN notes</h2><p>${esc(d.wan).replace(/\r?\n/g, '<br>')}</p></article>`;
+      `<h2>6. WAN / VPN notes</h2><p>${esc(d.wan).replace(/\r?\n/g, '<br>')}</p>` +
+      (d.routes.length ? '<h2>7. Static routes</h2><ul>' + d.routes.map(l => `<li>${esc(l)}</li>`).join('') + '</ul>' : '') + '</article>';
   }
 
   // Paste-safe CLI: CRLF line ends and no leading indent (FortiOS ignores indentation), so a console or PuTTY gets one command per line.
@@ -531,7 +544,7 @@
         'foreach ($l in $lines) {', "  $e = $l -replace '([+^%~(){}\\[\\]])', '{$1}'", "  [System.Windows.Forms.SendKeys]::SendWait($e + '{ENTER}')", '  Start-Sleep -Milliseconds 250', '}', 'Write-Host "Done."']).join('\r\n') + '\r\n';
   };
   return {
-    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, toFortiOSRaw, toPolicyFortiOSRaw, toRemoteFortiOSRaw, fortiNotes, policyNotes, remoteNotes, cliOnly, notesOnly, dhcpId, POL_ID0, POL6_ID0, VPNPOL_ID0, dnsOf, okIp, handoverRows, handoverCells,
+    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, toRoutesFortiOS, routesNotes, toFortiOSRaw, toPolicyFortiOSRaw, toRemoteFortiOSRaw, fortiNotes, policyNotes, remoteNotes, cliOnly, notesOnly, dhcpId, POL_ID0, POL6_ID0, VPNPOL_ID0, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));

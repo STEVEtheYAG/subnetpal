@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v48'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v49'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v48/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v49/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1767,7 +1767,7 @@ test('CLI copy: paste-safe CRLF lines, no leading indent, no tabs or runs of spa
   assert.ok(!/(^|\n)[ \t]/.test(out) && !/[^\r]\n/.test(out));
   assert.strictEqual(F.cliForPaste('a\r\nb\rc\n\n\n'), 'a\r\nb\r\nc\r\n');
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');
-  assert.ok(app.includes("CLI_KINDS = ['forti', 'polcli', 'remote']") && app.includes("Fmt.cliForPaste($('#clitext').value)"));
+  assert.ok(app.includes("CLI_KINDS = ['forti', 'polcli', 'remote', 'routes']") && app.includes("Fmt.cliForPaste($('#clitext').value)"));
 });
 test('explanations: hidden by default, one remembered switch per page and in the popup, warnings never hidden', () => {
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
@@ -1807,6 +1807,42 @@ test('FortiOS policy form: every popup field feeds the CLI (inspection, NAT pool
   const b = pol.slice(pol.indexOf('set name "SP_Staff_LAN_to_Servers"'), pol.indexOf('SP_Final_deny'));
   assert.ok(b.includes('set av-profile "default"') && b.includes('set ssl-ssh-profile "certificate-inspection"') && !b.includes('set status disable') && !b.includes('inspection-mode') && b.includes('set logtraffic all'));
   const d = Pol.resolve([mk({ src: 'Staff LAN', dst: 'internet', action: 'deny', utm: { av: true } })], r.allocations).pols[0]; assert.deepStrictEqual(d.utm, {}); // deny never carries profiles
+});
+test('suggested static routes: default + blackhole, gateway needed, ticks override, dual WAN backup, VPN pool outside block', () => {
+  const Rt = require('./routes.js');
+  const { c, r } = polSample();
+  let rs = Rt.suggest(r, I.toProject(c));
+  assert.deepStrictEqual(rs.map(x => x.id), ['def1', 'bh']);
+  assert.ok(rs.every(x => x.on) && rs[1].blackhole && rs[1].distance === 254 && rs[1].cidr === r.parent.cidr);
+  // no gateway yet: default route is commented out, blackhole is live
+  let t = F.toRoutesFortiOS(r, I.toProject(c));
+  assert.ok(t.includes('config router static') && t.includes('edit 103') && t.includes('set blackhole enable') && !/^\s*#/m.test(t) && !/set gateway/.test(t) && !/edit 101/.test(t));
+  assert.ok(F.routesNotes(r, I.toProject(c)).includes('Not added until the ISP gateway'));
+  c.routes = { gw1: '203.0.113.1', gw2: 'bad', sel: { bh: false } };
+  t = F.toRoutesFortiOS(r, I.toProject(c));
+  assert.ok(/^ {8}set gateway 203\.0\.113\.1$/m.test(t) && t.includes('edit 101') && t.includes('set device "wan1"') && t.includes('set distance 10') && !t.includes('blackhole'));
+  assert.ok(F.toFortiOS(r, I.toProject(c), 'port5').includes('config router static'));
+  assert.ok(!F.toPolicyFortiOS(r, I.toProject(c), 'port5').includes('config router static'));
+  c.routes.sel = { def1: false, bh: false }; assert.ok(F.routesNotes(r, I.toProject(c)).includes('No static routes are ticked') && !F.toRoutesFortiOS(r, I.toProject(c)).includes('config'));
+  assert.ok(!F.toFortiOS(r, I.toProject(c), 'port5').includes('config router static'));
+  // dual WAN adds a backup with a higher distance and the SD-WAN warning
+  c.intake.dualWan = true; c.routes = { gw1: '203.0.113.1', gw2: '198.51.100.1' };
+  rs = Rt.suggest(r, I.toProject(c)); assert.deepStrictEqual(rs.map(x => x.id), ['def1', 'def2', 'bh']);
+  t = F.toRoutesFortiOS(r, I.toProject(c));
+  assert.ok(t.includes('set device "wan2"') && t.includes('edit 102') && t.includes('set distance 20') && F.routesNotes(r, I.toProject(c)).includes('SD-WAN') && !t.includes('SD-WAN'));
+  // handover doc lists ticked routes
+  assert.ok(F.toHandoverDoc(r, I.toProject(c)).includes('## 7. Static routes') && F.toHandoverHTML(r, I.toProject(c)).includes('7. Static routes'));
+  c.routes.sel = { def1: false, def2: false, bh: false }; assert.ok(!F.toHandoverDoc(r, I.toProject(c)).includes('Static routes'));
+});
+test('suggested static routes: VPN pool blackhole only when the pool is outside the office block', () => {
+  const Rt = require('./routes.js');
+  const a = remoteClient('10');
+  assert.ok(!Rt.suggest(a.r, a.p).some(x => x.id === 'vpn'), 'pool inside the block is covered by the block blackhole');
+  const full = remoteClient('10', c => { c.parentAuto = false; c.parent = '10.50.0.0/24'; c.opts.style = 'packed'; });
+  const pool = R.plan(full.r, full.p);
+  const v = Rt.suggest(full.r, full.p).find(x => x.id === 'vpn');
+  assert.strictEqual(!!v, pool.ok && pool.where === 'separate');
+  if (v) assert.strictEqual(v.cidr, pool.cidr);
 });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

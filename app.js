@@ -552,6 +552,7 @@
       case 'text': return Fmt.toText(result, p);
       case 'polcli': return Fmt.toPolicyFortiOS(result, p, p.ifName);
       case 'remote': return Fmt.toRemoteFortiOS(result, p, p.ifName);
+      case 'routes': return Fmt.toRoutesFortiOS(result, p);
     }
     return '';
   }
@@ -559,7 +560,7 @@
   function notes(kind) {
     if (!result || !result.ok) return '';
     const p = project();
-    return kind === 'forti' ? Fmt.fortiNotes(result, p, p.ifName) : kind === 'polcli' ? Fmt.policyNotes(result, p, p.ifName) : kind === 'remote' ? Fmt.remoteNotes(result, p, p.ifName) : '';
+    return kind === 'forti' ? Fmt.fortiNotes(result, p, p.ifName) : kind === 'polcli' ? Fmt.policyNotes(result, p, p.ifName) : kind === 'remote' ? Fmt.remoteNotes(result, p, p.ifName) : kind === 'routes' ? Fmt.routesNotes(result, p) : '';
   }
   function renderExport() {
     $$('.subtabs button').forEach(b => b.classList.toggle('on', b.dataset.out === outView));
@@ -600,7 +601,7 @@
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/plain' })); a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
-  const CLI_KINDS = ['forti', 'polcli', 'remote'];
+  const CLI_KINDS = ['forti', 'polcli', 'remote', 'routes'];
   function bindOutputs() {
     $$('[data-copy]').forEach(b => { if (CLI_KINDS.indexOf(b.dataset.copy) < 0) return; const t = document.createElement('button'); t.type = 'button'; t.className = 'btn sm'; t.textContent = 'Type-in script (.ps1)'; t.title = 'For the FortiGate GUI console, which joins pasted lines. Run in PowerShell, then click the console.'; t.addEventListener('click', () => { const raw = text(b.dataset.copy); if (!raw) { toast('Nothing to download yet. Fix the problem at the top first.'); return; } downloadText('subnetpal-type-in.ps1', Fmt.cliTyper(raw)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); }); b.insertAdjacentElement('afterend', t); });
     $('.subtabs').addEventListener('click', e => { const b = e.target.closest('button[data-out]'); if (!b) return; outView = b.dataset.out; renderExport(); });
@@ -625,7 +626,7 @@
   // ---------- accordion + jump bar ----------
   function renderSection(name) {
     if (!result) return;
-    if (name === 'plan') { renderMap(); renderCards(); renderGaps(); }
+    if (name === 'plan') { renderMap(); renderCards(); renderRoutes(); renderGaps(); }
     else if (name === 'diagram') renderTopo();
     else if (name === 'policies') renderPolicies();
     else if (name === 'remote') renderRemote();
@@ -1017,6 +1018,33 @@
     $('#fortinote2').textContent = Fmt.FORTI_NOTE + ' ' + Policy.NOTE;
     $('#pre-remote').textContent = text('remote') || ''; $('#notes-remote').textContent = notes('remote');
   }
+  // ---------- suggested static routes ----------
+  const routeLine = r => `${r.cidr}${r.blackhole ? ' blackhole' : ' via ' + (r.gateway || '(enter gateway)') + ' on ' + r.device} · distance ${r.distance}`;
+  function renderRoutes() {
+    const box = $('#routesbox'); if (!box) return;
+    if (!result || !result.ok) { box.hidden = true; return; }
+    box.hidden = false;
+    const p = project(), rs = Routes.suggest(result, p), c = cur().routes || {}, dual = !!p.intake.dualWan;
+    const gw = (key, label) => `<label class="fld">${label}<input data-rgw="${key}" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 203.0.113.1" value="${esc(c[key] || '')}"></label>`;
+    const gwBox = $('#routegw');
+    if (gwBox.dataset.fp !== String(dual)) { gwBox.dataset.fp = String(dual); gwBox.innerHTML = gw('gw1', 'wan1 ISP gateway') + (dual ? gw('gw2', 'wan2 ISP gateway') : ''); }
+    $('#routelist').innerHTML = rs.map(r => `<label class="check route"><input type="checkbox" data-route="${r.id}"${r.on ? ' checked' : ''}> <span><b>${esc(r.title)}</b> <span class="dim mono">${esc(routeLine(r))}</span><span class="exp routewhy">${esc(r.reason)}</span></span></label>`).join('');
+    $('#pre-routes').textContent = text('routes'); $('#notes-routes').textContent = notes('routes');
+  }
+  function bindRoutes() {
+    $('#routelist').addEventListener('input', e => {
+      const t = e.target; if (!t.dataset.route) return;
+      const c = cur(); c.routes = c.routes || {}; c.routes.sel = c.routes.sel || {}; c.routes.sel[t.dataset.route] = t.checked; touch(); renderRoutes();
+    });
+    // Typing a gateway must not rebuild the inputs (focus would be lost): only the text beside each route and the CLI are refreshed.
+    $('#routegw').addEventListener('input', e => {
+      const t = e.target; if (!t.dataset.rgw) return;
+      const c = cur(); c.routes = c.routes || {}; c.routes[t.dataset.rgw] = t.value.trim(); touch();
+      const rs = Routes.suggest(result, project());
+      $$('#routelist label.route').forEach((l, i) => { if (rs[i]) l.querySelector('.mono').textContent = routeLine(rs[i]); });
+      $('#pre-routes').textContent = text('routes'); $('#notes-routes').textContent = notes('routes');
+    });
+  }
   function bindRemote() {
     $('#reachlist').addEventListener('change', e => {
       const t = e.target; if (!t.dataset.reach) return;
@@ -1118,7 +1146,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps(); bindDone(); bindExp();
+  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindRoutes(); bindCopyIps(); bindDone(); bindExp();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {
