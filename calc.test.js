@@ -826,7 +826,7 @@ test('IPsec remote access CLI: pool, split tunnel, matching policy, placeholders
   const f = F.toRemoteFortiOS(r, p, 'port5'), pool = R.plan(r, p);
   assert.ok(f.includes('config vpn ipsec phase1-interface') && f.includes('config vpn ipsec phase2-interface'));
   assert.ok(f.includes(`set ipv4-start-ip ${pool.first}`) && f.includes(`set ipv4-end-ip ${pool.last}`) && f.includes('set ipv4-split-include "SP_VPN_SPLIT"'));
-  assert.ok(/set member "SP_Staff_LAN" "SP_Servers"/.test(f) && /set srcintf "SP_VPN"[\s\S]*set dstintf "vlan20"/.test(f) && /set dstintf "vlan30"/.test(f));
+  assert.ok(/set member "SP_Staff_LAN" "SP_Servers"/.test(f) && /set srcintf "SP_VPN"[\s\S]*set dstintf "Staff_LAN_V\d+"/.test(f) && /set dstintf "Servers_V\d+"/.test(f));
   assert.ok(f.includes('PSK_CHANGE_ME') && f.includes('set authusrgrp "RemoteStaff"') && f.includes(F.FORTI_NOTE));
   // Bob's guide: IKE version not forced, DH 20/21, narrow services, group in the policy, NAT off, all sessions logged
   assert.ok(!/ike-version/.test(f.replace(/^#.*$/gm, '')) && f.includes('set dhgrp 20 21') && f.includes('set service "SMB" "HTTPS" "RDP"') && !f.includes('set service "ALL"'));
@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v44'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v45'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v44/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v45/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1468,13 +1468,13 @@ test('guide: least-privilege admin access per kind, and the main CLI uses the sa
   ['staff', 'lan'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['https', 'ping', 'ssh'], k)); // guide 1.4: Staff = HTTPS, SSH, PING
   assert.deepStrictEqual(A.adminAccess({ kind: 'printers' }), []); // guide 1.4: Printers/IoT = none
   const p = guideProj(), r = C.plan(p), cli = F.toFortiOS(r, p, 'port2');
-  assert.ok(/edit "vlan10"[\s\S]*?set allowaccess https ping ssh[\s\S]*?next/.test(cli));
-  assert.ok(/edit "vlan30"[\s\S]*?unset allowaccess[\s\S]*?next/.test(cli));
+  assert.ok(/edit "Management_V10"[\s\S]*?set allowaccess https ping ssh[\s\S]*?next/.test(cli));
+  assert.ok(/edit "Guest_V30"[\s\S]*?unset allowaccess[\s\S]*?next/.test(cli));
 });
 test('guide: interface card mirrors the FortiOS form and carries a why for every field', () => {
   const p = guideProj(), r = C.plan(p), i = r.allocations.findIndex(a => a.name === 'Staff'), a = r.allocations[i], g = G.iface(r, p, i);
   assert.deepStrictEqual(g.groups.map(x => x.title), ['Interface', 'Address', 'Administrative Access', 'DHCP Server', 'Network', 'Traffic Shaping', 'Miscellaneous']);
-  assert.strictEqual(gRow(g, 'Name').v, 'vlan20'); assert.strictEqual(gRow(g, 'Alias').v, 'Staff');
+  assert.strictEqual(gRow(g, 'Name').v, 'Staff_V20'); assert.strictEqual(gRow(g, 'Alias').v, 'Staff');
   assert.strictEqual(gRow(g, 'VLAN ID').v, '20'); assert.strictEqual(gRow(g, 'Interface').v, 'port2'); assert.strictEqual(gRow(g, 'Role').v, 'LAN');
   assert.strictEqual(gRow(g, 'IP/Netmask').v, `${a.gateway}/${a.netmask}`);
   assert.strictEqual(gRow(g, 'Address range').v, `${a.dhcpStart} - ${a.dhcpEnd}`);
@@ -1567,7 +1567,7 @@ test('guide: Open CLI popup is wired (dialog, textarea, Copy, Close, backdrop) a
   const p = guideProj(), r = C.plan(p), at = n => G.iface(r, p, r.allocations.findIndex(a => a.name === n));
   r.allocations.forEach((a, i) => { const g = G.iface(r, p, i); assert.ok(g.groups.some(x => x.title === 'DHCP Server'), a.name); assert.strictEqual(gRow(g, 'DHCP status').v, a.dhcpStart ? 'Enabled' : 'Disabled', a.name); });
   const m = at('Management'), s = at('Staff'); assert.strictEqual(gRow(m, 'DHCP status').v, 'Disabled'); assert.strictEqual(gRow(m, 'Address range'), undefined);
-  assert.strictEqual(gRow(s, 'Create address object matching subnet').v, 'On'); assert.strictEqual(gRow(s, 'Name').v, 'vlan20'); // Name appears first for the interface
+  assert.strictEqual(gRow(s, 'Create address object matching subnet').v, 'On'); assert.strictEqual(gRow(s, 'Name').v, 'Staff_V20'); // Name appears first for the interface
   assert.strictEqual(gRow(s, 'Destination').v, by(r, 'Staff').cidr);
   assert.deepStrictEqual(gRow(s, 'IPv4').chips.map(c => c.t), ['HTTPS', 'HTTP', 'PING', 'FMG-Access', 'SSH', 'SNMP', 'FTM', 'RADIUS Accounting', 'Security Fabric Connection', 'Speed Test', 'SCIM']);
   assert.ok(gRow(s, 'IPv4').chips.find(c => c.t === 'HTTP').dis && !gRow(s, 'IPv4').chips.find(c => c.t === 'HTTP').on);
@@ -1708,7 +1708,7 @@ test('ports available: plain networks get real ports, VLANs share the highest fr
   const al = [{ name: 'LAN', vlan: '', role: 'LAN' }, { name: 'DMZ', vlan: '', role: 'DMZ' }, { name: 'Guest', vlan: 30, role: 'Guest' }, { name: 'Lo', vlan: '', role: 'Loopback' }];
   const pr = { portCount: 4, portPrefix: 'port', portMap: {} };
   const pl = F.portPlan(al, 'PORT_CHANGE_ME', pr);
-  assert.deepStrictEqual(pl.names, ['port1', 'port2', 'vlan30', 'lo_Lo']);
+  assert.deepStrictEqual(pl.names, ['port1', 'port2', 'Guest_V30', 'lo_Lo']);
   assert.strictEqual(pl.parent, 'port4'); assert.deepStrictEqual(pl.free, ['port3']); assert.deepStrictEqual(pl.short, []);
   const pl2 = F.portPlan(al, 'PORT_CHANGE_ME', Object.assign({}, pr, { portMap: { LAN: 'port2' } }));   // a picked port wins and is not reused
   assert.deepStrictEqual(pl2.names.slice(0, 2), ['port2', 'port1']);
@@ -1812,3 +1812,10 @@ test('FortiOS policy form: every popup field feeds the CLI (inspection, NAT pool
   process.exit(failed ? 1 : 0);
 })();
 
+test('VLAN interface names: <Network>_V<id>, letters/digits/underscore, max 15, unique', () => {
+  const al = [{ name: 'Management', vlan: 10, role: 'Mgmt' }, { name: 'Staff WiFi & Co!', vlan: 20, role: 'LAN' }, { name: 'Very Long Network Name', vlan: 1234, role: 'LAN' }, { name: 'Guest', vlan: 70, role: 'Guest' }, { name: 'Guest', vlan: 70, role: 'Guest' }, { name: '!!!', vlan: 5, role: 'LAN' }];
+  const n = F.ifaceNames(al, 'port1', {});
+  assert.deepStrictEqual(n.slice(0, 4), ['Management_V10', 'Staff_WiFi_V20', 'Very_Long_V1234', 'Guest_V70']);
+  assert.ok(n.every(x => x.length <= 15 && /^[A-Za-z0-9_]+$/.test(x)), n.join());
+  assert.strictEqual(new Set(n).size, n.length); assert.strictEqual(n[5], 'vlan_V5');
+});

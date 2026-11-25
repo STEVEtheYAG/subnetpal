@@ -86,6 +86,15 @@
   // Port plan. With "ports available" set (project.portCount), every plain network gets a real port from the pool (port1..portN, name = project.portPrefix),
   // either the one picked on its card (project.portMap[name]) or the lowest free one. VLAN networks share one parent port: the explicit Parent port if given,
   // else the highest free port. Networks left without a port are listed in .short. With no count set, nothing changes: the placeholder is used.
+  // VLAN interface name: <Network name>_V<id>, e.g. Management -> Management_V10. Letters/digits/underscore only, max 15 chars (FortiOS limit), unique.
+  function vlanIf(a, used) {
+    const suf = '_V' + a.vlan;
+    let base = String(a.name).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, Math.max(0, 15 - suf.length)).replace(/_+$/, '');
+    if (!base) base = 'vlan';
+    let n = base + suf, k = 1;
+    while (used.has(n)) { k++; const t = String(k); n = base.slice(0, Math.max(1, 15 - suf.length - t.length)) + t + suf; }
+    used.add(n); return n;
+  }
   const PH = 'PORT_CHANGE_ME';
   const phOf = ifName => (ifName && String(ifName).trim()) || PH;
   function portPool(project) {
@@ -96,11 +105,11 @@
   const isPlain = a => a.vlan === '' && a.role !== 'Loopback' && a.role !== 'WAN';
   function portPlan(allocs, ph, project) {
     const pool = portPool(project);
-    const names = [], short = [];
+    const names = [], short = [], usedV = new Set();
     if (!pool.length) {
       let plain = 0;
       const plainCount = allocs.filter(a => a.vlan === '' && a.role !== 'Loopback').length;
-      allocs.forEach(a => names.push(a.role === 'Loopback' ? sanitizeIf('lo_' + a.name) : a.vlan !== '' ? sanitizeIf('vlan' + a.vlan) : plainCount > 1 ? sanitizeIf(ph + (++plain)) : sanitizeIf(ph)));
+      allocs.forEach(a => names.push(a.role === 'Loopback' ? sanitizeIf('lo_' + a.name) : a.vlan !== '' ? vlanIf(a, usedV) : plainCount > 1 ? sanitizeIf(ph + (++plain)) : sanitizeIf(ph)));
       return { pool, names, parent: ph, short, free: [] };
     }
     const map = (project && project.portMap) || {};
@@ -111,7 +120,7 @@
     let wan = 0;
     allocs.forEach(a => {
       if (a.role === 'Loopback') return names.push(sanitizeIf('lo_' + a.name));
-      if (a.vlan !== '') return names.push(sanitizeIf('vlan' + a.vlan));
+      if (a.vlan !== '') return names.push(vlanIf(a, usedV));
       if (a.role === 'WAN') return names.push('wan' + (++wan));
       let p = map[a.name];
       if (!(pool.indexOf(p) >= 0 && p !== explicit)) { p = nextLow(); if (p) taken.add(p); }
