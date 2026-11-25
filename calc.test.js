@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v45'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v48'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v45/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v48/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1641,7 +1641,7 @@ test('Bob review: usability (demo collapses panel, short toast, Manage menu, rew
 });
 test('policy tiles open the shared popup laid out like the FortiGate policy table, with Open CLI', () => {
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  ['Incoming interface', 'Outgoing interface', 'Source', 'Destination', 'Service', 'Action', 'NAT', 'data-pol=', 'data-opencli="pol:', 'openPol('].forEach(x => assert.ok(app.includes(x), x));
+  ['Incoming interface', 'Outgoing interface', 'Source', 'Destination', 'Service', 'Action', 'NAT', 'data-pol=', 'openPol('].forEach(x => assert.ok(app.includes(x), x));
   ['HTTPS', 'DNS', 'SMB', 'RDP', 'SSH', 'HTTP', 'PING'].forEach(x => assert.ok(app.includes("['" + x + "'"), 'legend ' + x));
   assert.ok(!/\(\?<[=!]/.test(app) && css.includes('.ptable') && css.includes('.schip'));
   assert.ok(!/--ok: var\(--ok\)/.test(css), 'dark theme has real ok/warn colours');
@@ -1818,4 +1818,16 @@ test('VLAN interface names: <Network>_V<id>, letters/digits/underscore, max 15, 
   assert.deepStrictEqual(n.slice(0, 4), ['Management_V10', 'Staff_WiFi_V20', 'Very_Long_V1234', 'Guest_V70']);
   assert.ok(n.every(x => x.length <= 15 && /^[A-Za-z0-9_]+$/.test(x)), n.join());
   assert.strictEqual(new Set(n).size, n.length); assert.strictEqual(n[5], 'vlan_V5');
+});
+test('done ticks: "Added to FortiGate" on network tiles, policy planks and both popups; Open CLI at the top', () => {
+  const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
+  assert.ok(app.includes('Added to FortiGate') && app.includes('doneKeyNet') && app.includes('doneKeyPol') && app.includes('c.done[k]'));
+  assert.ok(app.includes("addEventListener('input'") && app.includes("classList.contains('donechk')"), 'checkboxes listen on input');
+  assert.ok(app.includes("t.closest('.donelab')") && app.includes("e.target.closest('.donelab')"), 'tick does not open the popup');
+  assert.ok(app.includes('${doneBox(doneKeyNet(key))}') && app.includes('${doneBox(doneKeyPol(p))}') && app.includes('topBar('));
+  // Open CLI button only in the top bar now (one definition), not in the bottom panels
+  assert.strictEqual((app.match(/>Open CLI<\/button>/g) || []).length, 1);
+  assert.ok(app.indexOf("topBar('__vpn'") > 0 && app.indexOf("topBar(a.name") > 0 && app.indexOf("topBar('pol:' + i") > 0);
+  assert.ok(css.includes('.donelab') && css.includes('.ncard.done') && css.includes('.topbar'));
+  assert.ok(!/\(\?<[=!]/.test(app));
 });
