@@ -22,6 +22,12 @@
   function saveNow() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* private mode / full */ } }
   const cur = () => store.clients[store.current];
   const project = () => Intake.toProject(cur());
+  // "Added to FortiGate" ticks: stored on the client as done{key:true}. Keys are stable names (network name, 'vpn', policy name), not list positions, so they survive reordering.
+  const doneKeyNet = k => k === '__vpn' ? 'vpn' : 'n:' + k;
+  const doneKeyPol = p => 'p:' + Policy.policyName(p);
+  const isDone = k => !!(cur() && cur().done && cur().done[k]);
+  function setDone(k, on) { const c = cur(); if (!c.done) c.done = {}; if (on) c.done[k] = true; else delete c.done[k]; save(); }
+  const doneBox = k => `<label class="donelab" title="Tick when this is added to the FortiGate"><input type="checkbox" class="donechk" data-done="${esc(k)}"${isDone(k) ? ' checked' : ''}><span>Added to FortiGate</span></label>`;
 
   // ---------- state ----------
   let result = null;
@@ -370,6 +376,14 @@
     const v = el.dataset.ip, ok = await copy(v);
     toast(ok ? `Copied ${v}` : 'Copy was blocked. Press and hold the address to copy it.');
   }
+  // Done ticks: save on `input`, then mirror to every box with the same key (tile and popup) without re-rendering.
+  function bindDone() {
+    document.addEventListener('input', e => {
+      const t = e.target; if (!t.classList || !t.classList.contains('donechk')) return;
+      const k = t.dataset.done; setDone(k, t.checked);
+      Array.from(document.querySelectorAll('.donechk')).forEach(b => { if (b.dataset.done === k) { b.checked = t.checked; const c = b.closest('.ncard'); if (c) c.classList.toggle('done', t.checked); } });
+    });
+  }
   function bindCopyIps() {
     document.addEventListener('click', e => { const el = e.target.closest('.ip'); if (!el) return; e.preventDefault(); e.stopPropagation(); copyIp(el); }, true);
     document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('ip')) { e.preventDefault(); copyIp(e.target); } });
@@ -380,6 +394,7 @@
     return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}${apx(r.approx)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw exp">${esc(r.why)}</span>` : ''}</div>`).join('');
   }
   const guideList = (title, items, cls) => `<h4 class="fgh${cls ? ' ' + cls : ''}">${esc(title)}</h4><ul class="fgl${cls ? ' ' + cls : ''}">${items.map(i => { const o = typeof i === 'string' ? { t: i, ok: true } : i; return `<li class="${o.ok ? '' : 'bad'}">${o.ok ? '' : '⚠ '}${esc(o.t)}</li>`; }).join('')}</ul>`;
+  const topBar = (key, dk) => `<div class="topbar"><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button>${doneBox(dk)}</div>`;
   function guidePanel(g, key, title) {
     if (!g) return '';
     const head = x => `<h4 class="fgh">${esc(x.title)}${apx(x.approx)}</h4>`;
@@ -390,7 +405,7 @@
       + (g.checks ? guideList('Checks', g.checks) : '')
       + (g.hints ? guideList('Common mistakes', g.hints, 'exp') : g.mistakes ? guideList('Common mistakes', g.mistakes, 'exp') : '')
       + (g.notes || []).map(n => `<p class="hint exp">${esc(n)}</p>`).join('');
-    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button></div>${body}<p class="hint exp">${esc(g.note)}</p></div>`;
+    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b></div>${body}<p class="hint exp">${esc(g.note)}</p></div>`;
   }
   function guideFor(key) {
     if (!result || !result.ok) return null;
@@ -400,10 +415,11 @@
     return i < 0 ? null : Guide.iface(result, project(), i);
   }
   // Network cards are tiles; clicking one opens a modal with the full detail (built fresh each time).
-  const tile = (key, swatch, name, type, fields, off) => `<div class="ncard${off ? ' off' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
+  const tile = (key, swatch, name, type, fields, off) => `<div class="ncard${off ? ' off' : ''}${isDone(doneKeyNet(key)) ? ' done' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
         <div class="ncsum">
           <span class="nt"><span class="swatch" style="background:${swatch}"></span><b>${esc(name)}</b><span class="ntype">${esc(type)}</span><span class="chev" aria-hidden="true">›</span></span>
           <dl class="nf">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${v}</dd></div>`).join('')}</dl>
+          ${doneBox(doneKeyNet(key))}
         </div>
       </div>`;
   const dlRows = rows => `<dl class="nf extra">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${esc(v)}</dd></div>`).join('')}</dl>`;
@@ -466,12 +482,12 @@
     if (key === '__vpn') {
       const p = Remote.plan(result, project()); if (!p || !p.ok) return;
       $('#cardsw').style.background = '#37c2a0'; $('#cardtitle').textContent = 'Remote staff (VPN)'; $('#cardtype').textContent = 'IPsec pool';
-      $('#cardbody').innerHTML = `<div class="exp">${dlRows(vpnRows(p))}</div>` + guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate');
+      $('#cardbody').innerHTML = topBar('__vpn', 'vpn') + `<div class="exp">${dlRows(vpnRows(p))}</div>` + guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate');
     } else {
       const i = result.allocations.findIndex(a => a.name === key); if (i < 0) return;
       const a = result.allocations[i];
       $('#cardsw').style.background = color(Math.max(0, names.indexOf(a.name))); $('#cardtitle').textContent = a.name; $('#cardtype').textContent = typeOf(a);
-      $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + portBox(a) + dnsBox(a) + `<div class="exp">${dlRows(netRows(a))}</div>` + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
+      $('#cardbody').innerHTML = topBar(a.name, doneKeyNet(a.name)) + dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + portBox(a) + dnsBox(a) + `<div class="exp">${dlRows(netRows(a))}</div>` + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
     }
     cardOpener = opener || null; $('#cardbody').scrollTop = 0; dlg.dataset.kind = 'net'; polOpen = -1;
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
@@ -688,10 +704,10 @@
   function polTile(p, i, nets) {
     const deny = p.action === 'deny';
     const to = p.dst === 'internet' ? 'Internet' : p.dst === 'internal' ? 'All internal networks' : p.dst;
-    return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}" role="button" tabindex="0" aria-haspopup="dialog" aria-label="Policy ${i + 1}: ${esc(Policy.policyName(p))}" data-pol="${i}">
+    return `<div class="ncard ptile${deny ? ' deny' : ''}${polBad(p, nets) ? ' bad' : ''}${isDone(doneKeyPol(p)) ? ' done' : ''}" role="button" tabindex="0" aria-haspopup="dialog" aria-label="Policy ${i + 1}: ${esc(Policy.policyName(p))}" data-pol="${i}">
       <div class="plk"><button type="button" class="phandle" data-phandle aria-label="Drag to reorder policy ${i + 1}" title="Drag to reorder">&#8942;&#8942;</button><span class="swatch" style="background:${deny ? 'var(--bad)' : 'var(--ok)'}"></span><b class="ptitle">${esc(Policy.policyName(p))}</b>
         <span class="pflow">${esc(p.src)} &rarr; ${esc(to)}</span><span class="pchipsm">${polSvcs(p).map(x => `<span class="schip">${esc(x)}</span>`).join('')}</span>
-        <span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span><button type="button" class="pdelx" data-pdel aria-label="Delete policy ${i + 1}" title="Delete">&times;</button></div>
+        <span class="ntype ${deny ? 'pdeny' : 'pallow'}">${deny ? 'DENY' : 'ACCEPT'}</span>${doneBox(doneKeyPol(p))}<button type="button" class="pdelx" data-pdel aria-label="Delete policy ${i + 1}" title="Delete">&times;</button></div>
       <div class="pconf" hidden><b>Delete this policy?</b><span><button type="button" class="btn sm danger" data-pdelgo>Delete</button><button type="button" class="btn sm" data-pdelno>Cancel</button></span></div></div>`;
   }
   // The popup body, laid out like the hand-drawn FortiGate policy table. Every cell edits the draft; nothing is stored until Save.
@@ -714,6 +730,7 @@
     const legend = SVC_LEGEND.map(([k, v]) => [k, v]).concat(used.filter(x => SVC_EXTRA[x]).map(x => [x, SVC_EXTRA[x]]));
     const natNote = deny ? 'Not used on a deny rule.' : p.nat ? 'Swaps the private address for a public one (the public address from your ISP).' : 'Off: private addresses stay as they are, normal between your own networks.';
     return `<div class="popol${deny ? ' deny' : ''}" data-pi="${i}">
+      ${isNew ? '' : topBar('pol:' + i, doneKeyPol(Policy.effective(project(), result.allocations)[i] || p))}
       <div class="polhead"><span class="dim small">${isNew ? 'New policy, added above the Implicit deny when you Save' : `Policy ${i + 1} of ${n}`}${polBad(p, nets) ? ' \u00b7 a network in this policy is not in the plan' : ''}</span>
         ${isNew ? '' : `<span class="polbtns"><button type="button" class="btn sm" data-pact="up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>\u2191</button><button type="button" class="btn sm" data-pact="down" aria-label="Move down"${i === n - 1 ? ' disabled' : ''}>\u2193</button><button type="button" class="btn sm" data-pact="del" aria-label="Delete policy">\u00d7</button></span>`}</div>
       ${polCardHtml(p, libMap)}
@@ -747,7 +764,7 @@
       </div>
       <div class="plegend"><span class="plab">Policy services</span>${legend.map(([k, v]) => `<span class="lg${svcs.indexOf(k) >= 0 ? ' used' : ''}"><span class="schip">${esc(k)}</span> ${esc(v)}</span>`).join('')}</div>
       <div class="polform">${polWebHtml(p)}</div>
-      ${isNew ? '' : `<div class="fg"><div class="fgtop"><b>Set it up on the FortiGate</b><button type="button" class="btn sm" data-opencli="pol:${i}">Open CLI</button></div>
+      ${isNew ? '' : `<div class="fg"><div class="fgtop"><b>Set it up on the FortiGate</b></div>
         <p class="hint">Policy &amp; Objects, then Firewall Policy, then Create new. Open CLI shows the saved version of this policy with its address objects. Policies use edit 0: pasting twice makes duplicates. ${esc(Policy.NOTE)}</p></div>`}
       <div class="pfoot"><span class="dirtymsg" role="status"></span><button type="button" class="btn" data-pcancel>Cancel</button><button type="button" class="btn primary" data-psave>Save</button></div>
     </div>`;
@@ -826,7 +843,7 @@
     const edit = fn => { const list = materialize(); fn(list); touch(); };
     const rerender = () => { renderPolicies(); renderSummaries(); };
     const onPolChange = e => {
-      const t = e.target; if (!polDraft || !t.closest('.popol')) return;
+      const t = e.target; if (t.dataset && t.dataset.done !== undefined) return; if (!polDraft || !t.closest('.popol')) return;
       const p = polDraft, wasAuto = !p.name || p.name === polAutoName(p), kept = p.name;
       if (t.dataset.pf) { if (t.dataset.pf === 'name') return; setPath(p, t.dataset.pf, t.type === 'checkbox' ? t.checked : t.value); if (!wasAuto) p.name = kept; }
       else if (t.dataset.wpreset !== undefined) { if (t.value !== 'custom') Policy.setWebPreset(p, t.value, cur().intake.industry); }
@@ -883,7 +900,7 @@
       if (justDragged) return;
       const t = e.target, tile = t.closest('[data-pol]'); if (!tile) return;
       const i = Number(tile.dataset.pol);
-      if (t.closest('[data-phandle]')) return;
+      if (t.closest('[data-phandle]') || t.closest('.donelab')) return;
       if (t.closest('[data-pdel]')) { tile.querySelector('.pconf').hidden = false; tile.querySelector('[data-pdelno]').focus(); return; }
       if (t.closest('[data-pdelno]')) { tile.querySelector('.pconf').hidden = true; return; }
       if (t.closest('[data-pdelgo]')) { delPol(i); return; }
@@ -1026,7 +1043,7 @@
     $('#fitUsed').addEventListener('change', renderMap);
     const cardsBox = $('#cards');
     $('#folders').addEventListener('click', e => { const f = e.target.closest('.folder'); if (f) { grpSel = f.dataset.grp; renderCards(); const n = $('#folders').querySelector(`[data-grp="${grpSel}"]`); if (n) n.focus(); } });
-    cardsBox.addEventListener('click', e => { const c = e.target.closest('.ncard'); if (c) openCard(c.dataset.name, c); });
+    cardsBox.addEventListener('click', e => { if (e.target.closest('.donelab')) return; const c = e.target.closest('.ncard'); if (c) openCard(c.dataset.name, c); });
     cardsBox.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('ncard')) { e.preventDefault(); openCard(e.target.dataset.name, e.target); } });
     $('#cardclose').addEventListener('click', closeCard);
     $('#carddlg').addEventListener('close', () => { polDraft = null; polNew = false; });
@@ -1094,7 +1111,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps(); bindExp();
+  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps(); bindDone(); bindExp();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {
