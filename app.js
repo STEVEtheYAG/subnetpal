@@ -815,7 +815,7 @@
   function polFoot() { const m = $('#cardbody').querySelector('.dirtymsg'); if (m) m.textContent = polDirty() ? 'Unsaved changes' : ''; }
   // One policy as a standalone snippet: the full generator run with just this policy in the list.
   // idOffset keeps this policy's firewall ID the same as in the full export (its position in the list), so pasting either one overwrites the other.
-  const polOne = (i, fn) => { const p = project(), list = Policy.effective(p, result.allocations); return list[i] ? fn(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName, { idOffset: i }) : ''; };
+  const polOne = (i, fn) => { const p = project(), list = Policy.effective(p, result.allocations); return list[i] ? fn(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName, { idOffset: i, only: true }) : ''; };
   function polCli(i) { return polOne(i, Fmt.toPolicyFortiOS); }
   function polNotes(i) { return polOne(i, Fmt.policyNotes); }
   function renderPolicyCli() { const t = text('polcli'); $('#pre-polcli').textContent = t || 'Fix the problem at the top to enable this output.'; $('#notes-polcli').textContent = notes('polcli'); }

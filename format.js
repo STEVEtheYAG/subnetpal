@@ -398,7 +398,38 @@
     const i = full.indexOf('config firewall address\n');
     const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
       `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies have fixed IDs, so pasting twice overwrites them instead of adding copies.', ''];
-    return head.join('\n') + '\n' + (i >= 0 ? full.slice(i) : full);
+    const body = i >= 0 ? full.slice(i) : full;
+    return head.join('\n') + '\n' + (opts && opts.only ? onlyNeeded(body) : body);
+  }
+
+  // One policy on its own: keep its policy block(s) and only the objects it points to (addresses, groups, services, profiles, url tables), and drop the
+  // final deny and every unused object. Entry IDs and names are untouched, so pasting it on top of the full export overwrites the same entries.
+  function onlyNeeded(text) {
+    const blocks = []; let cur = null, pend = [];
+    text.split('\n').forEach(l => {
+      if (!cur) { if (/^config /.test(l)) cur = { head: l, pre: pend, entries: [] }, pend = []; else if (l.trim()) pend.push(l); return; }
+      if (l === 'end') { blocks.push(cur); cur = null; return; }
+      const m = /^    edit (.+)$/.exec(l);
+      if (m) cur.entries.push({ key: m[1].replace(/^"|"$/g, ''), lines: [l] }); else if (cur.entries.length) cur.entries[cur.entries.length - 1].lines.push(l);
+    });
+    const isPol = b => /^config firewall policy6?$/.test(b.head);
+    const keep = new Set();
+    let need = '';
+    blocks.filter(isPol).forEach(b => b.entries.forEach(e => { if (Number(e.key) % 1000 !== 0) { keep.add(e); need += e.lines.join('\n') + '\n'; } }));
+    for (let again = true; again;) {
+      again = false;
+      blocks.filter(b => !isPol(b)).forEach(b => b.entries.forEach(e => {
+        if (keep.has(e)) return;
+        const hit = need.indexOf('"' + e.key + '"') >= 0 || (/^\d+$/.test(e.key) && need.indexOf('urlfilter-table ' + e.key + '\n') >= 0);
+        if (hit) { keep.add(e); need += e.lines.join('\n') + '\n'; again = true; }
+      }));
+    }
+    const out = [];
+    blocks.forEach(b => {
+      const es = b.entries.filter(e => keep.has(e)); if (!es.length) return;
+      out.push('', ...b.pre, b.head); es.forEach(e => out.push(...e.lines)); out.push('end');
+    });
+    return out.join('\n').replace(/^\n/, '') + '\n';
   }
 
   // Just the static routes (the same lines the main snippet carries).
