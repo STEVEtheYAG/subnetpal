@@ -232,3 +232,5 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 - **Show explanations:** helper text (field "why" notes, policy reasons, hints, common mistakes, guide notes, extra network detail such as broadcast/wildcard/totals) carries `.exp` and is hidden by default. One "Show explanations" button above the tabs and one in the popup header; global, remembered in localStorage `subnetpal.exp`. Warnings (warnboxes, lock-out, out-of-ports, status/error lines) never carry `.exp`.
 - **Condensed network cards:** tile shows name, type, IP / mask and range only; smaller padding, narrower grid. Popup rows tighter. No data dropped: netmask, broadcast, wildcard and totals sit behind the toggle.
 - Assumptions: "each page" = the one button above the tab row (shows on every tab); the data-exp attribute is already used by the growth buttons, so the switch uses data-showexp. sw.js cache is v39.
+
+- Plan tab order (v40): Networks (folders + cards) first, address map and legend below. sw.js cache is v40.
