@@ -224,6 +224,8 @@
   const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
   const okIp = s => { const m = IPV4.exec(String(s || '').trim()); return !!m && m.slice(1).every(x => Number(x) <= 255); };
   const dnsOf = (project, a) => { const d = project && project.dhcpDns && project.dhcpDns[a.name] || {}; return { server: okIp(d.server) ? String(d.server).trim() : '', domain: /^[A-Za-z0-9.-]{1,60}$/.test(String(d.domain || '').trim()) ? String(d.domain).trim() : '' }; };
+  // Fixed firewall policy IDs (pasting twice overwrites, never adds): IPv4 final deny 1000, policies 1001+; IPv6 2000 / 2001+; remote staff 3001+. Order on screen comes from paste order, not the ID.
+  const POL_ID0 = 1000, POL6_ID0 = 2000, VPNPOL_ID0 = 3000;
   const DHCP_ID0 = 101; // first DHCP server ID we use: a factory FortiGate already has ID 1, and re-using it would overwrite that server
   const dhcpLines = (a, name, id, lease, dns) => ['    edit ' + id, ...(dns && dns.server ? ['        set dns-service specify', `        set dns-server1 ${dns.server}`] : ['        set dns-service default']), ...(dns && dns.domain ? [`        set domain ${q(dns.domain)}`] : []), `        set default-gateway ${a.gateway}`, ...(lease ? [`        set lease-time ${lease}`] : []), `        set netmask ${a.netmask}`, `        set interface ${q(name)}`,
     '        config ip-range', '            edit 1', `                set start-ip ${a.dhcpStart}`, `                set end-ip ${a.dhcpEnd}`, '            next', '        end', '    next'];
@@ -234,7 +236,8 @@
     `# !! DUAL WAN: every policy and the VPN below use "${WAN_IF}" only. If wan1 and wan2 are SD-WAN members, policies cannot use a member port: replace "${WAN_IF}" in each dstintf line with your SD-WAN zone (default name "virtual-wan-link"; check: show system sdwan). Create the zone and members first, and keep the VPN on a physical WAN port.`] : [];
 
   // ifName: the single interface-name placeholder the user edits.
-  function toFortiOS(result, project, ifName) {
+  function buildFortiOS(result, project, ifName, opts) {
+    const idOff = (opts && opts.idOffset) || 0;
     const ph = phOf(ifName);
     const allocs = result.allocations;
     const names = ifaceNames(allocs, ph, project), parent = parentPort(allocs, ph, project);
@@ -256,8 +259,8 @@
 
     const dhcp = info.filter(({ a }) => a.dhcpStart);
     if (dhcp.length) {
-      L.push('', `# DHCP server IDs start at ${DHCP_ID0} so they cannot overwrite one that already exists. Check first: show system dhcp server`);
-      L.push('config system dhcp-server');
+      L.push('', `# DHCP server IDs start at ${DHCP_ID0} (fixed per network, so pasting twice overwrites instead of adding) and cannot overwrite a factory server. Check first: show system dhcp server`);
+      L.push('config system dhcp server');
       dhcp.forEach(({ a, name }, i) => L.push(...dhcpLines(a, name, DHCP_ID0 + i, 0, dnsOf(project, a))));
       L.push('end');
     }
@@ -300,10 +303,10 @@
     L.push('', '# ' + Policy.NOTE);
     L.push('# Policies are ordered top to bottom (first match wins); the last one denies everything else.');
     L.push('config firewall policy');
-    pols.forEach(p => {
+    pols.forEach((p, k) => {
       const f = byAlloc.get(p.from);
       const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
-      L.push('    edit 0');
+      L.push('    edit ' + (POL_ID0 + 1 + idOff + k));
       L.push(`        set name ${q(polName('SP_', p))}`);
       if (!p.enabled) L.push('        set status disable');
       L.push(`        set srcintf ${q(f.name)}`);
@@ -337,7 +340,7 @@
       L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`);
       L.push('    next');
     });
-    L.push('    edit 0', '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
+    L.push('    edit ' + POL_ID0, '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
       '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', `        set comments ${q('SubnetPal final deny')}`, '    next', 'end');
     res.skipped.forEach(n => L.push(`# Skipped (network not in the current plan): ${n}`));
     if (result.v6) {
@@ -354,10 +357,10 @@
         L.push('', '# IPv6 policies mirror the IPv4 ones (no NAT, no website or application profiles). ' + Policy.NOTE);
         L.push('config firewall policy6');
         usedNames.clear();
-        pols.forEach(p => {
+        pols.forEach((p, k) => {
           const f = byAlloc.get(p.from);
           const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
-          L.push('    edit 0', `        set name ${q(polName('SP6_', p))}`, `        set srcintf ${q(f.name)}`);
+          L.push('    edit ' + (POL6_ID0 + 1 + idOff + k), `        set name ${q(polName('SP6_', p))}`, `        set srcintf ${q(f.name)}`);
           L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
           L.push(`        set action ${p.action}`, `        set srcaddr ${q(f.obj6)}`);
           L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
@@ -365,7 +368,7 @@
           if (!p.enabled) L.push('        set status disable');
           L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`, '    next');
         });
-        L.push('    edit 0', '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
+        L.push('    edit ' + POL6_ID0, '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
           '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', 'end');
       }
     }
@@ -373,17 +376,28 @@
     return L.join('\n') + '\n';
   }
 
+  // Pasteable text = no '#' lines (not CLI, and the web console chokes on them). The comments become a separate notes text, shown beside the CLI and never pasted.
+  const isNote = l => /^\s*#/.test(l);
+  const cliOnly = t => String(t).split('\n').filter(l => !isNote(l)).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '');
+  const notesOnly = t => String(t).split('\n').filter(isNote).map(l => l.replace(/^\s*#\s?/, '')).join('\n');
+  const dhcpId = (allocs, a) => DHCP_ID0 + Math.max(0, allocs.filter(x => x.dhcpStart).indexOf(a));
+  // Public generators return pasteable CLI only; the *Notes versions return the comments; *Raw keeps both.
+  const toFortiOSRaw = buildFortiOS, toPolicyFortiOSRaw = buildPolicyFortiOS, toRemoteFortiOSRaw = buildRemoteFortiOS;
+  const toFortiOS = (...x) => cliOnly(buildFortiOS(...x)), fortiNotes = (...x) => notesOnly(buildFortiOS(...x));
+  const toPolicyFortiOS = (...x) => cliOnly(buildPolicyFortiOS(...x)), policyNotes = (...x) => notesOnly(buildPolicyFortiOS(...x));
+  const toRemoteFortiOS = (...x) => cliOnly(buildRemoteFortiOS(...x)), remoteNotes = (...x) => notesOnly(buildRemoteFortiOS(...x));
+
   // Just the address objects, profiles and policies from the main snippet (interfaces and DHCP left out).
-  function toPolicyFortiOS(result, project, ifName) {
-    const full = toFortiOS(result, project, ifName);
+  function buildPolicyFortiOS(result, project, ifName, opts) {
+    const full = buildFortiOS(result, project, ifName, opts);
     const i = full.indexOf('config firewall address\n');
     const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
-      `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies use edit 0: pasting them twice creates duplicates.', ''];
+      `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies have fixed IDs, so pasting twice overwrites them instead of adding copies.', ''];
     return head.join('\n') + '\n' + (i >= 0 ? full.slice(i) : full);
   }
 
   // ---------- IPsec remote access (dial-up) ----------
-  function toRemoteFortiOS(result, project, ifName) {
+  function buildRemoteFortiOS(result, project, ifName) {
     const pool = Remote.plan(result, project);
     if (!pool) return '';
     const ph = phOf(ifName);
@@ -415,7 +429,7 @@
       '', '# Phase 2', 'config vpn ipsec phase2-interface', '    edit "SP_VPN"', '        set phase1name "SP_VPN"', '        set proposal aes256-sha256', '    next', 'end');
     if (reach.length) {
       L.push('', '# Policy: only the RemoteStaff group, only the ticked networks, narrow services (trim SMB/HTTPS/RDP to what staff use), NAT off, log all sessions.', 'config firewall policy');
-      reach.forEach(a => L.push('    edit 0', `        set name ${q(('RemoteStaff-to-' + fname(a.name)).slice(0, 35))}`, '        set srcintf "SP_VPN"', `        set dstintf ${q(names[idx(a)])}`,
+      reach.forEach((a, k) => L.push('    edit ' + (VPNPOL_ID0 + 1 + k), `        set name ${q(('RemoteStaff-to-' + fname(a.name)).slice(0, 35))}`, '        set srcintf "SP_VPN"', `        set dstintf ${q(names[idx(a)])}`,
         '        set action accept', '        set srcaddr "SP_VPN_POOL"', '        set groups "RemoteStaff"', `        set dstaddr ${q(objOf(a))}`, '        set schedule "always"', '        set service "SMB" "HTTPS" "RDP"', '        set nat disable', '        set logtraffic all',
         `        set comments ${q('SubnetPal remote access')}`, '    next'));
       L.push('end');
@@ -517,7 +531,7 @@
         'foreach ($l in $lines) {', "  $e = $l -replace '([+^%~(){}\\[\\]])', '{$1}'", "  [System.Windows.Forms.SendKeys]::SendWait($e + '{ENTER}')", '  Start-Sleep -Milliseconds 250', '}', 'Write-Host "Done."']).join('\r\n') + '\r\n';
   };
   return {
-    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
+    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, toFortiOSRaw, toPolicyFortiOSRaw, toRemoteFortiOSRaw, fortiNotes, policyNotes, remoteNotes, cliOnly, notesOnly, dhcpId, POL_ID0, POL6_ID0, VPNPOL_ID0, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));

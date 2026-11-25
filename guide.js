@@ -120,8 +120,8 @@
     if (isWan) lines.splice(lines.findIndex(x => /^\s+set ip /.test(x)), 1, '        set mode dhcp');
     lines.splice(lines.length - 1, 0, ...(dev ? ['        set device-identification enable'] : []), `        set description ${JSON.stringify(comment)}`);
     L.push(...lines, 'end', '', 'config firewall address', `    edit ${JSON.stringify(obj)}`, `        set subnet ${a.network} ${a.netmask}`, `        set comment ${JSON.stringify(a.name + ' (' + a.cidr + ')')}`, '    next', 'end');
-    if (a.dhcpStart) L.push('', '# Check existing DHCP servers first (show system dhcp server): ID 101 is used so it cannot overwrite an existing one.', 'config system dhcp-server', ...Fmt.dhcpLines(a, name, 101, leaseOf(a), Fmt.dnsOf(project, a)), 'end');
-    return { name, alias: a.name, groups, checks: checks(allocs, a, ph), hints: hints(a, kind, allocs), notes: [LOG_NOTE], cli: L.join('\n') + '\n', note: NOTE };
+    if (a.dhcpStart) L.push('', '# Check existing DHCP servers first (show system dhcp server): IDs start at 101 and stay fixed per network, so pasting twice overwrites instead of adding.', 'config system dhcp server', ...Fmt.dhcpLines(a, name, Fmt.dhcpId(allocs, a), leaseOf(a), Fmt.dnsOf(project, a)), 'end');
+    return { name, alias: a.name, groups, checks: checks(allocs, a, ph), hints: hints(a, kind, allocs), notes: [LOG_NOTE], cli: Fmt.cliOnly(L.join('\n')) + '\n', cliNotes: Fmt.notesOnly(L.join('\n')), note: NOTE };
   }
 
   // Tunnel name: at most 13 characters, no spaces (the wizard adds suffixes to it). From the client name, else a default.
@@ -177,7 +177,7 @@
       R('Logs recorded', 'Log & Report > Forward Traffic; System Events (VPN events)', 'Sessions show the policy ID and the user.', { approx: true }),
       R('Weak crypto gone', 'Edit tunnel > Phase 1 proposal', 'No SHA1/DES/MD5, DH 14 or higher.')] };
     const mistakes = ['Licensing: the free FortiClient VPN-only app has limited IPsec support (check the current FortiClient licence and version, a paid FortiClient may be needed).', 'The client range overlaps a LAN: pick an unused block.', 'Split tunnel off by accident: all home traffic goes through the office.', 'The policy service is left as ALL: narrow it to what staff use.', 'The user is not in the group: the user cannot log in.', 'A short pre-shared key: use 12+ random characters.'];
-    return { computed, steps, table, mistakes, cli: Fmt.toRemoteFortiOS(result, project, project && project.ifName), note: NOTE };
+    return { computed, steps, table, mistakes, cli: Fmt.toRemoteFortiOS(result, project, project && project.ifName), cliNotes: Fmt.remoteNotes(result, project, project && project.ifName), note: NOTE };
   }
 
   return { NOTE, iface, vpn, checks, tunnelName };

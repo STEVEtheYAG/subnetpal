@@ -238,9 +238,9 @@ test('CSV, Markdown, text, FortiOS, handover', () => {
   assert.ok(/\| Name \| VLAN/.test(md) && /\| --- \|/.test(md));
   assert.ok(/Network addressing/.test(F.toHandoverMarkdown(r, p)));
   assert.ok(/Gateway:/.test(F.toText(r, p)));
-  const f = F.toFortiOS(r, p, 'port5');
+  const f = F.toFortiOSRaw(r, p, 'port5');
   assert.ok(/config system interface/.test(f));
-  assert.ok(/config system dhcp-server/.test(f));
+  assert.ok(/config system dhcp server/.test(f));
   assert.ok(/set vlanid 10/.test(f) && /set interface "port5"/.test(f));
   assert.ok(/set dns-service default/.test(f) && /set default-gateway 10\.20\.0\./.test(f));
   assert.ok(/set ip 10\.20\.0\.\d+ 255\.255\.255\.254/.test(f)); // /31 transit
@@ -431,8 +431,8 @@ test('access matrix: guest and DMZ isolated, staff reaches servers, mgmt restric
 });
 test('FortiOS: interfaces, DHCP, address objects, starter policies, note, placeholder', () => {
   const { p, r } = sample();
-  const f = F.toFortiOS(r, p, 'port9');
-  ['config system interface', 'config system dhcp-server', 'config firewall address', 'config firewall addrgrp', 'config firewall policy'].forEach(s => assert.ok(f.includes(s), s));
+  const f = F.toFortiOSRaw(r, p, 'port9');
+  ['config system interface', 'config system dhcp server', 'config firewall address', 'config firewall addrgrp', 'config firewall policy'].forEach(s => assert.ok(f.includes(s), s));
   assert.ok(/^# Generated, untested\. Verify against FortiOS 8\.0 docs and the lab VM before applying\. Starter policies are not production rules\./m.test(f));
   assert.strictEqual(f.split('\n')[1].startsWith('# Generated, untested'), true); // note is at the top
   const stop = Math.min(...['# Website filtering', '# Application control', 'config firewall policy\n'].map(s => f.indexOf(s)).filter(i => i > 0));
@@ -445,7 +445,7 @@ test('FortiOS: interfaces, DHCP, address objects, starter policies, note, placeh
   assert.ok(/set name "SP_Staff_LAN_to_Servers"/.test(pol));
   assert.ok(/set name "SP_DMZ_to_internal_block"[\s\S]*?set action deny/.test(pol));
   assert.ok(!/set name "SP_Cameras_to_internet"/.test(pol) && !/SP_Transit_to/.test(pol)); // cameras get no internet allow (an explicit block rule is fine)
-  pol.split('policy\n')[1].split('    edit 0').slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
+  pol.split('policy\n')[1].split(/    edit 10\d\d\n/).slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
 });
 test('handover doc: all required sections in Markdown and HTML', () => {
   const { p, r } = sample();
@@ -540,7 +540,7 @@ test('IPv6 in outputs: CSV, text, FortiOS address6 / policy6, handover doc; v4-o
   const csv = F.toCSV(r).split('\n');
   assert.ok(/IPv6 subnet,IPv6 gateway$/.test(csv[0]) && csv[1].includes('2001:db8:abcd:'));
   assert.ok(F.toText(r, p).includes('IPv6 site prefix: 2001:db8:abcd::/48'));
-  const fo = F.toFortiOS(r, p, 'port5');
+  const fo = F.toFortiOSRaw(r, p, 'port5');
   assert.ok(fo.includes('config ipv6') && fo.includes('set ip6-address 2001:db8:abcd:20::1/64') && fo.includes('ip6-send-adv enable'));
   assert.ok(fo.includes('config firewall address6') && fo.includes('config firewall policy6') && fo.includes('SP6_INTERNAL'));
   assert.ok(fo.includes(F.FORTI_NOTE) && fo.indexOf('config firewall policy6') > fo.indexOf('config firewall policy\n'));
@@ -548,7 +548,7 @@ test('IPv6 in outputs: CSV, text, FortiOS address6 / policy6, handover doc; v4-o
   assert.ok(md.includes('IPv6 subnet') && md.includes('IPv6 site prefix') && !md.includes('undefined'));
   assert.ok(F.toHandoverHTML(r, p).includes('2001:db8:abcd:10::/64'));
   const v4 = sample();
-  assert.ok(!F.toFortiOS(v4.r, v4.p, 'port5').includes('ipv6') && !F.toCSV(v4.r).includes('IPv6') && F.toHandoverDoc(v4.r, v4.p).includes('Not planned'));
+  assert.ok(!F.toFortiOSRaw(v4.r, v4.p, 'port5').includes('ipv6') && !F.toCSV(v4.r).includes('IPv6') && F.toHandoverDoc(v4.r, v4.p).includes('Not planned'));
 });
 test('new clients default to dual stack with a ULA; map shows IPv6', () => {
   const c = I.newClient('x');
@@ -691,7 +691,7 @@ test('defaults reproduce the old starter policies and still export them', () => 
   assert.ok(d.some(x => x.src === 'Guest' && x.dst === 'internet' && x.service === 'DNS,HTTP,HTTPS' && x.nat));
   assert.ok(d.some(x => x.src === 'Guest' && x.dst === 'internal' && x.action === 'deny'));
   assert.ok(!d.some(x => /Transit|Loopback/.test(x.src)));
-  const f = F.toFortiOS(r, p, 'port5');
+  const f = F.toFortiOSRaw(r, p, 'port5');
   assert.ok(/set name "SP_Guest_to_internal_block"/.test(f) && f.includes(Pol.NOTE));
 });
 test('tagline: "Guests can access the internet but nothing else"', () => {
@@ -734,7 +734,7 @@ test('FortiOS: edited policies replace the defaults, ordered, with NAT/log, prof
     mk({ src: 'Staff LAN', dst: 'Servers', service: 'SMB', nat: false }),
     mk({ src: 'Gone', dst: 'internet' }),
   ] };
-  const f = F.toFortiOS(r, I.toProject(c), 'port5');
+  const f = F.toFortiOSRaw(r, I.toProject(c), 'port5');
   const pol = f.slice(f.indexOf('config firewall policy'));
   assert.ok(!/SP_Staff_LAN_to_internet/.test(pol));                     // defaults are gone
   assert.ok(pol.indexOf('SP_Guest_to_internal_block') < pol.indexOf('SP_Guest_to_internet') && pol.indexOf('SP_Guest_to_internet') < pol.indexOf('SP_Final_deny'));
@@ -742,18 +742,18 @@ test('FortiOS: edited policies replace the defaults, ordered, with NAT/log, prof
   assert.ok(/set name "SP_Staff_LAN_to_Servers"[\s\S]*?set service "SMB"/.test(pol) && !/SP_Staff_LAN_to_Servers"[\s\S]{0,300}set nat enable/.test(pol));
   assert.ok(/config webfilter urlfilter[\s\S]*set url "bad.example.com"[\s\S]*set url "evil.test"/.test(f) && /set category 26/.test(f) && /config application list[\s\S]*set category 2 6[\s\S]*set action block/.test(f));
   assert.ok(/# Skipped \(network not in the current plan\): Gone to internet/.test(f));
-  assert.ok(/edit 0\s+set name "SP_Final_deny"[\s\S]*set action deny/.test(f) && f.trim().split('\n').slice(-1)[0].includes('Generated, untested'));
+  assert.ok(/edit 1000\s+set name "SP_Final_deny"[\s\S]*set action deny/.test(f) && f.trim().split('\n').slice(-1)[0].includes('Generated, untested'));
   assert.ok(f.includes(Pol.NOTE) && f.includes(F.FORTI_NOTE));
-  const only = F.toPolicyFortiOS(r, I.toProject(c), 'port5');
+  const only = F.toPolicyFortiOSRaw(r, I.toProject(c), 'port5');
   assert.ok(only.includes('config firewall policy') && !only.includes('config system interface') && only.includes(Pol.NOTE));
   Pol.resolve(c.pol.list, al).pols.forEach(x => assert.ok(x.name.length <= 40));
   c.pol = { edited: false, list: [] };                                  // reset: defaults follow the plan again
-  assert.ok(/SP_Staff_LAN_to_internet/.test(F.toFortiOS(r, I.toProject(c), 'port5')));
+  assert.ok(/SP_Staff_LAN_to_internet/.test(F.toFortiOSRaw(r, I.toProject(c), 'port5')));
 });
 test('FortiOS: allow-list web and app profiles end with a catch-all block', () => {
   const { c, r } = polSample();
   c.pol = { edited: true, list: [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true, web: { mode: 'allow', sites: 'work.example.com', cats: [] }, app: { mode: 'allow', cats: [3] } })] };
-  const f = F.toFortiOS(r, I.toProject(c), 'port5');
+  const f = F.toFortiOSRaw(r, I.toProject(c), 'port5');
   assert.ok(/set url "work.example.com"[\s\S]*set action allow[\s\S]*set url "\*"[\s\S]*set type wildcard[\s\S]*set action block/.test(f));
   assert.ok(/edit 1[\s\S]*set category 3[\s\S]*set action pass[\s\S]*edit 2[\s\S]*set action block/.test(f.slice(f.indexOf('config application list'))));
 });
@@ -808,7 +808,7 @@ test('split tunnel: Staff and Servers by default, tick list overrides, only inte
 test('split tunnel: an empty tick map means nothing is reachable (no policies), not the defaults', () => {
   const { r, p, c } = remoteClient('10'); c.intake.remote.reach = {};
   assert.deepStrictEqual(R.plan(r, I.toProject(c)).reach, []);
-  const f = F.toRemoteFortiOS(r, I.toProject(c), 'port5');
+  const f = F.toRemoteFortiOSRaw(r, I.toProject(c), 'port5');
   assert.ok(!f.includes('SP_VPN_SPLIT') && !f.includes('RemoteStaff-to-') && f.includes('No office networks are ticked'));
 });
 test('home-range clash warning: existing ranges, manual office block, and only when remote staff are ticked', () => {
@@ -823,7 +823,7 @@ test('home-range clash warning: existing ranges, manual office block, and only w
 });
 test('IPsec remote access CLI: pool, split tunnel, matching policy, placeholders and the note', () => {
   const { r, p } = remoteClient('30');
-  const f = F.toRemoteFortiOS(r, p, 'port5'), pool = R.plan(r, p);
+  const f = F.toRemoteFortiOSRaw(r, p, 'port5'), pool = R.plan(r, p);
   assert.ok(f.includes('config vpn ipsec phase1-interface') && f.includes('config vpn ipsec phase2-interface'));
   assert.ok(f.includes(`set ipv4-start-ip ${pool.first}`) && f.includes(`set ipv4-end-ip ${pool.last}`) && f.includes('set ipv4-split-include "SP_VPN_SPLIT"'));
   assert.ok(/set member "SP_Staff_LAN" "SP_Servers"/.test(f) && /set srcintf "SP_VPN"[\s\S]*set dstintf "Staff_LAN_V\d+"/.test(f) && /set dstintf "Servers_V\d+"/.test(f));
@@ -831,7 +831,7 @@ test('IPsec remote access CLI: pool, split tunnel, matching policy, placeholders
   // Bob's guide: IKE version not forced, DH 20/21, narrow services, group in the policy, NAT off, all sessions logged
   assert.ok(!/ike-version/.test(f.replace(/^#.*$/gm, '')) && f.includes('set dhgrp 20 21') && f.includes('set service "SMB" "HTTPS" "RDP"') && !f.includes('set service "ALL"'));
   assert.ok(f.includes('set groups "RemoteStaff"') && f.includes('set nat disable') && f.includes('set logtraffic all') && f.includes('RemoteStaff-to-Servers'));
-  assert.strictEqual(F.toRemoteFortiOS(remoteClient('5', c => { c.intake.remote.on = false; }).r, remoteClient('5', c => { c.intake.remote.on = false; }).p), '');
+  assert.strictEqual(F.toRemoteFortiOSRaw(remoteClient('5', c => { c.intake.remote.on = false; }).r, remoteClient('5', c => { c.intake.remote.on = false; }).p), '');
 });
 test('plan diagram and client report include the VPN pool in plain language', () => {
   const T = require('./topology.js');
@@ -947,14 +947,14 @@ test('cardView: in a frozen list a card is "on" when its policies are present', 
 });
 test('exports work with the card policies: FortiOS (names <= 35, no skipped), policy-only, and the policy parser', () => {
   const { p, r } = fullClient();
-  const f = F.toFortiOS(r, p, 'port5'), pol = f.slice(f.indexOf('config firewall policy\n'));
+  const f = F.toFortiOSRaw(r, p, 'port5'), pol = f.slice(f.indexOf('config firewall policy\n'));
   assert.ok(!/# Skipped/.test(f));
   assert.ok(/set name "SP_POS_to_internal_block"/.test(pol) && /set name "SP_Staff_LAN_to_Printers"/.test(pol) && /set name "SP_Staff_LAN_to_POS_block"/.test(pol));
-  pol.split('policy\n')[1].split('    edit 0').slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
+  pol.split('policy\n')[1].split(/    edit 10\d\d\n/).slice(1).forEach(b => assert.ok(/set name "[^"]{1,35}"/.test(b)));
   assert.ok(/set name "SP_POS_to_internet"[\s\S]*?set service "DNS" "HTTPS" "NTP"[\s\S]*?set nat enable/.test(pol));
   assert.ok(/set name "SP_Voice_to_Management_block"[\s\S]*?set action deny/.test(pol));
   assert.ok(f.includes(F.FORTI_NOTE) && f.trim().split('\n').slice(-1)[0].includes('Generated, untested'));
-  const only = F.toPolicyFortiOS(r, p, 'port5'); assert.ok(only.includes('SP_Final_deny') && !only.includes('config system interface'));
+  const only = F.toPolicyFortiOSRaw(r, p, 'port5'); assert.ok(only.includes('SP_Final_deny') && !only.includes('config system interface'));
   const names = [...pol.matchAll(/set name "(SP_[^"]+)"/g)].map(m => m[1]); assert.strictEqual(new Set(names).size, names.length, 'duplicate policy names');
   const al = r.allocations;
   assert.deepStrictEqual(polFlat(Pol.parse('Printers cannot reach servers', al).policies), ['Printers>Servers:ALL:deny']);
@@ -973,7 +973,7 @@ test('report and diagram cope with the new network kinds', () => {
 test('older saved clients (no toggles, no card ids) still load and export', () => {
   const { c, r } = fullClient(); const old = JSON.parse(JSON.stringify(c)); delete old.pol.toggles; old.pol = { edited: true, list: [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true })] };
   I.migrate(old); assert.deepStrictEqual(old.pol.toggles, {});
-  const f = F.toFortiOS(r, I.toProject(old), 'port5'); assert.ok(/set name "SP_Staff_LAN_to_internet"/.test(f));
+  const f = F.toFortiOSRaw(r, I.toProject(old), 'port5'); assert.ok(/set name "SP_Staff_LAN_to_internet"/.test(f));
   const ok = Pol.resolve(old.pol.list, r.allocations); assert.strictEqual(ok.pols[0].card, '');
 });
 
@@ -1061,7 +1061,7 @@ test('older clients migrate: the new answers get blank defaults and the policies
   const old = I.newClient('old'); ['industry', 'serversWhere', 'wifi', 'voip', 'dualWan', 'siteVpn'].forEach(k => delete old.intake[k]); I.migrate(old);
   assert.deepStrictEqual([old.intake.industry, old.intake.serversWhere, old.intake.wifi, old.intake.voip, old.intake.dualWan, old.intake.siteVpn], ['', '', '', '', false, false]);
   old.intake.counts.staff = 10; I.applyIntake(old); const p = I.toProject(old), r = C.plan(p);
-  assert.ok(F.toFortiOS(r, p, 'port5').includes('SP_Staff_LAN_to_internet'));
+  assert.ok(F.toFortiOSRaw(r, p, 'port5').includes('SP_Staff_LAN_to_internet'));
   assert.ok(F.toHandoverDoc(r, p).indexOf('Site profile') < 0);                                    // nothing stated: no profile line
   old.intake.industry = 'clinic'; old.intake.dualWan = true; assert.ok(/Site profile:\*\* Clinic, dual WAN/.test(F.toHandoverDoc(r, I.toProject(old))));
 });
@@ -1115,13 +1115,13 @@ test('industry presets adjust the defaults: school blocks social media, clinic b
   assert.strictEqual(webOf(office.p, office.r, 'Staff LAN').webf.groups.productivity, 'warn');
   assert.strictEqual(webOf(clinic.p, clinic.r, 'Staff LAN').webf.groups.bandwidth, 'block');
   assert.strictEqual(webOf(clinic.p, clinic.r, 'Guest').webf.groups.bandwidth, 'block');
-  assert.ok(/set category 37\s+set action block/.test(F.toFortiOS(school.r, school.p, 'port5')));                                   // school: social media blocked
-  const fo = F.toFortiOS(office.r, office.p, 'port5');
+  assert.ok(/set category 37\s+set action block/.test(F.toFortiOSRaw(school.r, school.p, 'port5')));                                   // school: social media blocked
+  const fo = F.toFortiOSRaw(office.r, office.p, 'port5');
   assert.ok(/set category 37\s+set action warning/.test(fo));                                                                       // office staff: social media only warns (IoT and servers still block it)
 });
 test('FortiOS: profiles are exported with every category id marked unverified, shared when identical, attached to accept policies only', () => {
   const { r, p } = webClient({});
-  const f = F.toFortiOS(r, p, 'port5');
+  const f = F.toFortiOSRaw(r, p, 'port5');
   assert.ok(/config webfilter profile[\s\S]*edit "SP_Web_1"[\s\S]*config ftgd-wf[\s\S]*config filters[\s\S]*set category 26\s+set action block/.test(f));
   assert.ok(/UNVERIFIED/.test(f) && /26 Malicious Websites/.test(f) && /Botnets: Not a web category/.test(f));
   assert.ok(/set category 37\s+set action warning/.test(f));                                      // office staff: Productivity warns
@@ -1131,19 +1131,19 @@ test('FortiOS: profiles are exported with every category id marked unverified, s
   const names = [...f.matchAll(/edit "(SP_Web_\d+)"/g)].map(m => m[1]); assert.strictEqual(new Set(names).size, names.length);
   assert.ok(/SP_Web_\d+ \(.*Used by: .*Staff LAN to internet/.test(f));
   assert.ok(f.includes(F.FORTI_NOTE) && f.includes(Pol.NOTE));                                    // the required note and the placeholder stay
-  const same = webClient({ industry: 'school' }), g = F.toFortiOS(same.r, same.p, 'port5');          // school: Staff LAN and Guest end up identical, so one profile serves both
+  const same = webClient({ industry: 'school' }), g = F.toFortiOSRaw(same.r, same.p, 'port5');          // school: Staff LAN and Guest end up identical, so one profile serves both
   assert.ok(/Used by: Staff LAN to internet, Guest to internet/.test(g));
 });
 test('FortiOS: a profile that allows everything adds no profile; legacy site lists still work next to a preset', () => {
   const { c, r } = webClient({});
   c.pol = { edited: true, list: [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true, webf: { preset: 'custom', groups: W.normGroups(null) } })], toggles: {} };
-  const f = F.toFortiOS(r, I.toProject(c), 'port5'); assert.ok(!/config webfilter profile/.test(f) && !/webfilter-profile/.test(f));
+  const f = F.toFortiOSRaw(r, I.toProject(c), 'port5'); assert.ok(!/config webfilter profile/.test(f) && !/webfilter-profile/.test(f));
   c.pol.list = [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', nat: true, webf: W.profile('guest', 'office'), web: { mode: 'block', sites: 'bad.example.com', cats: [26] } })];
-  const g = F.toFortiOS(r, I.toProject(c), 'port5');
+  const g = F.toFortiOSRaw(r, I.toProject(c), 'port5');
   assert.ok(/config webfilter urlfilter[\s\S]*set url "bad.example.com"/.test(g) && /set urlfilter-table 101/.test(g));
   assert.strictEqual((g.match(/set category 26\b/g) || []).length, 1);                             // the same id from the list and the preset is not repeated
   c.pol.list = [Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet', action: 'deny', webf: W.profile('staff', 'office') })];
-  assert.ok(!/webfilter-profile|config webfilter profile/.test(F.toFortiOS(r, I.toProject(c), 'port5')));   // deny policies never get a profile
+  assert.ok(!/webfilter-profile|config webfilter profile/.test(F.toFortiOSRaw(r, I.toProject(c), 'port5')));   // deny policies never get a profile
 });
 test('editing a policy profile: preset, one group (becomes custom) and off; the list freezes like any other edit', () => {
   const p = Pol.mkPolicy({ src: 'Staff LAN', dst: 'internet' });
@@ -1168,9 +1168,9 @@ test('client report: a plain-language Web protection section per network, and it
 });
 test('older clients migrate with web filtering off, so their exports do not change; new clients start with it on', () => {
   const old = I.newClient('old'); delete old.intake.webFilter; old.intake.counts.staff = 10; I.migrate(old); assert.strictEqual(old.intake.webFilter, false);
-  I.applyIntake(old); const p = I.toProject(old), r = C.plan(p); assert.ok(!/webfilter-profile|config webfilter/.test(F.toFortiOS(r, p, 'port5')));
+  I.applyIntake(old); const p = I.toProject(old), r = C.plan(p); assert.ok(!/webfilter-profile|config webfilter/.test(F.toFortiOSRaw(r, p, 'port5')));
   assert.strictEqual(I.newClient('new').intake.webFilter, true);
-  old.intake.webFilter = true; assert.ok(/config webfilter profile/.test(F.toFortiOS(r, I.toProject(old), 'port5')));
+  old.intake.webFilter = true; assert.ok(/config webfilter profile/.test(F.toFortiOSRaw(r, I.toProject(old), 'port5')));
   const frozen = webClient({}); frozen.c.pol = { edited: true, list: Pol.effective(frozen.p, frozen.r.allocations).map(x => Object.assign({}, x)), toggles: {} };
   frozen.c.intake.webFilter = false; assert.ok(Pol.effective(I.toProject(frozen.c), frozen.r.allocations).some(x => x.webf));         // a frozen list keeps its profiles
 });
@@ -1227,16 +1227,16 @@ test('the demos differ where the answers differ (same engine, different rules)',
 test('demos run end to end: plan, diagram, policies, web filters, exports, report', () => {
   I.DEMO_KEYS.forEach(k => {
     const d = demo(k), { r, p } = d;
-    const f = F.toFortiOS(r, p, 'port5'); assert.ok(!/# Skipped/.test(f), k); assert.ok(f.includes(F.FORTI_NOTE) && /PLACEHOLDER: "port5"/.test(f));
+    const f = F.toFortiOSRaw(r, p, 'port5'); assert.ok(!/# Skipped/.test(f), k); assert.ok(f.includes(F.FORTI_NOTE) && /PLACEHOLDER: "port5"/.test(f));
     assert.ok(/config webfilter profile/.test(f) && /UNVERIFIED/.test(f) && /set name "SP_Final_deny"/.test(f), k);
     const names = [...f.matchAll(/set name "(SP_[^"]{1,35})"/g)].map(m => m[1]); assert.strictEqual(new Set(names).size, names.length, k + ' duplicate names');
     assert.ok(F.toCSV(r, p).split('\n').length > r.allocations.length && F.toText(r, p).length > 100 && F.toHandoverDoc(r, p).includes('Site profile'), k);
-    assert.ok(F.toPolicyFortiOS(r, p, 'port5').includes('config firewall policy'));
+    assert.ok(F.toPolicyFortiOSRaw(r, p, 'port5').includes('config firewall policy'));
     assert.ok(require('./topology.js').build(r, p, { cols: 2, theme: 'light', standalone: true, vpn: R.plan(r, p) }).startsWith('<svg'), k);
     const h = CR.build(r, p); ['What you asked for', 'Who can reach what', 'The firewall rules, in plain language', 'Web protection', 'Room to grow', 'Internet connection'].forEach(s => assert.ok(h.includes(s), k + ' ' + s));
   });
-  const acc = demo('accountancy'); const rf = F.toRemoteFortiOS(acc.r, acc.p, 'port5'); assert.ok(rf.includes('SP_VPN_POOL') && rf.includes('PSK_CHANGE_ME'));
-  assert.strictEqual(F.toRemoteFortiOS(...(([x]) => [x.r, x.p, 'port5'])([demo('clinic')])), '');
+  const acc = demo('accountancy'); const rf = F.toRemoteFortiOSRaw(acc.r, acc.p, 'port5'); assert.ok(rf.includes('SP_VPN_POOL') && rf.includes('PSK_CHANGE_ME'));
+  assert.strictEqual(F.toRemoteFortiOSRaw(...(([x]) => [x.r, x.p, 'port5'])([demo('clinic')])), '');
 });
 test('client report explains every rule and every filter in plain language, with no jargon', () => {
   I.DEMO_KEYS.forEach(k => {
@@ -1262,7 +1262,7 @@ test('report numbers its sections in order whatever applies (no gaps)', () => {
 test('demo clients survive being saved and loaded (JSON round trip + migrate) and editing', () => {
   I.DEMO_KEYS.forEach(k => {
     const d = demo(k), back = I.migrate(JSON.parse(JSON.stringify(d.c))), p2 = I.toProject(back);
-    assert.strictEqual(F.toFortiOS(C.plan(p2), p2, 'port5'), F.toFortiOS(d.r, d.p, 'port5'), k);
+    assert.strictEqual(F.toFortiOSRaw(C.plan(p2), p2, 'port5'), F.toFortiOSRaw(d.r, d.p, 'port5'), k);
     back.pol = { edited: true, list: Pol.effective(p2, d.r.allocations), toggles: {} }; back.intake.industry = 'school';               // freeze, then change an answer: list unchanged
     assert.strictEqual(Pol.effective(I.toProject(back), d.r.allocations).length, Pol.effective(p2, d.r.allocations).length);
   });
@@ -1361,7 +1361,7 @@ test('contract: applying fills the intake from confirmed fields only, then the p
     ['Brightwell Accountants Ltd', '14 Station Road, Reading, RG1 4BE', 25, true, true, 3, true, 6, true, 5, 'cloud', 'hosted', true, 25, 'office', true, false]);
   assert.ok(/Internet: fibre, 4g 300\/300 Mbps\./.test(c.intake.wanNote));
   const p = I.toProject(c), r = C.plan(p); assert.ok(r.ok); assert.ok(r.allocations.some(a => a.kind === 'printers') && r.allocations.some(a => a.kind === 'guest') && !r.allocations.some(a => a.kind === 'pos'));
-  assert.ok(F.toFortiOS(r, p, 'port5').includes('SP_Staff_LAN_to_Printers') && R.plan(r, p).ok);
+  assert.ok(F.toFortiOSRaw(r, p, 'port5').includes('SP_Staff_LAN_to_Printers') && R.plan(r, p).ok);
   K.apply(c, items); assert.strictEqual(c.intake.wanNote.split('Internet:').length, 2);                      // applying twice does not repeat the note
 });
 test('contract: apply touches only the fields it is given, ignores bad values, and an explicit No beats a count', () => {
@@ -1400,11 +1400,11 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   assert.ok(/const CACHE = 'subnetpal-v45'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
-  const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
+  const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
   assert.ok(f.includes('config firewall service custom') && f.includes('edit "SP_PRINT"') && f.includes('set tcp-portrange 9100 631 515'));
   assert.ok(f.indexOf('config firewall service custom') < f.indexOf('config firewall policy'));
   assert.strictEqual(f.split('edit "SP_PRINT"').length, 2);
-  const none = fullClient(c => { c.intake.req.printers = false; }); assert.ok(!F.toFortiOS(none.r, none.p, 'port5').includes('SP_PRINT'));
+  const none = fullClient(c => { c.intake.req.printers = false; }); assert.ok(!F.toFortiOSRaw(none.r, none.p, 'port5').includes('SP_PRINT'));
 });
 test('report: the access matrix follows the policy list, so optional cards and edits show', () => {
   const { r, p } = fullClient(); const al = r.allocations, ix = n => al.findIndex(a => a.name === n);
@@ -1467,7 +1467,7 @@ test('guide: least-privilege admin access per kind, and the main CLI uses the sa
   ['servers', 'voice', 'dmz'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['ping'], k));
   ['staff', 'lan'].forEach(k => assert.deepStrictEqual(A.adminAccess({ kind: k }), ['https', 'ping', 'ssh'], k)); // guide 1.4: Staff = HTTPS, SSH, PING
   assert.deepStrictEqual(A.adminAccess({ kind: 'printers' }), []); // guide 1.4: Printers/IoT = none
-  const p = guideProj(), r = C.plan(p), cli = F.toFortiOS(r, p, 'port2');
+  const p = guideProj(), r = C.plan(p), cli = F.toFortiOSRaw(r, p, 'port2');
   assert.ok(/edit "Management_V10"[\s\S]*?set allowaccess https ping ssh[\s\S]*?next/.test(cli));
   assert.ok(/edit "Guest_V30"[\s\S]*?unset allowaccess[\s\S]*?next/.test(cli));
 });
@@ -1481,7 +1481,7 @@ test('guide: interface card mirrors the FortiOS form and carries a why for every
   assert.strictEqual(gRow(g, 'Lease time').v, '604800 seconds');
   g.groups.forEach(x => x.rows.forEach(row => { if (row.k !== 'VPN') assert.ok(row.v !== '', row.k); }));
   assert.ok(g.cli.includes('set ip ' + a.gateway) && g.cli.includes('set vlanid 20') && g.cli.includes('set device-identification enable') && g.cli.includes('set lease-time 604800'));
-  assert.ok(g.cli.includes(F.FORTI_NOTE) && g.note.includes(F.FORTI_NOTE) && !/unverified/.test(g.note) && /approximate/.test(g.note));
+  assert.ok(g.cliNotes.includes(F.FORTI_NOTE) && g.note.includes(F.FORTI_NOTE) && !/unverified/.test(g.note) && /approximate/.test(g.note));
 });
 test('guide: management, guest and cameras differ sensibly', () => {
   const p = guideProj(), r = C.plan(p), at = n => G.iface(r, p, r.allocations.findIndex(a => a.name === n));
@@ -1514,7 +1514,7 @@ test('guide: VPN card is Bob\'s 10-step checklist with the plan values, computed
   assert.strictEqual(v.table.rows.length, 6); assert.ok(v.table.rows.find(x => x.k === 'Logs recorded').approx);
   assert.strictEqual(v.mistakes.length, 6);
   ['SP_VPN', 'aes256-sha256', 'RemoteStaff', 'PSK_CHANGE_ME', 'set dhgrp 20 21', 'set ipv4-start-ip ' + pool.first].forEach(t => assert.ok(v.cli.includes(t), t));
-  assert.ok(!/set ike-version/.test(v.cli) && v.cli.includes(F.FORTI_NOTE) && !/unverified/.test(v.note));
+  assert.ok(!/set ike-version/.test(v.cli) && v.cliNotes.includes(F.FORTI_NOTE) && !/unverified/.test(v.note));
 });
 test('guide: tunnel name is at most 13 characters with no spaces', () => {
   assert.strictEqual(G.tunnelName({ name: 'Halden Legal' }), 'Halden-FCT'); assert.strictEqual(G.tunnelName({}), 'SP-FCT');
@@ -1593,42 +1593,42 @@ test('layout: network cards are tiles that open a modal (no dropdown), with Esc/
 });
 const fs = require('fs');
 test('Bob review: DHCP IDs start at 101 with a check note; no id 1 in the main CLI or card CLI', () => {
-  const { r, p } = demo('accountancy'), f = F.toFortiOS(r, p, '');
-  const dh = f.slice(f.indexOf('config system dhcp-server'));
+  const { r, p } = demo('accountancy'), f = F.toFortiOSRaw(r, p, '');
+  const dh = f.slice(f.indexOf('config system dhcp server'));
   assert.ok(/edit 101\b/.test(dh) && !/\n    edit 1\n/.test(dh.slice(0, dh.indexOf('config firewall address'))) && f.includes('show system dhcp server'));
   const g = G.iface(r, p, r.allocations.findIndex(a => a.dhcpStart));
-  assert.ok(/edit 101\b/.test(g.cli) && !/edit 100\b/.test(g.cli) && g.cli.includes('show system dhcp server'));
+  assert.ok(/edit 101\b/.test(g.cli) && !/edit 100\b/.test(g.cli) && g.cliNotes.includes('show system dhcp server'));
 });
 test('Bob review: lock-out warning in every CLI and the parent port flows through; empty keeps PORT_CHANGE_ME', () => {
   const { r, p } = demo('accountancy');
-  [F.toFortiOS(r, p, ''), F.toRemoteFortiOS(r, p, '')].forEach(t => assert.ok(/must NOT be the port you are managing/.test(t)));
-  assert.ok(F.toFortiOS(r, p, '').includes('PORT_CHANGE_ME') && !F.toFortiOS(r, p, 'port5').includes('PORT_CHANGE_ME') && F.toFortiOS(r, p, 'port5').includes('set interface "port5"'));
+  [F.toFortiOSRaw(r, p, ''), F.toRemoteFortiOSRaw(r, p, '')].forEach(t => assert.ok(/must NOT be the port you are managing/.test(t)));
+  assert.ok(F.toFortiOSRaw(r, p, '').includes('PORT_CHANGE_ME') && !F.toFortiOSRaw(r, p, 'port5').includes('PORT_CHANGE_ME') && F.toFortiOSRaw(r, p, 'port5').includes('set interface "port5"'));
   const ix = fs.readFileSync('index.html', 'utf8');
-  assert.ok(ix.includes('Parent port') && ix.includes('Never use the port you are managing') && ix.includes('Pre-flight checklist') && ix.includes('edit 0') && ix.includes('rollback'));
+  assert.ok(ix.includes('Parent port') && ix.includes('Never use the port you are managing') && ix.includes('Pre-flight checklist') && ix.includes('policies 1000+') && ix.includes('rollback'));
 });
 test('Bob review: remote CLI is consistent (IKEv1 + XAuth, no IKEv2 wording) and gives clients DNS', () => {
   const { r, p } = demo('accountancy');
   assert.ok(!/IKEv2 dial-up/.test(fs.readFileSync('index.html', 'utf8')) && !/IKEv2 dial-up/.test(fs.readFileSync('README.md', 'utf8')));
-  let t = F.toRemoteFortiOS(r, p, ''); assert.ok(/CONFIRM ON THE VM/.test(t) && /# set ipv4-dns-server1/.test(t));
+  let t = F.toRemoteFortiOSRaw(r, p, ''); assert.ok(/CONFIRM ON THE VM/.test(t) && /# set ipv4-dns-server1/.test(t));
   const q = JSON.parse(JSON.stringify(p)), srv = r.allocations.find(a => /server/i.test(a.name)) || r.allocations[0];
   q.dhcpDns = {}; r.allocations.forEach(a => { q.dhcpDns[a.name] = { server: '10.9.9.9', domain: 'corp.example.com' }; });
-  t = F.toRemoteFortiOS(r, q, ''); assert.ok(t.includes('set ipv4-dns-server1 10.9.9.9') && t.includes('set domain "corp.example.com"'));
+  t = F.toRemoteFortiOSRaw(r, q, ''); assert.ok(t.includes('set ipv4-dns-server1 10.9.9.9') && t.includes('set domain "corp.example.com"'));
 });
 test('Bob review: per-network DHCP DNS flows into the CLI, validates the address, and defaults to System DNS', () => {
   const { r, p } = demo('accountancy'), a = r.allocations.find(x => x.dhcpStart), q = JSON.parse(JSON.stringify(p));
-  assert.ok(!F.toFortiOS(r, p, '').includes('dns-server1'));
+  assert.ok(!F.toFortiOSRaw(r, p, '').includes('dns-server1'));
   q.dhcpDns = { [a.name]: { server: '10.0.0.10', domain: 'corp.local' } };
-  const f = F.toFortiOS(r, q, ''); assert.ok(f.includes('set dns-service specify') && f.includes('set dns-server1 10.0.0.10') && f.includes('set domain "corp.local"'));
+  const f = F.toFortiOSRaw(r, q, ''); assert.ok(f.includes('set dns-service specify') && f.includes('set dns-server1 10.0.0.10') && f.includes('set domain "corp.local"'));
   q.dhcpDns = { [a.name]: { server: '10.0.0.999', domain: 'bad domain!' } };
-  assert.ok(!F.toFortiOS(r, q, '').includes('dns-server1') && !F.toFortiOS(r, q, '').includes('bad domain'));
+  assert.ok(!F.toFortiOSRaw(r, q, '').includes('dns-server1') && !F.toFortiOSRaw(r, q, '').includes('bad domain'));
   q.dhcpDns = { [a.name]: { server: '10.0.0.10' } };
   const gi = G.iface(r, q, r.allocations.indexOf(a)); assert.ok(gi.cli.includes('dns-server1 10.0.0.10') && gi.groups.some(g => g.rows.some(x => x.k === 'DNS server' && /Specify: 10\.0\.0\.10/.test(x.v))));
   assert.ok(fs.readFileSync('app.js', 'utf8').includes('data-dns="server"'));
 });
 test('Bob review: POS wording matches the policy; dual WAN warns; web category warning is stronger; advice cautions present', () => {
-  const { r, p } = demo('clinic'), f = F.toFortiOS(r, p, '');
+  const { r, p } = demo('clinic'), f = F.toFortiOSRaw(r, p, '');
   assert.ok(!/Only the payment provider is reachable/.test(fs.readFileSync('access.js', 'utf8')) && !/with access to the payment provider only/.test(fs.readFileSync('report.js', 'utf8')));
-  assert.ok(/DUAL WAN/.test(f) && f.includes('virtual-wan-link') && !/DUAL WAN/.test(F.toFortiOS(demo('accountancy').r, demo('accountancy').p, '')));
+  assert.ok(/DUAL WAN/.test(f) && f.includes('virtual-wan-link') && !/DUAL WAN/.test(F.toFortiOSRaw(demo('accountancy').r, demo('accountancy').p, '')));
   assert.ok(/show webfilter profile/.test(f) && /no IPS, antivirus or SSL inspection/.test(f) && /break OS and vendor updates/.test(f));
   const h = n => G.iface(r, p, r.allocations.findIndex(a => new RegExp(n, 'i').test(a.name))).hints.join(' ');
   assert.ok(/Management network only/.test(h('staff')) && /option 66/.test(h('voice|phone')) && /vendor updates/.test(h('server')));
@@ -1723,10 +1723,10 @@ test('ports available: running out is reported and falls back to the placeholder
 });
 test('ports available: CLI and remote CLI use real port names, no placeholder left', () => {
   const c = I.demoClient('clinic'); c.portCount = 8; c.portPrefix = 'port'; c.portMap = {};
-  const p = I.toProject(c), r = C.plan(p), f = F.toFortiOS(r, p, p.ifName);
+  const p = I.toProject(c), r = C.plan(p), f = F.toFortiOSRaw(r, p, p.ifName);
   assert.ok(r.ok && !/set interface "PORT_CHANGE_ME/.test(f) && /set interface "port\d"/.test(f) && !/PORT_CHANGE_ME\d/.test(f), f.slice(0, 900));
-  assert.ok(!/set (srcintf|dstintf) "PORT_CHANGE_ME/.test(F.toPolicyFortiOS(r, p, p.ifName)));
-  assert.ok(/ports/i.test(F.toFortiOS(r, p, p.ifName)));
+  assert.ok(!/set (srcintf|dstintf) "PORT_CHANGE_ME/.test(F.toPolicyFortiOSRaw(r, p, p.ifName)));
+  assert.ok(/ports/i.test(F.toFortiOSRaw(r, p, p.ifName)));
 });
 
 (async () => {
@@ -1800,7 +1800,7 @@ test('FortiOS policy form: every popup field feeds the CLI (inspection, NAT pool
     mk({ src: 'Staff LAN', dst: 'internet', service: 'HTTPS', nat: true, insp: 'proxy', ippool: 'dynamic', snat: 'never', utm: { av: true, web: true, dns: true, app: true, ips: true, file: true }, ssl: 'deep-inspection', logmode: 'utm', logstart: true, capture: true, comments: 'Staff web', enabled: false, sched: 'none' }),
     mk({ src: 'Staff LAN', dst: 'Servers', service: 'SMB', nat: false, utm: { av: true } }),
   ] };
-  const pol = F.toFortiOS(r, I.toProject(c), 'port5'); const a = pol.slice(pol.indexOf('set name "SP_Staff_LAN_to_internet"'), pol.indexOf('set name "SP_Staff_LAN_to_Servers"'));
+  const pol = F.toFortiOSRaw(r, I.toProject(c), 'port5'); const a = pol.slice(pol.indexOf('set name "SP_Staff_LAN_to_internet"'), pol.indexOf('set name "SP_Staff_LAN_to_Servers"'));
   ['set status disable', 'set inspection-mode proxy', 'set schedule "none"', 'set nat enable', 'set ippool enable', 'set fixedport enable', 'set logtraffic utm', 'set logtraffic-start enable',
     'set capture-packet enable', 'set utm-status enable', 'set ssl-ssh-profile "deep-inspection"', 'set av-profile "default"', 'set webfilter-profile "default"', 'set dnsfilter-profile "default"',
     'set application-list "default"', 'set ips-sensor "default"', 'set file-filter-profile "default"', 'set comments "Staff web"'].forEach(x => assert.ok(a.includes(x), x));

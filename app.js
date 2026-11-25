@@ -395,7 +395,7 @@
   function guideFor(key) {
     if (!result || !result.ok) return null;
     if (key === '__vpn') return Guide.vpn(result, project());
-    if (String(key).indexOf('pol:') === 0) { const i = Number(String(key).slice(4)), l = Policy.effective(project(), result.allocations); return l[i] ? { cli: polCli(i), alias: Policy.policyName(l[i]) } : null; }
+    if (String(key).indexOf('pol:') === 0) { const i = Number(String(key).slice(4)), l = Policy.effective(project(), result.allocations); return l[i] ? { cli: polCli(i), cliNotes: polNotes(i), alias: Policy.policyName(l[i]) } : null; }
     const i = result.allocations.findIndex(a => a.name === key);
     return i < 0 ? null : Guide.iface(result, project(), i);
   }
@@ -539,6 +539,12 @@
     }
     return '';
   }
+  // The comments of a generated CLI, shown beside it and never pasted.
+  function notes(kind) {
+    if (!result || !result.ok) return '';
+    const p = project();
+    return kind === 'forti' ? Fmt.fortiNotes(result, p, p.ifName) : kind === 'polcli' ? Fmt.policyNotes(result, p, p.ifName) : kind === 'remote' ? Fmt.remoteNotes(result, p, p.ifName) : '';
+  }
   function renderExport() {
     $$('.subtabs button').forEach(b => b.classList.toggle('on', b.dataset.out === outView));
     ['forti', 'csv', 'text'].forEach(k => { $('#out-' + k).hidden = k !== outView; });
@@ -546,6 +552,7 @@
     $('#fortinote').textContent = Fmt.FORTI_NOTE;
     const none = 'Fix the problem at the top to enable this output.';
     ['forti', 'csv', 'text'].forEach(k => { if (k === outView) $('#pre-' + k).textContent = text(k) || none; });
+    $('#notes-forti').textContent = notes('forti');
   }
   async function copy(t) {
     try { await navigator.clipboard.writeText(t); return true; } catch (e) { /* fall back */ }
@@ -748,7 +755,7 @@
       <div class="plegend"><span class="plab">Policy services</span>${legend.map(([k, v]) => `<span class="lg${svcs.indexOf(k) >= 0 ? ' used' : ''}"><span class="schip">${esc(k)}</span> ${esc(v)}</span>`).join('')}</div>
       <div class="polform">${polWebHtml(p)}</div>
       ${isNew ? '' : `<div class="fg"><div class="fgtop"><b>Set it up on the FortiGate</b><button type="button" class="btn sm" data-opencli="pol:${i}">Open CLI</button></div>
-        <p class="hint">Policy &amp; Objects, then Firewall Policy, then Create new. Open CLI shows the saved version of this policy with its address objects. Policies use edit 0: pasting twice makes duplicates. ${esc(Policy.NOTE)}</p></div>`}
+        <p class="hint">Policy &amp; Objects, then Firewall Policy, then Create new. Open CLI shows the saved version of this policy with its address objects. Policies have fixed IDs: pasting twice overwrites. ${esc(Policy.NOTE)}</p></div>`}
       <div class="pfoot"><span class="dirtymsg" role="status"></span><button type="button" class="btn" data-pcancel>Cancel</button><button type="button" class="btn primary" data-psave>Save</button></div>
     </div>`;
   }
@@ -789,11 +796,11 @@
   }
   function polFoot() { const m = $('#cardbody').querySelector('.dirtymsg'); if (m) m.textContent = polDirty() ? 'Unsaved changes' : ''; }
   // One policy as a standalone snippet: the full generator run with just this policy in the list.
-  function polCli(i) {
-    const p = project(), list = Policy.effective(p, result.allocations); if (!list[i]) return '';
-    return Fmt.toPolicyFortiOS(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName);
-  }
-  function renderPolicyCli() { const t = text('polcli'); $('#pre-polcli').textContent = t || 'Fix the problem at the top to enable this output.'; }
+  // idOffset keeps this policy's firewall ID the same as in the full export (its position in the list), so pasting either one overwrites the other.
+  const polOne = (i, fn) => { const p = project(), list = Policy.effective(p, result.allocations); return list[i] ? fn(result, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), p.ifName, { idOffset: i }) : ''; };
+  function polCli(i) { return polOne(i, Fmt.toPolicyFortiOS); }
+  function polNotes(i) { return polOne(i, Fmt.policyNotes); }
+  function renderPolicyCli() { const t = text('polcli'); $('#pre-polcli').textContent = t || 'Fix the problem at the top to enable this output.'; $('#notes-polcli').textContent = notes('polcli'); }
   function renderPolicies() {
     const c = cur();
     $('#polnote').textContent = Policy.NOTE;
@@ -991,7 +998,7 @@
     $('#reachlist').innerHTML = Remote.reachable(result).map(a => `<label class="check"><input type="checkbox" data-reach="${esc(a.name)}"${sel.has(a.name) ? ' checked' : ''}> ${esc(a.name)} <span class="dim mono">${esc(a.cidr)}</span></label>`).join('') || '<p class="hint">No internal networks.</p>';
     $('#homelist').textContent = Remote.HOME_RANGES.join('  ');
     $('#fortinote2').textContent = Fmt.FORTI_NOTE + ' ' + Policy.NOTE;
-    $('#pre-remote').textContent = text('remote') || '';
+    $('#pre-remote').textContent = text('remote') || ''; $('#notes-remote').textContent = notes('remote');
   }
   function bindRemote() {
     $('#reachlist').addEventListener('change', e => {
@@ -1053,7 +1060,7 @@
       const g = guideFor(b.dataset.opencli); if (!g) return;
       const d = $('#clidlg');
       $('#clititle').textContent = 'FortiOS CLI: ' + (g.alias || 'Remote staff VPN');
-      $('#clitext').value = Fmt.cliForPaste(g.cli); d.returnFocusTo = b;
+      $('#clitext').value = Fmt.cliForPaste(g.cli); $('#clinotes').textContent = g.cliNotes || ''; d.returnFocusTo = b;
       if (d.showModal) d.showModal(); else d.setAttribute('open', '');
       $('#clitext').focus(); $('#clitext').select();
     });
