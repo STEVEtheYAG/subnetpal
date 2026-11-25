@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v38'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v39'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v38/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v39/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1637,7 +1637,7 @@ test('Bob review: POS wording matches the policy; dual WAN warns; web category w
 test('Bob review: usability (demo collapses panel, short toast, Manage menu, reworded banner, IP at top of popup)', () => {
   const app = fs.readFileSync('app.js', 'utf8'), ix = fs.readFileSync('index.html', 'utf8');
   assert.ok(/setSideCollapsed\(true, true\); toast\('Demo loaded'\)/.test(app) && app.includes('1600') && !app.includes('Check this') && ix.includes('Manage client'));
-  assert.ok(app.indexOf("['Port / gateway IP', a.gateway") < app.indexOf('+ dnsBox(a) + dlRows(netRows(a))'));
+  assert.ok(app.indexOf("['Port / gateway IP', a.gateway") < app.indexOf('+ dnsBox(a) + `<div class="exp">'));
 });
 test('policy tiles open the shared popup laid out like the FortiGate policy table, with Open CLI', () => {
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
@@ -1761,6 +1761,28 @@ test('ports available: CLI and remote CLI use real port names, no placeholder le
     assert.ok(!/localStorage|sessionStorage|fetch\(|XMLHttpRequest|document\.(get|create|query|body)/.test(src), 'docread.js stays pure');
     assert.ok(!/\(\?<[=!]/.test(src + app), 'no regex lookbehind');
   });
+test('CLI copy: paste-safe CRLF lines, no leading indent, no tabs or runs of spaces joining lines', () => {
+  const out = F.cliForPaste('config system interface\n    edit "port2"\n        set ip 10.0.0.1 255.255.255.0\n    next\nend\n');
+  assert.strictEqual(out, 'config system interface\r\nedit "port2"\r\nset ip 10.0.0.1 255.255.255.0\r\nnext\r\nend\r\n');
+  assert.ok(!/(^|\n)[ \t]/.test(out) && !/[^\r]\n/.test(out));
+  assert.strictEqual(F.cliForPaste('a\r\nb\rc\n\n\n'), 'a\r\nb\r\nc\r\n');
+  const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');
+  assert.ok(app.includes("CLI_KINDS = ['forti', 'polcli', 'remote']") && app.includes("Fmt.cliForPaste($('#clitext').value)"));
+});
+test('explanations: hidden by default, one remembered switch per page and in the popup, warnings never hidden', () => {
+  const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.ok(/body:not\(\.showexp\) \.exp \{ display: none/.test(css));
+  assert.ok(html.includes('class="expbar"') && (html.match(/data-showexp/g) || []).length === 2);
+  assert.ok(app.includes("'subnetpal.exp'") && app.includes('bindExp()'));
+  assert.ok(app.includes('class="fw exp"') && app.includes('polwhy exp'));
+  assert.ok(!/warnbox"? ?[^>]*\bexp\b/.test(html) && !/class="hint warnbox exp/.test(html), 'warnboxes stay visible');
+  assert.ok(app.includes("' exp'}\">${pl.short.indexOf(a.name) >= 0 ? 'No free port"), 'out-of-ports warning stays visible');
+});
+test('network tiles are condensed: IP / mask and range only; broadcast, wildcard and totals sit behind the toggle', () => {
+  const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');
+  assert.ok(app.includes("[['IP / mask'") && !app.includes("['Netmask', `${ipHtml(a.netmask)}"));
+  assert.ok(app.includes('<div class="exp">${dlRows(netRows(a))}</div>'));
+});
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

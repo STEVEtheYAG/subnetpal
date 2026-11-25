@@ -623,3 +623,17 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 .dnsbox select { width: 100%; max-width: 100%; box-sizing: border-box; }
 .portrow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .portrow input { width: 100%; box-sizing: border-box; }
+
+/* Show explanations: helper text carries .exp and is hidden until the switch is on. Warnings never carry .exp. */
+body:not(.showexp) .exp { display: none !important; }
+.expbar { display: flex; justify-content: flex-end; margin: 0 0 6px; }
+.dlghead [data-showexp] { margin-left: auto; margin-right: 6px; }
+@media print { .expbar { display: none; } }
+/* Condensed network tiles */
+.cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.ncsum { padding: 8px 10px; }
+.nt { margin-bottom: 4px; }
+.nf { gap: 2px; }
+.nf > div { font-size: 13px; }
+.fgr { padding: 3px 0; }
+.fgh { margin-top: 8px; }

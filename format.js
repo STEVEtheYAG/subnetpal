@@ -480,8 +480,10 @@
       `<h2>6. WAN / VPN notes</h2><p>${esc(d.wan).replace(/\r?\n/g, '<br>')}</p></article>`;
   }
 
+  // Paste-safe CLI: CRLF line ends and no leading indent (FortiOS ignores indentation), so a console or PuTTY gets one command per line.
+  const cliForPaste = t => String(t == null ? '' : t).split(/\r\n|\r|\n/).map(l => l.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '')).join('\r\n').replace(/(\r\n)+$/, '') + '\r\n';
   return {
-    FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
+    cliForPaste, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));

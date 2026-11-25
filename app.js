@@ -377,20 +377,20 @@
   // "Set it up on the FortiGate" panel: grouped like the FortiOS form, a plain-English why per field, and a copy button for the CLI.
   const apx = on => on ? ' <span class="apx" title="Not captured from the FortiOS VM; from the FortiOS docs">approximate</span>' : '';
   function guideRows(rows) {
-    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}${apx(r.approx)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw">${esc(r.why)}</span>` : ''}</div>`).join('');
+    return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}${apx(r.approx)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw exp">${esc(r.why)}</span>` : ''}</div>`).join('');
   }
-  const guideList = (title, items) => `<h4 class="fgh">${esc(title)}</h4><ul class="fgl">${items.map(i => { const o = typeof i === 'string' ? { t: i, ok: true } : i; return `<li class="${o.ok ? '' : 'bad'}">${o.ok ? '' : '⚠ '}${esc(o.t)}</li>`; }).join('')}</ul>`;
+  const guideList = (title, items, cls) => `<h4 class="fgh${cls ? ' ' + cls : ''}">${esc(title)}</h4><ul class="fgl${cls ? ' ' + cls : ''}">${items.map(i => { const o = typeof i === 'string' ? { t: i, ok: true } : i; return `<li class="${o.ok ? '' : 'bad'}">${o.ok ? '' : '⚠ '}${esc(o.t)}</li>`; }).join('')}</ul>`;
   function guidePanel(g, key, title) {
     if (!g) return '';
     const head = x => `<h4 class="fgh">${esc(x.title)}${apx(x.approx)}</h4>`;
     const body = (g.computed ? head(g.computed) + guideRows(g.computed.rows) : '')
       + (g.groups ? g.groups.map(x => head(x) + guideRows(x.rows)).join('')
-        : g.steps.map(s => `${head(s)}<p class="fgw"><span class="dim">${esc(s.where)}.</span> ${esc(s.why)}</p>${guideRows(s.rows)}`).join(''))
+        : g.steps.map(s => `${head(s)}<p class="fgw"><span class="dim">${esc(s.where)}.</span><span class="exp"> ${esc(s.why)}</span></p>${guideRows(s.rows)}`).join(''))
       + (g.table ? head(g.table) + guideRows(g.table.rows) : '')
       + (g.checks ? guideList('Checks', g.checks) : '')
-      + (g.hints ? guideList('Common mistakes', g.hints) : g.mistakes ? guideList('Common mistakes', g.mistakes) : '')
-      + (g.notes || []).map(n => `<p class="hint">${esc(n)}</p>`).join('');
-    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button></div>${body}<p class="hint">${esc(g.note)}</p></div>`;
+      + (g.hints ? guideList('Common mistakes', g.hints, 'exp') : g.mistakes ? guideList('Common mistakes', g.mistakes, 'exp') : '')
+      + (g.notes || []).map(n => `<p class="hint exp">${esc(n)}</p>`).join('');
+    return `<div class="fg"><div class="fgtop"><b>${esc(title)}</b><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button></div>${body}<p class="hint exp">${esc(g.note)}</p></div>`;
   }
   function guideFor(key) {
     if (!result || !result.ok) return null;
@@ -417,7 +417,7 @@
   }
   function vpnCard(off) {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
-    return tile('__vpn', '#37c2a0', '👤 Remote staff (VPN)', 'IPsec pool', [['Usable range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`], ['Pool', esc(p.cidr)], ['Netmask', `${ipHtml(p.netmask)} /${esc(String(p.cidr).split('/')[1])}`]], off);
+    return tile('__vpn', '#37c2a0', '👤 Remote staff (VPN)', 'IPsec pool', [['Pool', esc(p.cidr)], ['Range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`]], off);
   }
   // Folders: tap one to show only its cards. 'all' shows everything. Remembered per page load only.
   let grpSel = 'all';
@@ -436,7 +436,7 @@
     const dim = a => grpSel !== 'all' && Groups.groupId(a) !== grpSel;
     box.classList.toggle('sel', grpSel !== 'all');
     box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), `${grpOf(a).emoji} ${a.name}`, typeOf(a),
-      [['Usable range', rangeHtml(a)], ['Port / gateway IP', ipHtml(a.gateway || a.firstUsable || '-')], ['Netmask', `${ipHtml(a.netmask)} /${esc(a.prefix)}`]], dim(a))).join('') + (vpnOk ? vpnCard(grpSel !== 'all' && grpSel !== 'users') : '');
+      [['IP / mask', `${ipHtml(a.gateway || a.firstUsable || '-')} /${esc(a.prefix)}`], ['Range', rangeHtml(a)]], dim(a))).join('') + (vpnOk ? vpnCard(grpSel !== 'all' && grpSel !== 'users') : '');
   }
   // Optional DHCP DNS for one network (default stays System DNS). Stored per client by network name: project().dhcpDns[name] = { server, domain }.
   function dnsBox(a) {
@@ -444,19 +444,19 @@
     const d = (project().dhcpDns || {})[a.name] || {};
     return `<div class="dnsbox"><label class="fld">DHCP DNS server (optional)<input data-dns="server" value="${esc(d.server || '')}" placeholder="Same as System DNS" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
       <label class="fld">DNS domain (optional)<input data-dns="domain" value="${esc(d.domain || '')}" placeholder="corp.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-      <p class="hint">Windows domain? Put the domain controller here. Empty keeps "Same as System DNS".</p></div>`;
+      <p class="hint exp">Windows domain? Put the domain controller here. Empty keeps "Same as System DNS".</p></div>`;
   }
   // Port picker for one network: pick from the ports available; a port used by another network is shown but marked. Stored per client: portMap[network name] = port.
   function portBox(a) {
     const p = project(), pool = Fmt.portPool(p);
     if (!pool.length || a.role === 'Loopback' || a.role === 'WAN') return '';
     const pl = Fmt.portPlan(result.allocations, phOf(), p), mine = pl.names[result.allocations.indexOf(a)];
-    if (a.vlan !== '') return `<div class="dnsbox portbox"><p class="hint">This network is a VLAN. It rides on <b class="mono">${esc(pl.parent)}</b> (the VLAN trunk port; change it with Parent port in the Export tab).</p></div>`;
+    if (a.vlan !== '') return `<div class="dnsbox portbox"><p class="hint exp">This network is a VLAN. It rides on <b class="mono">${esc(pl.parent)}</b> (the VLAN trunk port; change it with Parent port in the Export tab).</p></div>`;
     const use = {}; result.allocations.forEach((x, k) => { if (x !== a) use[pl.names[k]] = x.name; });
     const sel = (p.portMap || {})[a.name];
     return `<div class="dnsbox portbox"><label class="fld">Port<select data-portpick>
       <option value=""${!sel ? ' selected' : ''}>Auto (${esc(mine)})</option>${pool.map(x => `<option value="${esc(x)}"${sel === x ? ' selected' : ''}>${esc(x)}${use[x] ? ' (used by ' + esc(use[x]) + ')' : ''}</option>`).join('')}</select></label>
-      <p class="hint">${pl.short.indexOf(a.name) >= 0 ? 'No free port left for this network. Add ports, or give it a VLAN ID.' : 'Pick the physical port this network is plugged into. The CLI, policies and setup steps use it.'}</p></div>`;
+      <p class="hint${pl.short.indexOf(a.name) >= 0 ? '' : ' exp'}">${pl.short.indexOf(a.name) >= 0 ? 'No free port left for this network. Add ports, or give it a VLAN ID.' : 'Pick the physical port this network is plugged into. The CLI, policies and setup steps use it.'}</p></div>`;
   }
   // The card popup: same detail the card used to drop down, over a darkened page.
   let cardOpener = null;
@@ -466,12 +466,12 @@
     if (key === '__vpn') {
       const p = Remote.plan(result, project()); if (!p || !p.ok) return;
       $('#cardsw').style.background = '#37c2a0'; $('#cardtitle').textContent = 'Remote staff (VPN)'; $('#cardtype').textContent = 'IPsec pool';
-      $('#cardbody').innerHTML = dlRows(vpnRows(p)) + guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate');
+      $('#cardbody').innerHTML = `<div class="exp">${dlRows(vpnRows(p))}</div>` + guidePanel(Guide.vpn(result, project()), '__vpn', 'Set up the remote staff VPN on the FortiGate');
     } else {
       const i = result.allocations.findIndex(a => a.name === key); if (i < 0) return;
       const a = result.allocations[i];
       $('#cardsw').style.background = color(Math.max(0, names.indexOf(a.name))); $('#cardtitle').textContent = a.name; $('#cardtype').textContent = typeOf(a);
-      $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + portBox(a) + dnsBox(a) + dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
+      $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + portBox(a) + dnsBox(a) + `<div class="exp">${dlRows(netRows(a))}</div>` + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
     }
     cardOpener = opener || null; $('#cardbody').scrollTop = 0; dlg.dataset.kind = 'net'; polOpen = -1;
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
@@ -556,10 +556,27 @@
       const ok = document.execCommand('copy'); ta.remove(); return ok;
     } catch (e) { return false; }
   }
+  // Show explanations: one switch for the whole app, remembered on this device. Warnings never carry .exp, so they always show.
+  function paintExp() {
+    const on = document.body.classList.contains('showexp');
+    $$('[data-showexp]').forEach(b => { b.textContent = on ? 'Hide explanations' : 'Show explanations'; b.setAttribute('aria-pressed', on); });
+  }
+  function bindExp() {
+    let v = null; try { v = localStorage.getItem('subnetpal.exp'); } catch (e) { /* private mode */ }
+    document.body.classList.toggle('showexp', v === '1');
+    document.addEventListener('click', e => {
+      const b = e.target.closest('[data-showexp]'); if (!b) return;
+      const on = document.body.classList.toggle('showexp');
+      try { localStorage.setItem('subnetpal.exp', on ? '1' : '0'); } catch (x) { /* just not remembered */ }
+      paintExp();
+    });
+    paintExp();
+  }
+  const CLI_KINDS = ['forti', 'polcli', 'remote'];
   function bindOutputs() {
     $('.subtabs').addEventListener('click', e => { const b = e.target.closest('button[data-out]'); if (!b) return; outView = b.dataset.out; renderExport(); });
     $$('[data-copy]').forEach(b => b.addEventListener('click', async () => {
-      const t = text(b.dataset.copy);
+      const raw = text(b.dataset.copy), t = raw && CLI_KINDS.indexOf(b.dataset.copy) >= 0 ? Fmt.cliForPaste(raw) : raw;
       if (!t) { toast('Nothing to copy yet. Fix the problem at the top first.'); return; }
       const ok = await copy(t);
       toast(ok ? 'Copied to the clipboard.' : 'Copy was blocked. Press and hold the text, choose Select All, then Copy.');
@@ -602,7 +619,7 @@
     const card = p.card && Cards.byId(p.card); if (!card) return '';
     const st = libMap.get(card.id) || { tier: card.tier, because: '' };
     return `<div class="polcard">${badge('tier-' + st.tier, TIER_LABEL[st.tier])}${badge('risk-' + card.risk, RISK_LABEL[card.risk])}
-      <span class="polwhy">${esc(card.why)}${st.because ? ` <i>Because: ${esc(st.because)}.</i>` : ''}</span></div>`;
+      <span class="polwhy exp">${esc(card.why)}${st.because ? ` <i>Because: ${esc(st.because)}.</i>` : ''}</span></div>`;
   }
   // The web filter profile on a policy, in one line (accept policies only).
   const polWebLine = p => (p.webf && p.webf.groups && p.action !== 'deny'
@@ -618,7 +635,7 @@
           ? `<input type="checkbox" data-card="${esc(c.id)}"${e.on ? ' checked' : ''}${t === 'baseline' && !edited ? ' disabled' : ''} aria-label="${esc(c.name)}">`
           : '<span class="badge advice">Advice</span>';
         return `<label class="cardrow${e.on || !isP ? '' : ' off'}">${ctl}<span><b>${esc(c.name)}</b> ${badge('risk-' + c.risk, RISK_LABEL[c.risk])}
-          <span class="polwhy">${esc(c.why)}${e.because ? ` <i>Because: ${esc(e.because)}.</i>` : ''}${isP ? '' : ' ' + esc(c.text)}</span></span></label>`;
+          <span class="polwhy exp">${esc(c.why)}${e.because ? ` <i>Because: ${esc(e.because)}.</i>` : ''}${isP ? '' : ' ' + esc(c.text)}</span></span></label>`;
       }).join('');
     }).join('');
   }
@@ -1002,14 +1019,14 @@
       const g = guideFor(b.dataset.opencli); if (!g) return;
       const d = $('#clidlg');
       $('#clititle').textContent = 'FortiOS CLI: ' + (g.alias || 'Remote staff VPN');
-      $('#clitext').value = g.cli; d.returnFocusTo = b;
+      $('#clitext').value = Fmt.cliForPaste(g.cli); d.returnFocusTo = b;
       if (d.showModal) d.showModal(); else d.setAttribute('open', '');
       $('#clitext').focus(); $('#clitext').select();
     });
     const dlg = $('#clidlg'), closeDlg = () => { if (dlg.close) dlg.close(); else dlg.removeAttribute('open'); if (dlg.returnFocusTo) dlg.returnFocusTo.focus(); };
     $('#cliclose').addEventListener('click', closeDlg);
     dlg.addEventListener('click', e => { if (e.target === dlg) closeDlg(); });   // backdrop click (Esc is native)
-    $('#clicopy').addEventListener('click', async () => toast((await copy($('#clitext').value)) ? 'Copied the FortiOS CLI' : 'Copy was blocked. Select the text and copy it.'));
+    $('#clicopy').addEventListener('click', async () => toast((await copy(Fmt.cliForPaste($('#clitext').value))) ? 'Copied the FortiOS CLI' : 'Copy was blocked. Select the text and copy it.'));
   }
 
   function recalc() {
@@ -1041,7 +1058,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps();
+  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindCopyIps(); bindExp();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {

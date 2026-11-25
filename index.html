@@ -90,7 +90,7 @@
         <div id="others"></div>
         <button type="button" class="btn sm" id="addOther">+ Other (add your own device pool)</button>
       </div>
-      <p class="hint">Always planned: Staff LAN, Management, Transit and loopback.</p>
+      <p class="hint exp">Always planned: Staff LAN, Management, Transit and loopback.</p>
 
       <div class="fld">Remote access
         <div class="reqrow">
@@ -119,7 +119,7 @@
         <label class="check"><input type="checkbox" id="i-dualwan"> Dual WAN (two internet lines)</label>
         <label class="check"><input type="checkbox" id="i-sitevpn"> Site-to-site VPN</label>
         <label class="check"><input type="checkbox" id="i-webfilter"> Web filtering (FortiGuard categories) on internet policies</label>
-        <p class="hint">Printers and card payments are ticked in the list above.</p>
+        <p class="hint exp">Printers and card payments are ticked in the list above.</p>
       </div>
 
       <details id="more" class="more">
@@ -160,6 +160,7 @@
 
     <div class="kpis" id="kpis" aria-label="Plan at a glance"></div>
 
+    <div class="expbar"><button type="button" class="btn sm" data-showexp aria-pressed="false">Show explanations</button></div>
     <div class="rtabs" role="tablist" aria-label="Results">
       <button type="button" role="tab" data-tab="plan" aria-controls="sec-plan">Plan</button>
       <button type="button" role="tab" data-tab="diagram" aria-controls="sec-diagram">Diagram</button>
@@ -207,7 +208,7 @@
         <details class="more2 cardlib" id="cardlibbox"><summary id="cardlibsum">Policy library</summary>
           <p class="hint" id="sugline"></p>
           <ul class="sugnotes" id="sugnotes"></ul>
-          <p class="hint">Cards that fit this plan. Baseline rules are always on. Tick a recommended or optional card to add its rules, untick to remove them.</p>
+          <p class="hint exp">Cards that fit this plan. Baseline rules are always on. Tick a recommended or optional card to add its rules, untick to remove them.</p>
           <div id="cardlist"></div>
         </details>
         <div id="pollist"></div>
@@ -231,7 +232,7 @@
           <h3>Remote staff can reach <span class="dim">(split tunnel: only these networks go through the VPN)</span></h3>
           <div id="reachlist"></div>
           <details class="more2"><summary>Home ranges that are avoided</summary>
-            <p class="hint">Office address blocks are never auto-picked inside these common home-router ranges, so a remote worker's home network does not clash with the office.</p>
+            <p class="hint exp">Office address blocks are never auto-picked inside these common home-router ranges, so a remote worker's home network does not clash with the office.</p>
             <p class="mono small" id="homelist"></p>
           </details>
           <p id="fortinote2" class="hint warnbox"></p>
@@ -248,7 +249,7 @@
         <p class="sectionsum" id="sum-export"></p>
         <div class="reportbox">
           <button class="btn" type="button" id="btnReport">Generate client documentation</button>
-          <p class="hint">Opens a plain-language report for the client. Use Print, then Save as PDF.</p>
+          <p class="hint exp">Opens a plain-language report for the client. Use Print, then Save as PDF.</p>
         </div>
         <div class="subtabs">
           <button type="button" data-out="forti">FortiOS CLI</button>
@@ -294,12 +295,12 @@
 </div>
 
 <dialog id="carddlg" class="dlg" aria-labelledby="cardtitle">
-  <div class="dlghead"><span class="swatch" id="cardsw"></span><b id="cardtitle"></b><span class="ntype" id="cardtype"></span><button type="button" class="btn sm" id="cardclose">Close</button></div>
+  <div class="dlghead"><span class="swatch" id="cardsw"></span><b id="cardtitle"></b><span class="ntype" id="cardtype"></span><button type="button" class="btn sm" data-showexp aria-pressed="false">Show explanations</button><button type="button" class="btn sm" id="cardclose">Close</button></div>
   <div class="dlgbody" id="cardbody"></div>
 </dialog>
 <dialog id="clidlg" class="dlg" aria-labelledby="clititle"><div class="dlgin">
   <div class="clihead"><b id="clititle">FortiOS CLI</b></div>
-  <p class="hint" id="clihelp">Open the FortiGate CLI console, then paste these lines. Lines starting with # are comments.</p>
+  <p class="hint exp" id="clihelp">Open the FortiGate CLI console, then paste these lines. Lines starting with # are comments.</p>
   <textarea id="clitext" class="code mono" readonly spellcheck="false" aria-label="FortiOS CLI lines"></textarea>
   <div class="cliact"><button type="button" class="btn sm" id="clicopy">Copy</button><button type="button" class="btn sm" id="cliclose">Close</button></div>
 </div></dialog>

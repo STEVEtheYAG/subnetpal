@@ -226,3 +226,9 @@ Contrast, masks and prefixes are unchanged; `.results{min-width:0}` and `minmax(
 
 ## Mirrored taper (v36)
 - Planks share one straight right edge; the left edge steps inward going down (100% to 82% width). The number gutter stays fixed on the far left, and the small arrows sit under the right end of each plank. sw.js cache is v36.
+
+## Tidy-up: explanations, condensed cards, CLI copy (v39)
+- **CLI copy fix:** every CLI Copy button (Export forti, policy CLI, remote CLI, card/policy Open CLI popup) now goes through `Fmt.cliForPaste`: CRLF line ends, leading indent and trailing spaces removed (FortiOS ignores indentation), so a console/PuTTY paste is one command per line. The popup textarea shows the same unindented lines. CSV, text and SVG copies are unchanged.
+- **Show explanations:** helper text (field "why" notes, policy reasons, hints, common mistakes, guide notes, extra network detail such as broadcast/wildcard/totals) carries `.exp` and is hidden by default. One "Show explanations" button above the tabs and one in the popup header; global, remembered in localStorage `subnetpal.exp`. Warnings (warnboxes, lock-out, out-of-ports, status/error lines) never carry `.exp`.
+- **Condensed network cards:** tile shows name, type, IP / mask and range only; smaller padding, narrower grid. Popup rows tighter. No data dropped: netmask, broadcast, wildcard and totals sit behind the toggle.
+- Assumptions: "each page" = the one button above the tab row (shows on every tab); the data-exp attribute is already used by the growth buttons, so the switch uses data-showexp. sw.js cache is v39.
