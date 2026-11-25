@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v40'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v41'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v40/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v41/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1782,6 +1782,11 @@ test('network tiles are condensed: IP / mask and range only; broadcast, wildcard
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');
   assert.ok(app.includes("[['IP / mask'") && !app.includes("['Netmask', `${ipHtml(a.netmask)}"));
   assert.ok(app.includes('<div class="exp">${dlRows(netRows(a))}</div>'));
+});
+test('CLI popup: next-line stepper and download for consoles that join pasted lines', () => {
+  const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  ['id="clinext"', 'id="clidl"'].forEach(t => assert.ok(html.includes(t), t));
+  assert.ok(app.includes('stepReset()') && app.includes("l.charAt(0) !== '#'") && app.includes('downloadText('));
 });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
