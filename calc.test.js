@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v51'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v52'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v51/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v52/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1771,7 +1771,7 @@ test('Bob 4: no allow uses ALL; deny policies carry no profiles; every policy is
   assert.ok(/set udp-portrange 443/.test(cli) && /edit "SP_QUIC"/.test(cli));                    // custom UDP services are created before use
   const i = 3, p = bobBuild().p, r = bobBuild().r, list = Pol.effective(p, r.allocations);       // one policy on its own: rebuilt, then moved back into place
   const one = F.toPolicyFortiOS(r, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), '', { idOffset: i, only: true, total: list.length });
-  assert.ok(one.includes(`delete ${1001 + i}\n    edit ${1001 + i}`) && one.includes(`move ${1001 + i} before ${1002 + i}`) && !/edit 1000\b/.test(one));
+  assert.ok(one.includes(`delete ${1001 + i}\n    edit ${1001 + i}`) && one.includes(`move ${1001 + i} after ${1000 + i}`) && !/edit 1000\b/.test(one));
 });
 test('Bob 5: port1 is WAN (DHCP or the ISP address, alias WAN, PING only); no Transit /31 unless added; nothing else lands on port1', () => {
   const { r, cli } = bobBuild();
@@ -1785,6 +1785,46 @@ test('Bob 5: port1 is WAN (DHCP or the ISP address, alias WAN, PING only); no Tr
   const own = bobBuild(c => { c.planEdited = true; c.networks.push({ name: 'Uplink', hosts: 2, vlan: '', role: 'Transit', kind: 'transit' }); });
   assert.ok(own.r.allocations.some(a => a.name === 'Uplink') && !/edit "port1"[^]*?alias "Uplink"/.test(own.cli.split('    next')[1] || ''));   // a Transit you add gets its own port, never port1
   assert.strictEqual(F.wanIf({ wanPort: 'wan', portCount: 8 }), 'wan'); assert.strictEqual(F.wanIf({}), 'wan1');
+});
+
+// A tiny model of the FortiGate policy table: the SEQUENCE is what matches first, not the ID. A new ID is either appended (usual) or slotted in by ID
+// (what Bob's retest looked like: 1000 on top). delete removes, edit keeps an existing entry's place, move after/before reorders, a move naming a missing ID does nothing.
+function fosSeq(cli, start, mode) {
+  const seq = start.slice(); let inPol = false;
+  cli.split(/\r?\n/).forEach(l => {
+    const t = l.trim();
+    if (t === 'config firewall policy') { inPol = true; return; }
+    if (!inPol) return;
+    if (t === 'end') { inPol = false; return; }
+    let m;
+    if ((m = /^delete (\d+)$/.exec(t))) { const i = seq.indexOf(+m[1]); if (i >= 0) seq.splice(i, 1); }
+    else if ((m = /^edit (\d+)$/.exec(t))) { const id = +m[1]; if (seq.indexOf(id) < 0) { if (mode === 'byId') { const at = seq.findIndex(x => x > id); seq.splice(at < 0 ? seq.length : at, 0, id); } else seq.push(id); } }
+    else if ((m = /^move (\d+) (after|before) (\d+)$/.exec(t))) {
+      const a = +m[1], b = +m[3]; if (seq.indexOf(a) < 0 || seq.indexOf(b) < 0) return;
+      seq.splice(seq.indexOf(a), 1); seq.splice(seq.indexOf(b) + (m[2] === 'after' ? 1 : 0), 0, a);
+    }
+  });
+  return seq;
+}
+test("Bob retest: the final deny is always LAST in the sequence (not just ID 1000), on an empty box, a messy box, and either way FortiOS slots new IDs", () => {
+  const { r, p, cli } = bobBuild(), n = Pol.effective(p, r.allocations).length, want = Array.from({ length: n }, (_, k) => 1001 + k).concat(1000);
+  const sp = seq => seq.filter(x => x >= 1000 && x < 2000);
+  ['append', 'byId'].forEach(mode => {
+    assert.deepStrictEqual(fosSeq(cli, [], mode), want, mode + ' empty box');
+    const messy = [1000, 1005, 7, 1001, 1003, 1999, 1002].filter(x => x !== 1999);                  // an old paste: final deny on top, a hand-made policy 7 in between
+    const out = fosSeq(cli, messy, mode); assert.deepStrictEqual(sp(out), want, mode + ' messy box');   // every SubnetPal allow above the final deny (a hand-made policy may sit anywhere)
+    assert.deepStrictEqual(sp(fosSeq(cli, fosSeq(cli, [], mode), mode)), want, mode + ' pasted twice');
+  });
+  const one = (i, box) => fosSeq(F.toPolicyFortiOS(r, Object.assign({}, p, { pol: { edited: true, list: [Pol.effective(p, r.allocations)[i]], toggles: {} } }), '', { idOffset: i, only: true, total: n }), box, 'byId');
+  const full = fosSeq(cli, [], 'append');
+  assert.deepStrictEqual(one(n - 1, full), want);                                                   // the last policy on its own: the final deny is moved after it
+  assert.deepStrictEqual(one(2, full), want); assert.deepStrictEqual(one(0, full), want);           // a middle and the first policy go back in place
+  assert.ok(/move 1000 after \d+\nend/.test(cli));
+});
+test('admin checklist: MFA and a renamed / backup admin account are in the notes and the pre-flight checklist (not scripted)', () => {
+  const { raw, cli } = bobBuild(), ix = require('fs').readFileSync(__dirname + '/index.html', 'utf8');
+  assert.ok(/MFA/.test(raw) && /backup admin/i.test(raw) && /backup admin/i.test(ix) && /MFA/.test(ix));
+  assert.ok(!/edit "admin"[\s\S]*?set (name|password|two-factor)/.test(cli) && (cli.match(/config system admin/g) || []).length === 1);
 });
 
 (async () => {

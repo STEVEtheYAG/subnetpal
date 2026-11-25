@@ -232,6 +232,7 @@
   // Admin hardening: the admin account may only log in from the Management network. MFA needs a FortiToken, so it is a checklist step, not CLI.
   const adminLines = mg => ['', `# ADMIN HARDENING: admin may only log in from ${mg.name} (${mg.cidr}). !! LOCK-OUT RISK: if you are managing from any other address (another VLAN, the VM host network, port1), your next login is refused. Before pasting, connect a PC to ${mg.name} or add your own address as trusthost2. Assumes the account is called "admin" (check: show system admin).`,
     '# MFA: give the admin account a FortiToken (System > Administrators > admin > Two-factor authentication). Not scripted: it needs a token serial number.',
+    '# Backup admin: create a second super_admin with its own strong password, MFA and the same trusted host, test it, then rename or retire the default "admin" (FortiOS cannot rename an account in place: create the new one, then delete "admin"). Not scripted: it needs a password.',
     'config system admin', '    edit "admin"', `        set trusthost1 ${mg.network} ${mg.netmask}`, '    next', 'end'];
   // Optional per-network DNS: dns = { server, domain }. Empty = "Same as System DNS". Only a plain IPv4 address is accepted.
   const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
@@ -247,6 +248,10 @@
   const lockWarn = ph => [`# !! WARNING: "${ph}" must NOT be the port you are managing the firewall through. Changing its address or VLAN mid-paste locks you out. Use a spare port, or have console access ready.`];
   const wanWarn = project => (project && project.intake && project.intake.dualWan) ? [
     `# !! DUAL WAN: every policy and the VPN below use "${wanIf(project)}" only. If ${Routes.wanIfs(project).join(' and ')} are SD-WAN members, policies cannot use a member port: replace "${wanIf(project)}" in each dstintf line with your SD-WAN zone (default name "virtual-wan-link"; check: show system sdwan). Create the zone and members first, and keep the VPN on a physical WAN port.`] : [];
+
+  // Sequence, not ID, decides which policy matches first, and a rebuilt policy may land anywhere (Bob's retest: 1000 ended up on top).
+  // So every paste pins the order: each policy after the one before it, and the final deny after the last one.
+  const orderLines = (ids, finalId) => ids.slice(1).map((id, k) => `    move ${id} after ${ids[k]}`).concat(ids.length ? [`    move ${finalId} after ${ids[ids.length - 1]}`] : []);
 
   // ifName: the single interface-name placeholder the user edits.
   function buildFortiOS(result, project, ifName, opts) {
@@ -322,7 +327,7 @@
     }
     L.push('', '# ' + Policy.NOTE);
     L.push('# Policies are ordered top to bottom (first match wins); the last one denies everything else.');
-    L.push('# Each policy is deleted and rebuilt, so nothing from an earlier paste or GUI edit (NAT, profiles, services) survives. First paste: "entry not found" after each delete is expected. Re-pasting briefly drops sessions on these policies.');
+    L.push('# Each policy is deleted and rebuilt, so nothing from an earlier paste or GUI edit (NAT, profiles, services) survives. First paste: "entry not found" after each delete is expected. Re-pasting briefly drops sessions on these policies. The move lines at the end pin the sequence (FortiOS matches by sequence, not ID), so the final deny is always last. Check after pasting: Policy & Objects > Firewall Policy, Sequence view.');
     L.push('# Internet policies: NAT on, certificate inspection, antivirus, web filter, IPS and DNS filter ("default" profiles unless a web filter preset is chosen; FortiGuard licence needed). Policies between your own networks: NAT off, no profiles.');
     L.push('config firewall policy');
     pols.forEach((p, k) => {
@@ -365,7 +370,7 @@
       L.push('    next');
     });
     L.push('    delete ' + POL_ID0, '    edit ' + POL_ID0, '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
-      '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', `        set comments ${q('SubnetPal final deny')}`, '    next', 'end');
+      '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', `        set comments ${q('SubnetPal final deny')}`, '    next', ...orderLines(pols.map((p, k) => POL_ID0 + 1 + idOff + k), POL_ID0), 'end');
     res.skipped.forEach(n => L.push(`# Skipped (network not in the current plan): ${n}`));
     if (result.v6) {
       info.forEach(x => { x.obj6 = ('SP6_' + x.obj.slice(3)).slice(0, 79); });
@@ -393,7 +398,7 @@
           L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`, '    next');
         });
         L.push('    edit ' + POL6_ID0, '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
-          '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', 'end');
+          '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', ...orderLines(pols.map((p, k) => POL6_ID0 + 1 + idOff + k), POL6_ID0), 'end');
       }
     }
     const mg = allocs.find(a => Access.kindOf(a) === 'mgmt');
@@ -423,15 +428,16 @@
     let body = i >= 0 ? full.slice(i) : full;
     const k = body.indexOf('\n# ADMIN HARDENING');                                 // admin hardening belongs to the main snippet only
     if (k >= 0) body = body.slice(0, k) + '\n' + body.slice(body.indexOf('\nend\n', k) + 5);
-    // One policy alone: rebuilt policies land at the bottom, so move it back above the next one in the full list (or the final deny when it is the last).
-    const off = (opts && opts.idOffset) || 0, nextId = opts && opts.total > off + 1 ? POL_ID0 + 2 + off : POL_ID0;
-    if (opts && opts.only) head.splice(head.length - 1, 0, `# This policy is deleted and rebuilt, then moved back above policy ${nextId}. If ${nextId} is not on the firewall yet, paste the full policies instead.`);
-    return head.join('\n') + '\n' + (opts && opts.only ? onlyNeeded(body, nextId) : body);
+    // One policy alone: it is rebuilt, then moved back after the policy before it (before the next one when it is first); when it is the last, the final deny is moved after it.
+    const off = (opts && opts.idOffset) || 0, id = POL_ID0 + 1 + off, total = (opts && opts.total) || off + 1;
+    const moves = (off > 0 ? [`    move ${id} after ${id - 1}`] : total > 1 ? [`    move ${id} before ${id + 1}`] : []).concat(off + 1 >= total ? [`    move ${POL_ID0} after ${id}`] : []);
+    if (opts && opts.only) head.splice(head.length - 1, 0, `# This policy is deleted and rebuilt, then moved back into place (${moves.map(m => m.trim()).join('; ')}). If a policy it moves next to is not on the firewall yet, paste the full policies instead.`);
+    return head.join('\n') + '\n' + (opts && opts.only ? onlyNeeded(body, moves) : body);
   }
 
   // One policy on its own: keep its policy block(s) and only the objects it points to (addresses, groups, services, profiles, url tables), and drop the
   // final deny and every unused object. Entry IDs and names are untouched, so pasting it on top of the full export overwrites the same entries.
-  function onlyNeeded(text, nextId) {
+  function onlyNeeded(text, moves) {
     const blocks = []; let cur = null, pend = [];
     text.split('\n').forEach(l => {
       if (!cur) { if (/^config /.test(l)) cur = { head: l, pre: pend, entries: [] }, pend = []; else if (l.trim()) pend.push(l); return; }
@@ -443,11 +449,10 @@
     const isPol = b => /^config firewall policy6?$/.test(b.head);
     const keep = new Set();
     let need = '';
-    // A rebuilt policy lands at the bottom of the list, so it is moved back above the next one (the last one above the final deny).
+    // A rebuilt policy may land anywhere in the sequence, so the caller's move lines put it back in place.
     blocks.filter(isPol).forEach(b => b.entries.forEach((e, i) => {
       if (Number(e.key) % 1000 === 0) return;
-      const nx = nextId || (b.entries[i + 1] && b.entries[i + 1].key);
-      if (nx && e.lines[0].indexOf('    delete ') === 0) e.lines = e.lines.concat('    move ' + e.key + ' before ' + nx);
+      if (moves && e.lines[0].indexOf('    delete ') === 0 && /^config firewall policy$/.test(b.head)) e.lines = e.lines.concat(moves);
       keep.add(e); need += e.lines.join('\n') + '\n';
     }));
     for (let again = true; again;) {

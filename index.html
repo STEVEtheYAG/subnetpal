@@ -288,6 +288,7 @@
               <li>WAN is port1 when ports available is set (wan1 otherwise): DHCP unless you enter the ISP address under Suggested static routes. Do not manage the firewall through it.</li>
               <li>Admin lock-out check: the paste limits admin login to the Management network (trusted hosts) and turns HTTPS/SSH off on Staff. Be on Management, or add your PC as trusthost2, before pasting.</li>
               <li>Turn on MFA for the admin account: System > Administrators > admin > Two-factor authentication (FortiToken).</li>
+              <li>Create a backup admin (second super_admin, own password, MFA, same trusted host), test it, then retire or replace the default "admin" name.</li>
               <li>Dual WAN: use the SD-WAN zone in policies, not the single WAN port.</li>
               <li>Have a rollback plan: console or out-of-band access, and a way to restore the backup.</li>
             </ol>
