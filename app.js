@@ -572,15 +572,14 @@
     });
     paintExp();
   }
-  // For consoles that join pasted lines: copy one command at a time, and download the CLI as a file.
-  let stepLines = [], stepAt = 0;
-  const stepReset = () => { stepLines = Fmt.cliForPaste($('#clitext').value).split('\r\n').filter(l => l && l.charAt(0) !== '#'); stepAt = 0; $('#clinext').textContent = 'Copy next line (1/' + stepLines.length + ')'; };
+  // For consoles that join pasted lines (the FortiGate GUI CLI console): download the CLI as a file, or as a PowerShell script that types it for you.
   function downloadText(name, t) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/plain' })); a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
   const CLI_KINDS = ['forti', 'polcli', 'remote'];
   function bindOutputs() {
+    $$('[data-copy]').forEach(b => { if (CLI_KINDS.indexOf(b.dataset.copy) < 0) return; const t = document.createElement('button'); t.type = 'button'; t.className = 'btn sm'; t.textContent = 'Type-in script (.ps1)'; t.title = 'For the FortiGate GUI console, which joins pasted lines. Run in PowerShell, then click the console.'; t.addEventListener('click', () => { const raw = text(b.dataset.copy); if (!raw) { toast('Nothing to download yet. Fix the problem at the top first.'); return; } downloadText('subnetpal-type-in.ps1', Fmt.cliTyper(raw)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); }); b.insertAdjacentElement('afterend', t); });
     $('.subtabs').addEventListener('click', e => { const b = e.target.closest('button[data-out]'); if (!b) return; outView = b.dataset.out; renderExport(); });
     $$('[data-copy]').forEach(b => b.addEventListener('click', async () => {
       const raw = text(b.dataset.copy), t = raw && CLI_KINDS.indexOf(b.dataset.copy) >= 0 ? Fmt.cliForPaste(raw) : raw;
@@ -1028,16 +1027,12 @@
       $('#clititle').textContent = 'FortiOS CLI: ' + (g.alias || 'Remote staff VPN');
       $('#clitext').value = Fmt.cliForPaste(g.cli); d.returnFocusTo = b;
       if (d.showModal) d.showModal(); else d.setAttribute('open', '');
-      stepReset(); $('#clitext').focus(); $('#clitext').select();
+      $('#clitext').focus(); $('#clitext').select();
     });
     const dlg = $('#clidlg'), closeDlg = () => { if (dlg.close) dlg.close(); else dlg.removeAttribute('open'); if (dlg.returnFocusTo) dlg.returnFocusTo.focus(); };
     $('#cliclose').addEventListener('click', closeDlg);
     dlg.addEventListener('click', e => { if (e.target === dlg) closeDlg(); });   // backdrop click (Esc is native)
-    $('#clinext').addEventListener('click', async () => {
-      if (!stepLines.length) return;
-      const ok = await copy(stepLines[stepAt]); toast(ok ? `Copied line ${stepAt + 1} of ${stepLines.length}: paste it, press Enter` : 'Copy was blocked.');
-      if (ok) { stepAt = (stepAt + 1) % stepLines.length; $('#clinext').textContent = `Copy next line (${stepAt + 1}/${stepLines.length})`; }
-    });
+    $('#clips').addEventListener('click', () => { downloadText('subnetpal-type-in.ps1', Fmt.cliTyper($('#clitext').value)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); });
     $('#clidl').addEventListener('click', () => downloadText('subnetpal-' + ($('#clititle').textContent.replace(/^FortiOS CLI: /, '').replace(/[^A-Za-z0-9]+/g, '-') || 'cli') + '.txt', Fmt.cliForPaste($('#clitext').value)));
     $('#clicopy').addEventListener('click', async () => toast((await copy(Fmt.cliForPaste($('#clitext').value))) ? 'Copied the FortiOS CLI' : 'Copy was blocked. Select the text and copy it.'));
   }

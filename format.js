@@ -482,8 +482,18 @@
 
   // Paste-safe CLI: CRLF line ends and no leading indent (FortiOS ignores indentation), so a console or PuTTY gets one command per line.
   const cliForPaste = t => String(t == null ? '' : t).split(/\r\n|\r|\n/).map(l => l.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '')).join('\r\n').replace(/(\r\n)+$/, '') + '\r\n';
+  // PowerShell that types the CLI into whatever window has focus (SendKeys), one line at a time. For consoles that turn a paste into one long line.
+  const cliTyper = t => {
+    const lines = cliForPaste(t).split('\r\n').filter(l => l && l.charAt(0) !== '#');
+    return ['# SubnetPal: types the FortiOS CLI into the window you click. Run in PowerShell, then click the FortiGate CLI console within 8 seconds.',
+      '# Do not touch the keyboard until it finishes. Closing PowerShell stops it.',
+      'Add-Type -AssemblyName System.Windows.Forms', '$lines = @(']
+      .concat(lines.map(l => "'" + l.replace(/'/g, "''") + "'"))
+      .concat([')', 'Write-Host "Click the FortiGate CLI console now. Typing starts in 8 seconds..."', 'Start-Sleep -Seconds 8',
+        'foreach ($l in $lines) {', "  $e = $l -replace '([+^%~(){}\\[\\]])', '{$1}'", "  [System.Windows.Forms.SendKeys]::SendWait($e + '{ENTER}')", '  Start-Sleep -Milliseconds 250', '}', 'Write-Host "Done."']).join('\r\n') + '\r\n';
+  };
   return {
-    cliForPaste, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
+    cliForPaste, cliTyper, FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));
