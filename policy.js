@@ -187,6 +187,10 @@
       pols.push({
         id: p.id, card: p.card || '', name: policyName(p), action: p.action === 'deny' ? 'deny' : 'accept', from, to,
         services: String(p.service || 'ALL').split(',').map(s => s.trim()).filter(Boolean), nat: !!p.nat, log: p.log !== false,
+        sched: p.sched || 'always', insp: p.insp === 'proxy' ? 'proxy' : 'flow', ippool: p.ippool === 'dynamic' ? 'dynamic' : 'outgoing',
+        snat: ['always', 'never'].indexOf(p.snat) >= 0 ? p.snat : 'conflict', logmode: p.logmode === 'utm' ? 'utm' : 'all', logstart: !!p.logstart, capture: !!p.capture,
+        comments: String(p.comments || '').slice(0, 1023), enabled: p.enabled !== false, ssl: p.ssl || '',
+        utm: p.action === 'deny' ? {} : Object.assign({}, p.utm || {}),
         web: p.web && p.web.mode ? p.web : null, app: p.app && p.app.mode ? p.app : null,
         webf: p.action !== 'deny' && p.webf && p.webf.groups ? { preset: p.webf.preset || 'custom', groups: Webcat.normGroups(p.webf.groups) } : null,
       });

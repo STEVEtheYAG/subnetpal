@@ -697,6 +697,10 @@
   // The popup body, laid out like the hand-drawn FortiGate policy table. Every cell edits the draft; nothing is stored until Save.
   const SVC_CHIPS = ['ALL', 'HTTPS', 'HTTP', 'DNS', 'SSH', 'RDP', 'SMB', 'SMTP', 'PING', 'FTP', 'NTP', 'SP_PRINT'];
   const polAutoName = p => Policy.policyName(Object.assign({}, p, { name: '' }));
+  const UTM = [['av', 'AntiVirus'], ['web', 'Web filter'], ['dns', 'DNS filter'], ['app', 'Application control'], ['ips', 'IPS'], ['file', 'File filter']];
+  const sslOf = p => p.ssl || (p.webf || (p.web && p.web.mode) || (p.app && p.app.mode) ? 'certificate-inspection' : 'no-inspection');
+  const tog = (f, on) => `<label class="tgl"><input type="checkbox" data-pf="${f}"${on ? ' checked' : ''} aria-label="${f}"><span></span></label>`;
+  const seg = (f, opts, val) => `<span class="pseg" role="group">${opts.map(([v, l]) => `<button type="button" class="${v === val ? 'on' : ''}" data-pseg="${f}" data-v="${v}" aria-pressed="${v === val}">${l}</button>`).join('')}</span>`;
   function polPopHtml(p, i, n, nets, libMap, isNew) {
     const ph = phOf();
     const f = polEnd(p.src, ph), t = polEnd(p.dst, ph), deny = p.action === 'deny', svcs = polSvcs(p);
@@ -713,17 +717,33 @@
       <div class="polhead"><span class="dim small">${isNew ? 'New policy, added above the Implicit deny when you Save' : `Policy ${i + 1} of ${n}`}${polBad(p, nets) ? ' \u00b7 a network in this policy is not in the plan' : ''}</span>
         ${isNew ? '' : `<span class="polbtns"><button type="button" class="btn sm" data-pact="up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>\u2191</button><button type="button" class="btn sm" data-pact="down" aria-label="Move down"${i === n - 1 ? ' disabled' : ''}>\u2193</button><button type="button" class="btn sm" data-pact="del" aria-label="Delete policy">\u00d7</button></span>`}</div>
       ${polCardHtml(p, libMap)}
-      <div class="ptable">
-        <div class="pcell pname"><label class="plab" for="pf-name">Name</label><input id="pf-name" data-pf="name" value="${esc(p.name || '')}" placeholder="${esc(polAutoName(p))}" autocomplete="off" spellcheck="false"><span class="phint">label the rule; empty uses the automatic name</span></div>
-        <div class="pcell"><span class="plab">Incoming interface</span><select data-pf="src" aria-label="Incoming interface">${srcOpts(true)}</select><span class="phint">where the traffic comes in</span></div>
-        <div class="pcell"><span class="plab">Outgoing interface</span><select data-pf="dst" aria-label="Outgoing interface">${dstOpts(true)}</select><span class="phint">where the traffic goes out</span></div>
-        <div class="pcell"><span class="plab">Source</span><select data-pf="src" aria-label="Source">${srcOpts(false)}</select><span class="psub mono">${esc(f && f.note ? f.note : '')}</span></div>
-        <div class="pcell"><span class="plab">Destination</span><select data-pf="dst" aria-label="Destination">${dstOpts(false)}</select><span class="psub mono">${esc(t ? (p.dst === 'internet' ? 'all (the internet)' : t.note) : '')}</span></div>
-        <div class="pcell"><span class="plab">Service</span><span class="phint">which kind of traffic? Tap to switch on or off</span><span class="pchips">${chips}</span></div>
-        <div class="pcell pact ${deny ? 'deny' : 'allow'}"><span class="plab">Action</span><select data-pf="action" class="pactsel" aria-label="Action">${o('accept', 'ACCEPT (allow)', !deny)}${o('deny', 'DENY (block)', deny)}</select></div>
-        <div class="pcell pnat"><span class="plab">NAT (network address translation)</span>
-          <label class="check"><input type="checkbox" data-pf="nat"${p.nat && !deny ? ' checked' : ''}${deny ? ' disabled' : ''}> <b class="pmain">${p.nat && !deny ? 'ON' : 'OFF'}</b></label><span class="phint">${esc(natNote)}</span>
-          <label class="check small"><input type="checkbox" data-pf="log"${p.log !== false ? ' checked' : ''}> Log traffic</label></div>
+      <div class="fos">
+        <div class="frow"><span class="flab">Name</span><div><input id="pf-name" data-pf="name" value="${esc(p.name || '')}" placeholder="${esc(polAutoName(p))}" autocomplete="off" spellcheck="false"><span class="phint">empty uses the automatic name</span></div></div>
+        <div class="frow"><span class="flab">Schedule</span><select data-pf="sched" aria-label="Schedule">${o('always', 'always', (p.sched || 'always') === 'always')}${o('none', 'none (never matches)', p.sched === 'none')}</select></div>
+        <div class="frow"><span class="flab">Action</span>${seg('action', [['accept', '\u2713 ACCEPT'], ['deny', '\u2298 DENY']], deny ? 'deny' : 'accept')}</div>
+        <div class="frow"><span class="flab">Incoming interface</span><div class="fchipsel"><span class="fchip">${esc(f ? f.top : p.src)}</span><select data-pf="src" aria-label="Incoming interface">${srcOpts(true)}</select></div></div>
+        <div class="frow"><span class="flab">Outgoing interface</span><div class="fchipsel"><span class="fchip">${esc(t ? t.top : p.dst)}</span><select data-pf="dst" aria-label="Outgoing interface">${dstOpts(true)}</select></div></div>
+        <div class="fhead">Source &amp; Destination</div>
+        <div class="frow"><span class="flab">Source</span><div class="fchipsel"><span class="fchip">${esc(p.src)}</span><select data-pf="src" aria-label="Source">${srcOpts(false)}</select><span class="psub mono">${esc(f && f.note ? f.note : '')}</span></div></div>
+        <div class="frow"><span class="flab">User/group</span><span class="phint">not used here: remote staff are set up on the Remote tab</span></div>
+        <div class="frow"><span class="flab">Destination</span><div class="fchipsel"><span class="fchip">${esc(p.dst)}</span><select data-pf="dst" aria-label="Destination">${dstOpts(false)}</select><span class="psub mono">${esc(t ? (p.dst === 'internet' ? 'all (the internet)' : t.note) : '')}</span></div></div>
+        <div class="frow"><span class="flab">Service</span><span class="pchips">${chips}</span></div>
+        ${deny ? '' : `<div class="fhead">Firewall/Network Options</div>
+        <div class="frow"><span class="flab">Inspection mode</span>${seg('insp', [['flow', 'Flow-based'], ['proxy', 'Proxy-based']], p.insp === 'proxy' ? 'proxy' : 'flow')}</div>
+        <div class="frow"><span class="flab">NAT</span><div>${tog('nat', !!p.nat)}<span class="phint"> ${esc(natNote)}</span></div></div>
+        ${p.nat ? `<div class="frow sub"><span class="flab">IP pool configuration</span>${seg('ippool', [['outgoing', 'Use Outgoing Interface Address'], ['dynamic', 'Use Dynamic IP Pool']], p.ippool === 'dynamic' ? 'dynamic' : 'outgoing')}</div>
+        <div class="frow sub"><span class="flab">Source port translation</span>${seg('snat', [['always', 'Always'], ['conflict', 'When port conflicts'], ['never', 'Never']], ['always', 'never'].indexOf(p.snat) >= 0 ? p.snat : 'conflict')}</div>` : ''}
+        <div class="frow"><span class="flab">Protocol options</span><select data-pf="prot" aria-label="Protocol options">${o('default', 'default', true)}</select></div>
+        <div class="fhead">Security Profiles</div>
+        ${UTM.map(([k, l]) => `<div class="frow"><span class="flab">${l}</span>${tog('utm.' + k, !!(p.utm && p.utm[k]))}</div>`).join('')}
+        <div class="frow"><span class="flab">SSL inspection</span><select data-pf="ssl" aria-label="SSL inspection">${['no-inspection', 'certificate-inspection', 'deep-inspection'].map(x => o(x, x, sslOf(p) === x)).join('')}</select></div>`}
+        <div class="fhead">Logging Options</div>
+        <div class="frow"><span class="flab">Log allowed traffic</span><div>${tog('log', p.log !== false)}</div></div>
+        ${p.log !== false ? `<div class="frow sub"><span class="flab"></span>${seg('logmode', [['utm', 'Security events'], ['all', 'All sessions']], p.logmode === 'utm' ? 'utm' : 'all')}</div>
+        <div class="frow"><span class="flab">Generate logs when session starts</span>${tog('logstart', !!p.logstart)}</div>` : ''}
+        <div class="frow"><span class="flab">Capture packets</span>${tog('capture', !!p.capture)}</div>
+        <div class="frow"><span class="flab">Comments</span><div><textarea data-pf="comments" rows="2" maxlength="1023" aria-label="Comments" spellcheck="false">${esc(p.comments || '')}</textarea><span class="phint">${String(p.comments || '').length}/1023</span></div></div>
+        <div class="frow"><span class="flab">Enable this policy</span>${tog('enabled', p.enabled !== false)}</div>
       </div>
       <div class="plegend"><span class="plab">Policy services</span>${legend.map(([k, v]) => `<span class="lg${svcs.indexOf(k) >= 0 ? ' used' : ''}"><span class="schip">${esc(k)}</span> ${esc(v)}</span>`).join('')}</div>
       <div class="polform">${polWebHtml(p)}</div>
@@ -795,6 +815,7 @@
   function setPath(p, path, v) {
     if (path === 'web.mode' || path === 'web.sites') { p.web = p.web || { mode: '', sites: '', cats: [] }; p.web[path.split('.')[1]] = v; }
     else if (path === 'app.mode') { p.app = p.app || { mode: '', cats: [] }; p.app.mode = v; }
+    else if (path.indexOf('utm.') === 0) { p.utm = p.utm || {}; p.utm[path.slice(4)] = v; }
     else p[path] = v;
     if (path === 'src' || path === 'dst' || path === 'action') p.name = '';
     if (path === 'action' && v === 'deny') p.nat = false;
@@ -804,7 +825,7 @@
     const box = $('#pollist'), pop = $('#cardbody');
     const edit = fn => { const list = materialize(); fn(list); touch(); };
     const rerender = () => { renderPolicies(); renderSummaries(); };
-    pop.addEventListener('change', e => {
+    const onPolChange = e => {
       const t = e.target; if (!polDraft || !t.closest('.popol')) return;
       const p = polDraft, wasAuto = !p.name || p.name === polAutoName(p), kept = p.name;
       if (t.dataset.pf) { if (t.dataset.pf === 'name') return; setPath(p, t.dataset.pf, t.type === 'checkbox' ? t.checked : t.value); if (!wasAuto) p.name = kept; }
@@ -815,10 +836,17 @@
         const id = Number(t.value); o.cats = (o.cats || []).map(Number).filter(x => x !== id); if (t.checked) o.cats.push(id);
       } else return;
       renderPolPop();
+    };
+    pop.addEventListener('change', e => { if (e.target.type !== 'checkbox') onPolChange(e); });
+    pop.addEventListener('input', e => { if (e.target.type === 'checkbox') onPolChange(e); });
+    pop.addEventListener('click', e => {
+      const b = e.target.closest('[data-pseg]'); if (!b || !polDraft) return;
+      const p = polDraft, kept = p.name, wasAuto = !p.name || p.name === polAutoName(p);
+      setPath(p, b.dataset.pseg, b.dataset.v); if (!wasAuto) p.name = kept; renderPolPop();
     });
     pop.addEventListener('input', e => {
-      const t = e.target; if (!polDraft || !t.dataset || (t.dataset.pf !== 'web.sites' && t.dataset.pf !== 'name')) return;
-      if (t.dataset.pf === 'name') polDraft.name = t.value.trim(); else setPath(polDraft, 'web.sites', t.value);
+      const t = e.target; if (!polDraft || !t.dataset || (t.dataset.pf !== 'web.sites' && t.dataset.pf !== 'name' && t.dataset.pf !== 'comments')) return;
+      if (t.dataset.pf === 'name') polDraft.name = t.value.trim(); else if (t.dataset.pf === 'comments') polDraft.comments = t.value; else setPath(polDraft, 'web.sites', t.value);
       polFoot();
       if (t.dataset.pf === 'name') $('#cardtitle').textContent = polNew ? 'New policy' : `${polOpen + 1}. ${Policy.policyName(polDraft)}`;
     });

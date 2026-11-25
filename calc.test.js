@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v43'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v44'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v43/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v44/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1641,7 +1641,7 @@ test('Bob review: usability (demo collapses panel, short toast, Manage menu, rew
 });
 test('policy tiles open the shared popup laid out like the FortiGate policy table, with Open CLI', () => {
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  ['Incoming interface', 'Outgoing interface', 'Source', 'Destination', 'Service', 'Action', 'NAT (network address translation)', 'data-pol=', 'data-opencli="pol:', 'openPol('].forEach(x => assert.ok(app.includes(x), x));
+  ['Incoming interface', 'Outgoing interface', 'Source', 'Destination', 'Service', 'Action', 'NAT', 'data-pol=', 'data-opencli="pol:', 'openPol('].forEach(x => assert.ok(app.includes(x), x));
   ['HTTPS', 'DNS', 'SMB', 'RDP', 'SSH', 'HTTP', 'PING'].forEach(x => assert.ok(app.includes("['" + x + "'"), 'legend ' + x));
   assert.ok(!/\(\?<[=!]/.test(app) && css.includes('.ptable') && css.includes('.schip'));
   assert.ok(!/--ok: var\(--ok\)/.test(css), 'dark theme has real ok/warn colours');
@@ -1660,7 +1660,7 @@ test('policy snake: drag handle, delete with confirm, tiles shrink down the snak
 test('policy popup: cells edit a draft, Save/Cancel, no Edit this policy section', () => {
   const fs = require('fs'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
   assert.ok(!app.includes('Edit this policy') && !app.includes('polEditOpen'));
-  ['data-psave', 'data-pcancel', 'data-psvc', 'polDraft', 'polDirty', 'id="pf-name"', 'data-pf="action"', 'data-pf="nat"'].forEach(x => assert.ok(app.includes(x), x));
+  ['data-psave', 'data-pcancel', 'data-psvc', 'polDraft', 'polDirty', 'id="pf-name"', "seg('action'", "tog('nat'"].forEach(x => assert.ok(app.includes(x), x));
   assert.ok(css.includes('.pfoot') && css.includes('.schip.tog'));
 });
 // ---- network folders (groups.js) ----
@@ -1792,6 +1792,21 @@ test('type-in script: one SendKeys line per command, comments skipped, quotes do
   const ps = F.cliTyper("# note\nconfig system interface\n    edit \"it's\"\n        set alias \"a+b\"\nend\n");
   assert.ok(ps.includes("'config system interface'") && ps.includes("'edit \"it''s\"'") && ps.includes("'set alias \"a+b\"'") && !ps.includes("'# note'"));
   assert.ok(ps.includes('SendWait($e') && ps.includes('{ENTER}') && ps.includes('([+^%~(){}\\[\\]])') && /\r\n/.test(ps) && !/[^\r]\n/.test(ps));
+});
+test('FortiOS policy form: every popup field feeds the CLI (inspection, NAT pool, profiles, SSL, logging, comments, status)', () => {
+  const { c, r } = polSample();
+  const mk = Pol.mkPolicy;
+  c.pol = { edited: true, list: [
+    mk({ src: 'Staff LAN', dst: 'internet', service: 'HTTPS', nat: true, insp: 'proxy', ippool: 'dynamic', snat: 'never', utm: { av: true, web: true, dns: true, app: true, ips: true, file: true }, ssl: 'deep-inspection', logmode: 'utm', logstart: true, capture: true, comments: 'Staff web', enabled: false, sched: 'none' }),
+    mk({ src: 'Staff LAN', dst: 'Servers', service: 'SMB', nat: false, utm: { av: true } }),
+  ] };
+  const pol = F.toFortiOS(r, I.toProject(c), 'port5'); const a = pol.slice(pol.indexOf('set name "SP_Staff_LAN_to_internet"'), pol.indexOf('set name "SP_Staff_LAN_to_Servers"'));
+  ['set status disable', 'set inspection-mode proxy', 'set schedule "none"', 'set nat enable', 'set ippool enable', 'set fixedport enable', 'set logtraffic utm', 'set logtraffic-start enable',
+    'set capture-packet enable', 'set utm-status enable', 'set ssl-ssh-profile "deep-inspection"', 'set av-profile "default"', 'set webfilter-profile "default"', 'set dnsfilter-profile "default"',
+    'set application-list "default"', 'set ips-sensor "default"', 'set file-filter-profile "default"', 'set comments "Staff web"'].forEach(x => assert.ok(a.includes(x), x));
+  const b = pol.slice(pol.indexOf('set name "SP_Staff_LAN_to_Servers"'), pol.indexOf('SP_Final_deny'));
+  assert.ok(b.includes('set av-profile "default"') && b.includes('set ssl-ssh-profile "certificate-inspection"') && !b.includes('set status disable') && !b.includes('inspection-mode') && b.includes('set logtraffic all'));
+  const d = Pol.resolve([mk({ src: 'Staff LAN', dst: 'internet', action: 'deny', utm: { av: true } })], r.allocations).pols[0]; assert.deepStrictEqual(d.utm, {}); // deny never carries profiles
 });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

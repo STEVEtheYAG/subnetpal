@@ -296,22 +296,36 @@
       const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
       L.push('    edit 0');
       L.push(`        set name ${q(polName('SP_', p))}`);
+      if (!p.enabled) L.push('        set status disable');
       L.push(`        set srcintf ${q(f.name)}`);
       L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
       L.push(`        set action ${p.action}`);
+      if (p.insp === 'proxy') L.push('        set inspection-mode proxy');
       L.push(`        set srcaddr ${q(f.obj)}`);
       L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP_INTERNAL' : t.obj)}`);
-      L.push('        set schedule "always"');
+      L.push(`        set schedule ${q(p.sched)}`);
       L.push(`        set service ${p.services.map(q).join(' ')}`);
-      if (p.action === 'accept' && p.nat) L.push('        set nat enable');
-      L.push(`        set logtraffic ${p.log ? 'all' : 'disable'}`);
-      const pr = prof.get(p.id);
-      if (pr && p.action === 'accept') {
-        L.push('        set utm-status enable', '        set ssl-ssh-profile "certificate-inspection"');
-        if (pr.web) L.push(`        set webfilter-profile ${q(pr.web)}`);
-        if (pr.app) L.push(`        set application-list ${q(pr.app)}`);
+      if (p.action === 'accept' && p.nat) {
+        L.push('        set nat enable');
+        if (p.ippool === 'dynamic') L.push('        set ippool enable', '        set poolname "POOL_NAME_CHANGE_ME"   # create it first: Policy & Objects > IP Pools');
+        if (p.snat === 'never') L.push('        set fixedport enable');
+        else if (p.snat === 'always') L.push('        # Source port translation "Always": set it on the IP pool (UNVERIFIED, check the GUI field on the VM)');
       }
-      L.push(`        set comments ${q('SubnetPal policy')}`);
+      L.push(`        set logtraffic ${p.log ? p.logmode : 'disable'}`);
+      if (p.log && p.logstart) L.push('        set logtraffic-start enable');
+      if (p.capture) L.push('        set capture-packet enable');
+      const pr = prof.get(p.id), u = p.utm || {};
+      const on = ['av', 'web', 'dns', 'app', 'ips', 'file'].filter(k => u[k]);
+      if (p.action === 'accept' && (pr || on.length)) {
+        L.push('        set utm-status enable', `        set ssl-ssh-profile ${q(p.ssl || 'certificate-inspection')}`);
+        if (pr && pr.web) L.push(`        set webfilter-profile ${q(pr.web)}`); else if (u.web) L.push('        set webfilter-profile "default"');
+        if (pr && pr.app) L.push(`        set application-list ${q(pr.app)}`); else if (u.app) L.push('        set application-list "default"');
+        if (u.av) L.push('        set av-profile "default"');
+        if (u.dns) L.push('        set dnsfilter-profile "default"');
+        if (u.ips) L.push('        set ips-sensor "default"');
+        if (u.file) L.push('        set file-filter-profile "default"');
+      } else if (p.action === 'accept' && p.ssl) L.push(`        set ssl-ssh-profile ${q(p.ssl)}`);
+      L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`);
       L.push('    next');
     });
     L.push('    edit 0', '        set name "SP_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
@@ -338,8 +352,9 @@
           L.push(`        set dstintf ${q(p.to === 'internet' ? WAN_IF : p.to === 'internal' ? 'any' : t.name)}`);
           L.push(`        set action ${p.action}`, `        set srcaddr ${q(f.obj6)}`);
           L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
-          L.push('        set schedule "always"', `        set service ${p.services.map(q).join(' ')}`, `        set logtraffic ${p.log ? 'all' : 'disable'}`);
-          L.push(`        set comments ${q('SubnetPal policy')}`, '    next');
+          L.push(`        set schedule ${q(p.sched)}`, `        set service ${p.services.map(q).join(' ')}`, `        set logtraffic ${p.log ? p.logmode : 'disable'}`);
+          if (!p.enabled) L.push('        set status disable');
+          L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`, '    next');
         });
         L.push('    edit 0', '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
           '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', 'end');
