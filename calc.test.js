@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v52'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v53'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v52/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v53/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1943,6 +1943,106 @@ test('suggested static routes: VPN pool blackhole only when the pool is outside 
   assert.strictEqual(!!v, pool.ok && pool.where === 'separate');
   if (v) assert.strictEqual(v.cidr, pool.cidr);
 });
+  console.log('Prepare tab (prepare.js, draw.js)');
+  const Pr = require('./prepare.js'), Dw = require('./draw.js');
+  const prepPlan = () => { const c = I.newClient('P'); Object.assign(c.intake.counts, { staff: 20, guest: 10, servers: 3, printers: 2 }); Object.assign(c.intake.req, { guest: true, servers: true, printers: true }); I.applyIntake(c); return C.plan(I.toProject(c)).allocations; };
+  test('prepare: 8 steps in Bob\'s reading order, ticks normalised and counted', () => {
+    assert.deepStrictEqual(Pr.STEPS.map(s => s.id), ['nouns', 'map', 'base', 'flows', 'pols', 'admin', 'vpn', 'prove']);
+    const n = Pr.normalize({ steps: { nouns: true, map: 'yes', bogus: true, vpn: true }, brief: 5, flows: [{ who: 'a', what: 'b', how: 'c', x: 1 }, null, 'x'] });
+    assert.deepStrictEqual(n.steps, { nouns: true, vpn: true });
+    assert.strictEqual(Pr.progress(n.steps), 2);
+    assert.strictEqual(n.brief, '5');
+    assert.deepStrictEqual(n.flows, [{ who: 'a', what: 'b', how: 'c' }]);
+    assert.deepStrictEqual(Pr.normalize(null), { steps: {}, brief: '', flows: [], board: null });
+  });
+  test('prepare: flow -> policy maps who/what/how onto plan networks and services', () => {
+    const al = prepPlan();
+    let o = Pr.flowToPolicy({ who: 'Staff', what: 'servers', how: 'https, rdp' }, al);
+    assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.service, o.policy.action, o.policy.nat], ['Staff LAN', 'Servers', 'HTTPS,RDP', 'accept', false]);
+    assert.deepStrictEqual(o.why, []);
+    assert.ok(/From the brief: Staff \/ servers \/ https, rdp/.test(o.policy.comments));
+    o = Pr.flowToPolicy({ who: 'Guest Wi-Fi', what: 'internet', how: '' }, al);
+    assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.action, o.policy.nat], ['Guest', 'internet', 'accept', true]);
+    assert.ok(o.policy.service.indexOf('ALL') < 0, 'no ALL on an internet allow');
+    o = Pr.flowToPolicy({ who: 'guests', what: 'all internal', how: 'block' }, al);
+    assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.action, o.policy.nat, o.policy.service], ['Guest', 'internal', 'deny', false, 'ALL']);
+    o = Pr.flowToPolicy({ who: 'Staff LAN', what: 'Printers', how: 'print / ping' }, al);
+    assert.strictEqual(o.policy.service, 'SP_PRINT,PING');
+  });
+  test('prepare: flow -> policy flags what it could not work out instead of guessing silently', () => {
+    const al = prepPlan();
+    const o = Pr.flowToPolicy({ who: 'Bob', what: 'the moon', how: 'teleport' }, al);
+    assert.ok(o.policy.src && Pr.flowToPolicy({}, al).policy.src, 'still a usable draft');
+    assert.strictEqual(o.why.length, 3);
+    assert.ok(/Bob/.test(o.why[0]) && /moon/.test(o.why[1]) && /teleport/.test(o.why[2]));
+    assert.ok(Pr.flowToPolicy({ who: 'staff', what: 'servers', how: 'all' }, al).why.some(w => /ALL/.test(w)), 'warns on ALL');
+    assert.ok(Pr.flowToPolicy({ who: 'staff', what: 'servers', how: '' }, al).why.some(w => /how/.test(w)), 'asks for services');
+  });
+  test('draw: add, link, move, resize, delete keeps links consistent and shapes on the board', () => {
+    const b = Dw.empty();
+    const a = Dw.addItem(b, 'fw', 100, 100, '#DC2626'), z = Dw.addItem(b, 'cloud', 500, 100), t = Dw.addItem(b, 'text', 0, 0);
+    assert.strictEqual(a.c, '#dc2626'); assert.strictEqual(z.c, Dw.COLOURS[0].c); assert.strictEqual(t.label, 'Text');
+    assert.strictEqual(Dw.addItem(b, 'nope', 0, 0), null);
+    const l = Dw.addLink(b, a.id, z.id, '#4f46e5');
+    assert.ok(l && !l.two); assert.strictEqual(Dw.addLink(b, a.id, a.id), null);
+    assert.strictEqual(Dw.addLink(b, z.id, a.id), l); assert.ok(l.two, 'reverse arrow makes it two-way'); assert.strictEqual(b.links.length, 1);
+    Dw.move(a, 33, 47); assert.deepStrictEqual([a.x, a.y], [30, 50]);
+    Dw.move(a, -500, 9999); assert.deepStrictEqual([a.x, a.y], [0, Dw.H - a.h]);
+    Dw.resize(a, 5, 5); assert.deepStrictEqual([a.w, a.h], [30, 20]);
+    Dw.remove(b, [z.id]);
+    assert.strictEqual(b.links.length, 0, 'link to a deleted shape goes too'); assert.strictEqual(b.items.length, 2);
+  });
+  test('draw: arrows end on the shape edges, not the centres', () => {
+    const b = Dw.empty(), a = Dw.addItem(b, 'box', 100, 100), z = Dw.addItem(b, 'box', 500, 100);
+    const e = Dw.linkEnds(b, Dw.addLink(b, a.id, z.id));
+    assert.ok(Math.abs(e.p.x - (a.x + a.w + 3)) < 0.01 && Math.abs(e.q.x - (z.x - 3)) < 0.01);
+    assert.strictEqual(e.p.y, a.y + a.h / 2);
+  });
+  test('draw: undo history restores earlier boards and caps its size', () => {
+    const b = Dw.empty(), h = Dw.history();
+    h.push(b); Dw.addItem(b, 'box', 0, 0); h.push(b); Dw.addItem(b, 'pc', 200, 0);
+    assert.strictEqual(h.undo().items.length, 1); assert.strictEqual(h.undo().items.length, 0); assert.strictEqual(h.undo(), null);
+    h.push(b); h.push(b); assert.strictEqual(h.size, 1, 'same state is not pushed twice');
+    for (let k = 0; k < 100; k++) { Dw.addItem(b, 'box', k, 0); h.push(b); }
+    assert.ok(h.size <= 60);
+  });
+  test('draw: normalize cleans stored data and survives a JSON round trip', () => {
+    const b = Dw.empty(), a = Dw.addItem(b, 'server', 10, 10, '#15803d'), z = Dw.addItem(b, 'pc', 300, 10); Dw.addLink(b, a.id, z.id); a.label = 'File server';
+    assert.deepStrictEqual(Dw.normalize(JSON.parse(JSON.stringify(b))), b);
+    const bad = Dw.normalize({ items: [{ id: 'x', t: 'box', x: 'a', y: 1e9, w: -5, c: 'red; x' }, { id: 'x', t: 'box' }, { id: 'y', t: 'script' }, { t: 'box' }], links: [{ id: 'l', a: 'x', b: 'gone' }] });
+    assert.strictEqual(bad.items.length, 1); assert.strictEqual(bad.links.length, 0);
+    assert.deepStrictEqual([bad.items[0].x, bad.items[0].y, bad.items[0].w, bad.items[0].c], [0, 4000, 30, Dw.COLOURS[0].c]);
+    assert.deepStrictEqual(Dw.normalize('junk'), Dw.empty());
+  });
+  test('draw: SVG escapes labels, draws every shape type, and the standalone one fits the drawing', () => {
+    const b = Dw.empty();
+    Dw.TYPES.forEach((d, k) => { const it = Dw.addItem(b, d.t, 40 + k * 120, 60); it.label = '<b>"x" & y</b>'; });
+    const s = Dw.svg(b, { standalone: true });
+    assert.ok(s.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && s.includes('fill="#ffffff"'));
+    assert.ok(!s.includes('<b>') && s.includes('&lt;b&gt;&quot;x&quot; &amp; y&lt;/b&gt;'));
+    assert.ok(!/data-resize|class="hit"/.test(s), 'no editor handles in the export');
+    const bb = Dw.bounds(b); assert.strictEqual(bb.x, 40); assert.ok(new RegExp(`viewBox="${bb.x - 24} ${bb.y - 24} `).test(s));
+    assert.strictEqual(Dw.bounds(Dw.empty()), null);
+    assert.ok(Dw.svg(b, { edit: true, sel: new Set([b.items[0].id]) }).includes('data-resize'));
+    assert.deepStrictEqual(Dw.wrap('one two three four', 60, 14), ['one two', 'three', 'four']);
+    assert.deepStrictEqual(Dw.wrap('abcdefghijklmnop', 40, 14), ['abcde', 'fghij', 'klmno', 'p']);
+  });
+  test('prepare: Prepare is the first tab, files are precached, report takes the sketch, layout guards kept', () => {
+    const fs = require('fs'), html = fs.readFileSync('./index.html', 'utf8'), sw = fs.readFileSync('./sw.js', 'utf8'), app = fs.readFileSync('./app.js', 'utf8'), css = fs.readFileSync('./style.css', 'utf8');
+    const tabs = [...html.matchAll(/data-tab="([a-z]+)"/g)].map(m => m[1]);
+    assert.strictEqual(tabs[0], 'prepare');
+    assert.ok(html.indexOf('policy.js') < html.indexOf('prepare.js') && html.indexOf('prepare.js') < html.indexOf('app.js') && html.indexOf('draw.js') < html.indexOf('app.js'));
+    assert.ok(sw.includes("'./prepare.js'") && sw.includes("'./draw.js'"));
+    assert.ok(/SECTIONS = \['prepare', 'plan'/.test(app));
+    assert.ok(app.includes("$('#prepsteps').addEventListener('input'"), 'checkboxes listen on input');
+    const Rep = require('./report.js');
+    const c = I.newClient('P'); Object.assign(c.intake.counts, { staff: 5 }); I.applyIntake(c); const pp = I.toProject(c), rr = C.plan(pp);
+    const r1 = Rep.build(rr, pp, '<svg></svg>'), r2 = Rep.build(rr, pp, '<svg></svg>', '<svg id="sk"></svg>');
+    assert.ok(!r1.includes('Site sketch') && r2.includes('Site sketch') && r2.includes('<svg id="sk"></svg>'));
+    assert.ok(/\.results \{[^}]*min-width: 0/.test(css));
+    [fs.readFileSync('./draw.js', 'utf8'), fs.readFileSync('./prepare.js', 'utf8'), app].forEach(src => assert.ok(!/\(\?<[=!]/.test(src)));
+    assert.ok(!/document\.|addEventListener/.test(fs.readFileSync('./prepare.js', 'utf8')), 'no DOM in prepare.js');
+  });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

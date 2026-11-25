@@ -126,8 +126,8 @@ section.page h2{margin-top:0}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }`;
 
-  // svg = standalone light-theme SVG string for the map (optional).
-  function build(result, project, svg) {
+  // svg = standalone light-theme SVG string for the map (optional). sketch = the engineer's drawing from the Prepare tab (optional, always light).
+  function build(result, project, svg, sketch) {
     project = project || {};
     const it = project.intake || {};
     const c = it.counts || {}, req = it.req || {};
@@ -235,6 +235,7 @@ section.page h2{margin-top:0}
   <h2>2. Your network map</h2>
   <p>Everything connects through the firewall, which protects the network and links it to the internet. Each box below is a separate area of your network.</p>
   <div class="map">${svg || '<p class="note">The map is not available.</p>'}</div>
+  ${sketch ? `<h3>Site sketch</h3><p>Drawn while planning, to show how the site fits together.</p><div class="map sketch">${sketch}</div>` : ''}
 </section>
 
 <section class="page">

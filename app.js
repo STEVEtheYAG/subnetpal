@@ -6,7 +6,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const color = i => `hsl(${(i * 47 + 205) % 360} 62% 58%)`;
   const rng = Fmt.rng;
-  const SECTIONS = ['plan', 'diagram', 'policies', 'remote', 'export'];
+  const SECTIONS = ['prepare', 'plan', 'diagram', 'policies', 'remote', 'export'];
   const isPhone = () => matchMedia('(max-width: 899px)').matches;
 
   // ---------- storage ----------
@@ -322,6 +322,8 @@
     const vp = Remote.plan(result, project());
     $('#sum-remote').textContent = !vp ? 'Not planned. Tick Remote staff in the intake.' : vp.ok ? `${vp.staff} remote staff · VPN pool ${vp.cidr} · reaches ${vp.reach.length} network${vp.reach.length === 1 ? '' : 's'}` : 'No space for the VPN pool';
     $('#sum-export').textContent = 'Client report · FortiOS CLI · CSV · text';
+    const pr = prep(), nShapes = pr.board && Array.isArray(pr.board.items) ? pr.board.items.length : 0;
+    $('#sum-prepare').textContent = `${Prep.progress(pr.steps)} of ${Prep.STEPS.length} steps done · ${pr.flows.length} flow${pr.flows.length === 1 ? '' : 's'} · ${nShapes ? nShapes + ' shapes drawn' : 'nothing drawn yet'}`;
     renderHello(c, ok, n, nPol);
   }
   // KPI tiles above the tabs.
@@ -616,7 +618,8 @@
     $('#ifName').addEventListener('input', e => { cur().ifName = e.target.value; touch(); renderExport(); });
     $('#btnReport').addEventListener('click', () => {
       if (!result || !result.ok) { toast('Fix the problem at the top first, then generate the report.'); return; }
-      const html = ClientReport.build(result, project(), Topology.build(result, project(), { cols: 2, theme: 'light', color, standalone: true, plain: true, vpn: Remote.plan(result, project()) }));
+      const board = Draw.normalize(prep().board);
+      const html = ClientReport.build(result, project(), Topology.build(result, project(), { cols: 2, theme: 'light', color, standalone: true, plain: true, vpn: Remote.plan(result, project()) }), board.items.length ? Draw.svg(board, { standalone: true }) : '');
       const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
       const w = window.open(url, '_blank');
       if (!w) { toast('The report was blocked as a pop-up. Allow pop-ups for this site and try again.'); URL.revokeObjectURL(url); return; }
@@ -624,10 +627,57 @@
     });
   }
 
+  // ---------- prepare: reading order, drawing board, brief + flows ----------
+  // Saved on the client as prep: { steps:{id:true}, brief, flows:[{who,what,how}], board }.
+  function prep() { const c = cur(); c.prep = Prep.normalize(c.prep); return c.prep; }
+  let board = null, prepFor = null;
+  const flowRow = (f, i) => `<div class="flowrow" data-flow="${i}">
+      <label class="fld">Who<input data-ff="who" list="prepnets" value="${esc(f.who)}" autocomplete="off" placeholder="e.g. Staff LAN"></label>
+      <label class="fld">What<input data-ff="what" list="prepnets" value="${esc(f.what)}" autocomplete="off" placeholder="e.g. Servers"></label>
+      <label class="fld">How<input data-ff="how" value="${esc(f.how)}" autocomplete="off" placeholder="e.g. https, rdp"></label>
+      <span class="flowact"><button type="button" class="btn sm primary" data-fmake>Make policy</button><button type="button" class="pdelx" data-fdel aria-label="Delete flow ${i + 1}" title="Delete">&times;</button></span></div>`;
+  function renderFlows() { const f = prep().flows; $('#flowlist').innerHTML = f.length ? f.map(flowRow).join('') : '<p class="hint">No flows yet. Add one per thing someone needs to reach.</p>'; }
+  function renderPrep() {
+    const pr = prep(), c = cur();
+    $('#prepsteps').innerHTML = Prep.STEPS.map((s, i) => `<li class="prepstep${pr.steps[s.id] ? ' done' : ''}"><label class="check"><input type="checkbox" data-step="${s.id}"${pr.steps[s.id] ? ' checked' : ''}><span><b>${i + 1}. ${esc(s.title)}</b><span class="hint">${esc(s.text)}</span></span></label>${s.tab ? `<button type="button" class="btn sm" data-goto="${s.tab}">Open ${esc(s.tab[0].toUpperCase() + s.tab.slice(1))}</button>` : ''}</li>`).join('');
+    const nets = result && result.ok ? Policy.policyNets(result.allocations) : [];
+    $('#prepnets').innerHTML = nets.concat(['internet', 'all internal']).map(n => `<option value="${esc(n)}"></option>`).join('');
+    if (prepFor !== c.id) { prepFor = c.id; $('#prepbrief').value = pr.brief; renderFlows(); if (board) board.reload(); }
+    if (!board) board = Draw.mount($('#drawbox'), { load: () => prep().board, save: b => { prep().board = b; touch(); renderSummaries(); }, fileName: () => 'subnetpal-sketch-' + ((cur().name || 'client').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'client') });
+  }
+  function bindPrep() {
+    $('#prepsteps').addEventListener('input', e => {
+      const id = e.target.dataset && e.target.dataset.step; if (!id) return;
+      const pr = prep(); if (e.target.checked) pr.steps[id] = true; else delete pr.steps[id];
+      e.target.closest('.prepstep').classList.toggle('done', e.target.checked); touch(); renderSummaries();
+    });
+    $('#prepsteps').addEventListener('click', e => { const b = e.target.closest('[data-goto]'); if (b) setOpen(b.dataset.goto, true); });
+    $('#prepbrief').addEventListener('input', e => { prep().brief = e.target.value.slice(0, 20000); touch(); });
+    $('#btnAddFlow').addEventListener('click', () => {
+      const pr = prep(); if (pr.flows.length >= 60) { toast('That is the most flows one client can hold (60).'); return; }
+      pr.flows.push({ who: '', what: '', how: '' }); touch(); renderFlows(); renderSummaries();
+      const ins = $$('#flowlist [data-ff="who"]'); if (ins.length) ins[ins.length - 1].focus();
+    });
+    const box = $('#flowlist');
+    box.addEventListener('input', e => { const r = e.target.closest('[data-flow]'), k = e.target.dataset.ff; if (!r || !k) return; const f = prep().flows[+r.dataset.flow]; if (f) { f[k] = e.target.value.slice(0, 200); touch(); } });
+    box.addEventListener('click', e => {
+      const r = e.target.closest('[data-flow]'); if (!r) return;
+      const i = +r.dataset.flow, pr = prep();
+      if (e.target.closest('[data-fdel]')) { pr.flows.splice(i, 1); touch(); renderFlows(); renderSummaries(); return; }
+      if (e.target.closest('[data-fmake]')) {
+        if (!result || !result.ok || !Policy.policyNets(result.allocations).length) { toast('Fill in the client info first so the plan has networks.'); return; }
+        const out = Prep.flowToPolicy(pr.flows[i], result.allocations);
+        openPol(-1, e.target.closest('button'), false, out.policy);
+        if (out.why.length) toast('Check: ' + out.why.join('; '));
+      }
+    });
+  }
+
   // ---------- accordion + jump bar ----------
   function renderSection(name) {
     if (!result) return;
-    if (name === 'plan') { renderMap(); renderCards(); renderRoutes(); renderGaps(); }
+    if (name === 'prepare') renderPrep();
+    else if (name === 'plan') { renderMap(); renderCards(); renderRoutes(); renderGaps(); }
     else if (name === 'diagram') renderTopo();
     else if (name === 'policies') renderPolicies();
     else if (name === 'remote') renderRemote();
@@ -794,10 +844,11 @@
     $('#tagline').focus();
   }
   // Open the popup on a draft copy of policy i (or a blank one). Changes stay in the draft until Save; Cancel, Esc and Close discard it.
-  function openPol(i, opener, blank) {
+  function openPol(i, opener, blank, draft) {
     if (!result || !result.ok) return;
     const list = Policy.effective(project(), result.allocations);
-    if (blank) { const nets = Policy.policyNets(result.allocations); if (!nets.length) return; polDraft = Policy.mkPolicy({ src: nets[0], dst: 'internet', service: 'ALL', action: 'accept', nat: true }); polNew = true; polOpen = list.length; }
+    if (draft) { polDraft = draft; polNew = true; polOpen = list.length; }
+    else if (blank) { const nets = Policy.policyNets(result.allocations); if (!nets.length) return; polDraft = Policy.mkPolicy({ src: nets[0], dst: 'internet', service: 'ALL', action: 'accept', nat: true }); polNew = true; polOpen = list.length; }
     else { if (!list[i]) { closeCard(); return; } polDraft = JSON.parse(JSON.stringify(list[i])); polNew = false; polOpen = i; }
     polOrig = JSON.stringify(polDraft);
     if (opener) cardOpener = opener;
@@ -1150,7 +1201,7 @@
   // ---------- init ----------
   load();
   buildReqs();
-  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindRoutes(); bindCopyIps(); bindDone(); bindExp();
+  bindTheme(); bindSide(); bindClients(); bindIntake(); bindContract(); bindTopo(); bindOutputs(); bindAccordion(); bindPolicies(); bindRemote(); bindRoutes(); bindPrep(); bindCopyIps(); bindDone(); bindExp();
   window.addEventListener('pagehide', saveNow);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   if (!cur()) {

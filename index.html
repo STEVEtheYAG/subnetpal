@@ -165,12 +165,40 @@
 
     <div class="expbar"><button type="button" class="btn sm" data-showexp aria-pressed="false">Show explanations</button></div>
     <div class="rtabs" role="tablist" aria-label="Results">
+      <button type="button" role="tab" data-tab="prepare" aria-controls="sec-prepare">Prepare</button>
       <button type="button" role="tab" data-tab="plan" aria-controls="sec-plan">Plan</button>
       <button type="button" role="tab" data-tab="diagram" aria-controls="sec-diagram">Diagram</button>
       <button type="button" role="tab" data-tab="policies" aria-controls="sec-policies">Policies</button>
       <button type="button" role="tab" data-tab="remote" aria-controls="sec-remote">Remote</button>
       <button type="button" role="tab" data-tab="export" aria-controls="sec-export">Export</button>
     </div>
+
+    <section class="acc" id="sec-prepare" role="tabpanel">
+      <div class="acc-body" id="body-prepare" hidden>
+        <p class="sectionsum" id="sum-prepare"></p>
+        <section class="bcard" aria-label="Reading order">
+          <h3 class="bh">Prepare first: the reading order</h3>
+          <p class="hint exp">Work through these in order before building. Ticks are saved with this client.</p>
+          <ol id="prepsteps" class="prepsteps"></ol>
+        </section>
+        <section class="bcard" aria-label="Drawing board">
+          <h3 class="bh">Drawing board</h3>
+          <p class="hint exp">Add a shape, drag it, drag the blue corner to resize. Arrow: tap the start shape, then the end shape; arrows follow when shapes move. Shift-click selects several. Saved with this client and added to the client report.</p>
+          <div id="drawbox" class="drawbox"></div>
+        </section>
+        <section class="bcard" aria-label="Brief notes">
+          <h3 class="bh">Brief notes</h3>
+          <label class="fld">Client brief (paste it here; saved with this client)
+            <textarea id="prepbrief" rows="5" spellcheck="true" placeholder="Paste the client brief or your meeting notes"></textarea>
+          </label>
+          <h3 class="bh">Flows: who needs what, and how</h3>
+          <p class="hint exp">One row per flow. Who and What: network names from the plan, "internet" or "all internal". How: services (https, rdp, smb, print, dns, ping...) or "block". Make policy opens a filled-in policy to check and save.</p>
+          <datalist id="prepnets"></datalist>
+          <div id="flowlist" class="flowlist"></div>
+          <div class="btnrow"><button id="btnAddFlow" class="btn sm" type="button">+ Add flow</button></div>
+        </section>
+      </div>
+    </section>
 
     <section class="acc" id="sec-plan" role="tabpanel">
       <div class="acc-body" id="body-plan">
@@ -339,6 +367,8 @@
 <script src="remote.js"></script>
 <script src="routes.js"></script>
 <script src="policy.js"></script>
+<script src="prepare.js"></script>
+<script src="draw.js"></script>
 <script src="intake.js"></script>
 <script src="groups.js"></script>
 <script src="format.js"></script>

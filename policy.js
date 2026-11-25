@@ -108,7 +108,7 @@
   const INTERNET_ALIASES = ['the internet', 'internet', 'wan', 'outside'];
   const SERVICE_WORDS = {
     https: 'HTTPS', http: 'HTTP', web: 'HTTP,HTTPS', dns: 'DNS', ssh: 'SSH', rdp: 'RDP', 'remote desktop': 'RDP', smb: 'SMB',
-    'file sharing': 'SMB', ping: 'PING', icmp: 'PING', smtp: 'SMTP', email: 'SMTP', mail: 'SMTP', ftp: 'FTP', ntp: 'NTP', all: 'ALL', everything: 'ALL', any: 'ALL',
+    'file sharing': 'SMB', print: 'SP_PRINT', printing: 'SP_PRINT', ping: 'PING', icmp: 'PING', smtp: 'SMTP', email: 'SMTP', mail: 'SMTP', ftp: 'FTP', ntp: 'NTP', all: 'ALL', everything: 'ALL', any: 'ALL',
   };
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -206,5 +206,5 @@
     return { pols, skipped };
   }
 
-  return { NOTE, SERVICES, CUSTOM_SERVICES, OUT_UTM, utmOf, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile };
+  return { NOTE, SERVICES, CUSTOM_SERVICES, OUT_UTM, utmOf, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile, aliasTable, mentions, serviceOf };
 }));
