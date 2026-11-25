@@ -71,13 +71,13 @@
   function iface(result, project, idx) {
     const allocs = result.allocations, a = allocs[idx];
     if (!a) return null;
-    const ph = (project && project.ifName && String(project.ifName).trim()) || 'PORT_CHANGE_ME';
-    const name = Fmt.ifaceNames(allocs, ph)[idx], kind = Access.kindOf(a);
+    const ph0 = (project && project.ifName && String(project.ifName).trim()) || 'PORT_CHANGE_ME';
+    const ph = Fmt.parentPort(allocs, ph0, project), name = Fmt.ifaceNames(allocs, ph0, project)[idx], kind = Access.kindOf(a);
     const isVlan = a.vlan !== '' && a.role !== 'Loopback', isLoop = a.role === 'Loopback', isWan = kind === 'wan';
     const role = Fmt.FORTI_ROLE[a.role] || 'lan', acc = Access.adminAccess(a);
     const ip = `${a.gateway ? a.gateway : a.firstUsable}/${a.netmask}`;
     const dev = DEVICE_DETECT.indexOf(kind) >= 0, obj = ('SP_' + (Fmt.fname(a.name) || 'net')).slice(0, 79);
-    const top = [R('Name', name, isVlan ? 'Built from the VLAN ID. You can rename it; keep the same name in the CLI and in policies. Max 15 characters, no spaces.' : isLoop ? 'A loopback has its own name.' : `Use the real port name (for example port3) in place of ${ph}.`),
+    const top = [R('Name', name, isVlan ? 'Built from the VLAN ID. You can rename it; keep the same name in the CLI and in policies. Max 15 characters, no spaces.' : isLoop ? 'A loopback has its own name.' : (Fmt.portPool(project).length ? `Assigned from the ports available. Change it with the Port picker at the top of this card.` : `Use the real port name (for example port3) in place of ${ph}.`)),
       R('Alias', a.name, 'The friendly name shown in policies and logs.'),
       R('Type', isLoop ? 'Loopback Interface' : isVlan ? 'VLAN' : 'Physical Interface', isVlan ? 'One cable (trunk) carries several networks, each on its own VLAN.' : isWan ? 'The WAN is the physical port, not a VLAN. Use Edit on the existing port.' : isLoop ? 'Always up, unlike a physical port.' : '')];
     if (isVlan) top.push(R('VLAN protocol', '802.1Q', 'The standard way to tag VLANs. The switch port must carry this VLAN tagged.'), R('Interface', ph, 'The parent port that carries the VLAN. Replace the placeholder with your real port.'), R('VLAN ID', a.vlan, 'Must match the VLAN ID on the switch and access points.'), R('VRF ID', '0', 'Leave at 0 unless you are splitting routing tables.'));

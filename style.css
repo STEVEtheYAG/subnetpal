@@ -620,3 +620,6 @@ pre.code { background: var(--bg); border: 0; border-radius: 16px; }
 /* Folder selected: other cards grey out (still tappable), the chosen group stays lit. */
 .cards.sel .ncard { border: 2px solid var(--accent-t); box-shadow: 0 0 14px color-mix(in srgb, var(--accent-t) 35%, transparent); }
 .cards.sel .ncard.off { opacity: .4; filter: grayscale(1); border: 1px solid var(--line); box-shadow: none; }
+.dnsbox select { width: 100%; max-width: 100%; box-sizing: border-box; }
+.portrow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.portrow input { width: 100%; box-sizing: border-box; }

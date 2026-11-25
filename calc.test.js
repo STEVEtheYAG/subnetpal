@@ -1397,7 +1397,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v37'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v38'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOS(r, p, 'port5');
@@ -1449,7 +1449,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v37/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v38/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1704,6 +1704,31 @@ function makeZip(files, method) {      // files: {name: string}; method 8 = defl
   return new Uint8Array(Buffer.concat([...parts, cd, eo]));
 }
 const WX = '<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Site: 5 Smith &amp; Co, Sydney</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">We have 25 staff</w:t></w:r><w:r><w:tab/><w:t>on site.</w:t></w:r></w:p><w:p><w:r><w:t>Guest Wi-Fi is required.</w:t></w:r></w:p></w:body></w:document>';
+test('ports available: plain networks get real ports, VLANs share the highest free port, no placeholder', () => {
+  const al = [{ name: 'LAN', vlan: '', role: 'LAN' }, { name: 'DMZ', vlan: '', role: 'DMZ' }, { name: 'Guest', vlan: 30, role: 'Guest' }, { name: 'Lo', vlan: '', role: 'Loopback' }];
+  const pr = { portCount: 4, portPrefix: 'port', portMap: {} };
+  const pl = F.portPlan(al, 'PORT_CHANGE_ME', pr);
+  assert.deepStrictEqual(pl.names, ['port1', 'port2', 'vlan30', 'lo_Lo']);
+  assert.strictEqual(pl.parent, 'port4'); assert.deepStrictEqual(pl.free, ['port3']); assert.deepStrictEqual(pl.short, []);
+  const pl2 = F.portPlan(al, 'PORT_CHANGE_ME', Object.assign({}, pr, { portMap: { LAN: 'port2' } }));   // a picked port wins and is not reused
+  assert.deepStrictEqual(pl2.names.slice(0, 2), ['port2', 'port1']);
+  const pl3 = F.portPlan(al, 'port1', pr);                                                             // explicit parent port is reserved
+  assert.strictEqual(pl3.parent, 'port1'); assert.deepStrictEqual(pl3.names.slice(0, 2), ['port2', 'port3']);
+  assert.deepStrictEqual(F.ifaceNames(al, 'PORT_CHANGE_ME', {}).slice(0, 2), ['PORT_CHANGE_ME1', 'PORT_CHANGE_ME2']);   // no count: unchanged
+});
+test('ports available: running out is reported and falls back to the placeholder', () => {
+  const al = [{ name: 'A', vlan: '', role: 'LAN' }, { name: 'B', vlan: '', role: 'LAN' }, { name: 'C', vlan: '', role: 'LAN' }];
+  const pl = F.portPlan(al, 'PORT_CHANGE_ME', { portCount: 2 });
+  assert.deepStrictEqual(pl.short, ['C']); assert.strictEqual(pl.names[2], 'PORT_CHANGE_ME');
+});
+test('ports available: CLI and remote CLI use real port names, no placeholder left', () => {
+  const c = I.demoClient('clinic'); c.portCount = 8; c.portPrefix = 'port'; c.portMap = {};
+  const p = I.toProject(c), r = C.plan(p), f = F.toFortiOS(r, p, p.ifName);
+  assert.ok(r.ok && !/set interface "PORT_CHANGE_ME/.test(f) && /set interface "port\d"/.test(f) && !/PORT_CHANGE_ME\d/.test(f), f.slice(0, 900));
+  assert.ok(!/set (srcintf|dstintf) "PORT_CHANGE_ME/.test(F.toPolicyFortiOS(r, p, p.ifName)));
+  assert.ok(/ports/i.test(F.toFortiOS(r, p, p.ifName)));
+});
+
 (async () => {
   async function atest(name, fn) { try { await fn(); passed++; console.log('  ok   ' + name); } catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e).split('\n').slice(0, 4).join('\n       ')); } }
   await atest('docread: file kinds are told apart by their first bytes, then the name', async () => {

@@ -83,15 +83,49 @@
   const fname = s => String(s).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
   const sanitizeIf = s => String(s).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 15);
 
-  function ifaceNames(allocs, ph) {
-    let plain = 0;
-    const plainCount = allocs.filter(a => a.vlan === '' && a.role !== 'Loopback').length;
-    return allocs.map(a => {
-      if (a.role === 'Loopback') return sanitizeIf('lo_' + a.name);
-      if (a.vlan !== '') return sanitizeIf('vlan' + a.vlan);
-      return plainCount > 1 ? sanitizeIf(ph + (++plain)) : sanitizeIf(ph);
-    });
+  // Port plan. With "ports available" set (project.portCount), every plain network gets a real port from the pool (port1..portN, name = project.portPrefix),
+  // either the one picked on its card (project.portMap[name]) or the lowest free one. VLAN networks share one parent port: the explicit Parent port if given,
+  // else the highest free port. Networks left without a port are listed in .short. With no count set, nothing changes: the placeholder is used.
+  const PH = 'PORT_CHANGE_ME';
+  const phOf = ifName => (ifName && String(ifName).trim()) || PH;
+  function portPool(project) {
+    const n = Math.min(48, Math.max(0, Math.floor(Number(project && project.portCount)) || 0));
+    const pre = sanitizeIf((project && project.portPrefix && String(project.portPrefix).trim()) || 'port');
+    return Array.from({ length: n }, (_, i) => pre + (i + 1));
   }
+  const isPlain = a => a.vlan === '' && a.role !== 'Loopback' && a.role !== 'WAN';
+  function portPlan(allocs, ph, project) {
+    const pool = portPool(project);
+    const names = [], short = [];
+    if (!pool.length) {
+      let plain = 0;
+      const plainCount = allocs.filter(a => a.vlan === '' && a.role !== 'Loopback').length;
+      allocs.forEach(a => names.push(a.role === 'Loopback' ? sanitizeIf('lo_' + a.name) : a.vlan !== '' ? sanitizeIf('vlan' + a.vlan) : plainCount > 1 ? sanitizeIf(ph + (++plain)) : sanitizeIf(ph)));
+      return { pool, names, parent: ph, short, free: [] };
+    }
+    const map = (project && project.portMap) || {};
+    const taken = new Set(), explicit = ph !== PH ? ph : '';
+    if (explicit && pool.indexOf(explicit) >= 0) taken.add(explicit);
+    allocs.forEach(a => { const p = map[a.name]; if (isPlain(a) && pool.indexOf(p) >= 0 && p !== explicit) taken.add(p); });
+    const nextLow = () => pool.find(p => !taken.has(p));
+    let wan = 0;
+    allocs.forEach(a => {
+      if (a.role === 'Loopback') return names.push(sanitizeIf('lo_' + a.name));
+      if (a.vlan !== '') return names.push(sanitizeIf('vlan' + a.vlan));
+      if (a.role === 'WAN') return names.push('wan' + (++wan));
+      let p = map[a.name];
+      if (!(pool.indexOf(p) >= 0 && p !== explicit)) { p = nextLow(); if (p) taken.add(p); }
+      if (!p) { short.push(a.name); p = ph; }
+      names.push(sanitizeIf(p));
+    });
+    let parent = explicit;
+    if (!parent) { const f = pool.slice().reverse().find(p => !taken.has(p)); parent = f || ph; if (f && allocs.some(a => a.vlan !== '' && a.role !== 'Loopback')) taken.add(f); }
+    const vlans = allocs.some(a => a.vlan !== '' && a.role !== 'Loopback');
+    return { pool, names, parent, short, free: pool.filter(p => !taken.has(p)), vlans };
+  }
+  const ifaceNames = (allocs, ph, project) => portPlan(allocs, ph, project).names;
+  const parentPort = (allocs, ph, project) => portPlan(allocs, ph, project).parent;
+  const portWarn = (allocs, ph, project) => { const pl = portPlan(allocs, ph, project); return pl.short.length ? [`# !! PORTS: only ${pl.pool.length} LAN port(s) available, none left for: ${pl.short.join(', ')}. Those use "${ph}" below. Add ports, or put the network on a VLAN (set its VLAN ID in the plan).`] : []; };
 
   // Website filter + application control profiles for the policies that ask for them. Returns Map(policy id -> { web, app } profile names).
   function profileCLI(L, pols) {
@@ -192,22 +226,23 @@
 
   // ifName: the single interface-name placeholder the user edits.
   function toFortiOS(result, project, ifName) {
-    const ph = (ifName && String(ifName).trim()) || 'PORT_CHANGE_ME';
+    const ph = phOf(ifName);
     const allocs = result.allocations;
-    const names = ifaceNames(allocs, ph);
+    const names = ifaceNames(allocs, ph, project), parent = parentPort(allocs, ph, project);
     const info = allocs.map((a, i) => ({ a, name: names[i] }));
     const byAlloc = new Map(info.map(x => [x.a, x]));
     const L = [];
     L.push('# ===== SubnetPal FortiOS snippet =====');
     L.push('# ' + FORTI_NOTE);
-    L.push(`# >>> INTERFACE NAME PLACEHOLDER: "${ph}"  <<<  Replace every occurrence with your real port/aggregate name.`);
-    L.push(...lockWarn(ph), ...wanWarn(project));
+    if (!portPool(project).length || ph !== PH) L.push(`# >>> INTERFACE NAME PLACEHOLDER: "${ph}"  <<<  Replace every occurrence with your real port/aggregate name.`);
+    if (portPool(project).length) L.push('# Ports: assigned from the ports available in the plan (port picker on each network card). Check each name against System > Network > Interfaces.');
+    L.push(...lockWarn(parent), ...portWarn(allocs, ph, project), ...wanWarn(project));
     if (result.v6) L.push(`# IPv6: site prefix ${result.v6.cidr} (${result.v6.kind}). Each network is a /64 (SLAAC via router advertisements on client networks). If IPv6 is hidden in the GUI, enable it under System > Feature Visibility.`);
     L.push('# VLAN sub-interfaces use the placeholder as their parent port. Non-VLAN networks use it as the interface name itself.');
     L.push(`# Policies assume the internet-facing interface is "${WAN_IF}". Change it if yours differs.`);
     L.push('');
     L.push('config system interface');
-    info.forEach(({ a, name }) => L.push(...ifaceLines(a, name, ph)));
+    info.forEach(({ a, name }) => L.push(...ifaceLines(a, name, parent)));
     L.push('end');
 
     const dhcp = info.filter(({ a }) => a.dhcpStart);
@@ -319,7 +354,7 @@
     const full = toFortiOS(result, project, ifName);
     const i = full.indexOf('config firewall address\n');
     const head = ['# ===== SubnetPal policies =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE,
-      `# >>> INTERFACE NAME PLACEHOLDER: "${(ifName && String(ifName).trim()) || 'PORT_CHANGE_ME'}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies use edit 0: pasting them twice creates duplicates.', ''];
+      `# >>> INTERFACE NAME PLACEHOLDER: "${phOf(ifName)}"  <<<  Use the same interface names as the main snippet. Internet-facing interface is assumed to be "${WAN_IF}".`, ...wanWarn(project), '# Paste the interfaces first. Policies use edit 0: pasting them twice creates duplicates.', ''];
     return head.join('\n') + '\n' + (i >= 0 ? full.slice(i) : full);
   }
 
@@ -327,14 +362,14 @@
   function toRemoteFortiOS(result, project, ifName) {
     const pool = Remote.plan(result, project);
     if (!pool) return '';
-    const ph = (ifName && String(ifName).trim()) || 'PORT_CHANGE_ME';
+    const ph = phOf(ifName);
     const L = ['# ===== SubnetPal IPsec remote access snippet =====', '# ' + FORTI_NOTE, '# ' + Policy.NOTE, '# Test before applying. PSK_CHANGE_ME is a placeholder: use a random key of 12+ characters and share it securely (the app never stores it). Create the users and the RemoteStaff group first (steps 1-2 on the card).'];
     if (!pool.ok) { L.push('# ' + pool.error); return L.join('\n') + '\n'; }
-    const names = ifaceNames(result.allocations, ph);
+    const names = ifaceNames(result.allocations, ph, project);
     const reach = Remote.reachList(result, project);
     const idx = a => result.allocations.indexOf(a);
     const objOf = a => 'SP_' + (fname(a.name) || 'net');
-    L.push(...lockWarn(ph), ...wanWarn(project));
+    L.push(...lockWarn(parentPort(result.allocations, ph, project)), ...wanWarn(project));
     L.push(`# Internet-facing interface is assumed to be "${WAN_IF}". Interface names for office networks use the placeholder "${ph}" like the main snippet.`);
     pool.notes.forEach(n => L.push('# ' + n));
     L.push('', 'config firewall address', '    edit "SP_VPN_POOL"', `        set subnet ${pool.network} ${pool.netmask}`, `        set comment ${q('VPN user pool ' + pool.cidr)}`, '    next');
@@ -446,7 +481,7 @@
   }
 
   return {
-    FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
+    FORTI_NOTE, WAN_IF, FORTI_ROLE, fname, ifaceNames, portPlan, parentPort, portPool, isPlain, ifaceLines, dhcpLines, HANDOVER_HEAD, usable, rng, toCSV, toMarkdown, toText, toFortiOS, toPolicyFortiOS, toRemoteFortiOS, dnsOf, okIp, handoverRows, handoverCells,
     docModel, toHandoverDoc, toHandoverMarkdown: toHandoverDoc, toHandoverHTML,
   };
 }));

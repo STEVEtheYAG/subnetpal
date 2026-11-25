@@ -112,6 +112,10 @@
         <label class="fld">Phones (VoIP)
           <select id="i-voip"><option value="">Not stated</option><option value="hosted">Hosted (cloud) phone system</option><option value="onprem">On-site phone system (PBX)</option></select>
         </label>
+        <label class="fld">LAN ports available on the firewall
+          <span class="portrow"><input id="i-ports" type="number" min="0" max="48" inputmode="numeric" autocomplete="off" placeholder="e.g. 4" aria-label="Number of LAN ports"><input id="i-portprefix" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="port" aria-label="Port name prefix"></span>
+          <span class="hint" id="portsum"></span>
+        </label>
         <label class="check"><input type="checkbox" id="i-dualwan"> Dual WAN (two internet lines)</label>
         <label class="check"><input type="checkbox" id="i-sitevpn"> Site-to-site VPN</label>
         <label class="check"><input type="checkbox" id="i-webfilter"> Web filtering (FortiGuard categories) on internet policies</label>
@@ -252,7 +256,7 @@
           <button type="button" data-out="text">Text</button>
         </div>
         <div id="out-forti">
-          <label class="fld">Parent port (replaces PORT_CHANGE_ME everywhere in the CLI and cards)
+          <label class="fld">Parent port (VLAN trunk). Empty uses a free port from the ports available, or PORT_CHANGE_ME if none is set
             <input id="ifName" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="PORT_CHANGE_ME">
           </label>
           <p class="hint warnbox"><b>Never use the port you are managing the firewall through.</b> Changing its address or VLAN mid-paste locks you out. Use a spare port.</p>

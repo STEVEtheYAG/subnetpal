@@ -107,6 +107,7 @@
     $('#rem-on').checked = !!rm.on; $('#rem-count').hidden = !rm.on; $('#rem-count').value = rm.count || '';
     $('#i-industry').value = it.industry || ''; $('#i-serverswhere').value = it.serversWhere || ''; $('#i-wifi').value = it.wifi || ''; $('#i-voip').value = it.voip || '';
     $('#i-dualwan').checked = !!it.dualWan; $('#i-sitevpn').checked = !!it.siteVpn; $('#i-webfilter').checked = !!it.webFilter;
+    $('#i-ports').value = c.portCount || ''; $('#i-portprefix').value = c.portPrefix || '';
     $('#i-existing').value = it.existing || ''; $('#i-wan').value = it.wanNote || '';
     $('#i-style').value = c.opts.style === 'packed' ? 'packed' : 'vlan24';
     $('#i-parent').value = c.parentAuto === false ? c.parent : '';
@@ -133,6 +134,8 @@
     else if (t.id === 'i-dualwan') it.dualWan = t.checked;
     else if (t.id === 'i-sitevpn') it.siteVpn = t.checked;
     else if (t.id === 'i-webfilter') it.webFilter = t.checked;
+    else if (t.id === 'i-ports') { const n = Math.floor(Number(t.value)); c.portCount = n > 0 ? Math.min(48, n) : ''; }
+    else if (t.id === 'i-portprefix') c.portPrefix = t.value.trim();
     else if (t.id === 'rem-on') {
       it.remote = it.remote || { on: false, count: '', reach: null }; it.remote.on = t.checked;
       $('#rem-count').hidden = !t.checked; if (t.checked) $('#rem-count').focus();
@@ -289,6 +292,7 @@
 
   // ---------- results (right panel) ----------
   // One warning banner, only when something is wrong.
+  const phOf = () => (cur().ifName && String(cur().ifName).trim()) || 'PORT_CHANGE_ME';
   function renderWarn() {
     const items = [];
     if (result.conflicts && result.conflicts.length) items.push(...result.conflicts);
@@ -297,6 +301,9 @@
     if (result.v6Error) items.push('IPv6: ' + result.v6Error);
     items.push(...Remote.warnings(result, project()));
     const vp = Remote.plan(result, project()); if (vp && !vp.ok) items.push('Remote access: ' + vp.error);
+    const pp = result.ok ? Fmt.portPlan(result.allocations, phOf(), project()) : null;
+    if (pp && pp.short.length) items.push(`Not enough ports: ${pp.pool.length} available, none left for ${pp.short.join(', ')}. Add ports, or give that network a VLAN ID so it shares the VLAN trunk port.`);
+    $('#portsum').textContent = pp && pp.pool.length ? `Ports: ${pp.pool.length} available (${pp.pool[0]} to ${pp.pool[pp.pool.length - 1]}), ${pp.free.length} free${pp.vlans ? '. VLANs ride on ' + pp.parent : ''}.` : 'Optional. Leave empty and the CLI keeps a PORT_CHANGE_ME placeholder.';
     $('#warn').innerHTML = items.length ? `<div class="banner"><b>Things to review</b><ul>${items.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>` : '';
   }
   function renderSummaries() {
@@ -439,6 +446,18 @@
       <label class="fld">DNS domain (optional)<input data-dns="domain" value="${esc(d.domain || '')}" placeholder="corp.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <p class="hint">Windows domain? Put the domain controller here. Empty keeps "Same as System DNS".</p></div>`;
   }
+  // Port picker for one network: pick from the ports available; a port used by another network is shown but marked. Stored per client: portMap[network name] = port.
+  function portBox(a) {
+    const p = project(), pool = Fmt.portPool(p);
+    if (!pool.length || a.role === 'Loopback' || a.role === 'WAN') return '';
+    const pl = Fmt.portPlan(result.allocations, phOf(), p), mine = pl.names[result.allocations.indexOf(a)];
+    if (a.vlan !== '') return `<div class="dnsbox portbox"><p class="hint">This network is a VLAN. It rides on <b class="mono">${esc(pl.parent)}</b> (the VLAN trunk port; change it with Parent port in the Export tab).</p></div>`;
+    const use = {}; result.allocations.forEach((x, k) => { if (x !== a) use[pl.names[k]] = x.name; });
+    const sel = (p.portMap || {})[a.name];
+    return `<div class="dnsbox portbox"><label class="fld">Port<select data-portpick>
+      <option value=""${!sel ? ' selected' : ''}>Auto (${esc(mine)})</option>${pool.map(x => `<option value="${esc(x)}"${sel === x ? ' selected' : ''}>${esc(x)}${use[x] ? ' (used by ' + esc(use[x]) + ')' : ''}</option>`).join('')}</select></label>
+      <p class="hint">${pl.short.indexOf(a.name) >= 0 ? 'No free port left for this network. Add ports, or give it a VLAN ID.' : 'Pick the physical port this network is plugged into. The CLI, policies and setup steps use it.'}</p></div>`;
+  }
   // The card popup: same detail the card used to drop down, over a darkened page.
   let cardOpener = null;
   function openCard(key, opener) {
@@ -452,7 +471,7 @@
       const i = result.allocations.findIndex(a => a.name === key); if (i < 0) return;
       const a = result.allocations[i];
       $('#cardsw').style.background = color(Math.max(0, names.indexOf(a.name))); $('#cardtitle').textContent = a.name; $('#cardtype').textContent = typeOf(a);
-      $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + dnsBox(a) + dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
+      $('#cardbody').innerHTML = dlRows([['Port / gateway IP', a.gateway || a.firstUsable || '-'], ['Netmask', `${a.netmask} /${a.prefix}`], ['Usable range', rng(a.firstUsable, a.lastUsable) || '-']]) + portBox(a) + dnsBox(a) + dlRows(netRows(a)) + guidePanel(Guide.iface(result, project(), i), a.name, 'Set it up on the FortiGate');
     }
     cardOpener = opener || null; $('#cardbody').scrollTop = 0; dlg.dataset.kind = 'net'; polOpen = -1;
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
@@ -631,7 +650,7 @@
     if (name === 'internet') return { top: Fmt.WAN_IF, sub: 'the internet side', note: 'all' };
     if (name === 'internal') return { top: 'any', sub: 'All internal networks', note: 'SP_INTERNAL' };
     const al = result.allocations, i = al.findIndex(a => a.name === name);
-    return i < 0 ? null : { top: Fmt.ifaceNames(al, ph)[i], sub: name, note: al[i].cidr };
+    return i < 0 ? null : { top: Fmt.ifaceNames(al, ph, project())[i], sub: name, note: al[i].cidr };
   }
   // A stack of slender planks, one per row, joined by small down arrows. The numbers sit in a fixed left gutter: dragging moves the policy, not the number. Implicit deny is the last plank.
   function renderSnake() {
@@ -656,7 +675,7 @@
   const SVC_CHIPS = ['ALL', 'HTTPS', 'HTTP', 'DNS', 'SSH', 'RDP', 'SMB', 'SMTP', 'PING', 'FTP', 'NTP', 'SP_PRINT'];
   const polAutoName = p => Policy.policyName(Object.assign({}, p, { name: '' }));
   function polPopHtml(p, i, n, nets, libMap, isNew) {
-    const ph = (cur().ifName && String(cur().ifName).trim()) || 'PORT_CHANGE_ME';
+    const ph = phOf();
     const f = polEnd(p.src, ph), t = polEnd(p.dst, ph), deny = p.action === 'deny', svcs = polSvcs(p);
     const o = (v, l, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(l)}</option>`;
     const miss = x => (nets.indexOf(x) < 0 && x !== 'internet' && x !== 'internal');
@@ -964,6 +983,15 @@
     const dnsSave = () => { const c = cur(), name = $('#cardtitle').textContent; c.dhcpDns = c.dhcpDns || {}; const d = c.dhcpDns[name] = c.dhcpDns[name] || {}; $('#cardbody').querySelectorAll('[data-dns]').forEach(i => { d[i.dataset.dns] = i.value.trim(); }); touch(); };
     $('#cardbody').addEventListener('input', e => { if (e.target.dataset && e.target.dataset.dns) { dnsSave(); renderExport(); } });
     $('#cardbody').addEventListener('change', e => {
+      if (e.target.dataset && e.target.dataset.portpick !== undefined) {
+        const c = cur(), name = $('#cardtitle').textContent; c.portMap = c.portMap || {};
+        if (e.target.value) { Object.keys(c.portMap).forEach(k => { if (c.portMap[k] === e.target.value) delete c.portMap[k]; }); c.portMap[name] = e.target.value; } else delete c.portMap[name];
+        touch(); recalc();
+        const i = result.allocations.findIndex(a => a.name === name), g = guideFor(name), fg = $('#cardbody').querySelector('.fg');
+        if (i >= 0) $('#cardbody').querySelector('.portbox').outerHTML = portBox(result.allocations[i]);
+        if (g && fg) fg.outerHTML = guidePanel(g, name, 'Set it up on the FortiGate');
+        return;
+      }
       if (!(e.target.dataset && e.target.dataset.dns)) return;
       const name = $('#cardtitle').textContent, g = guideFor(name), fg = $('#cardbody').querySelector('.fg');
       if (g && fg) fg.outerHTML = guidePanel(g, name, 'Set it up on the FortiGate');
