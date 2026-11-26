@@ -135,7 +135,11 @@ section.page h2{margin-top:0}
     const nets = allocs.filter(a => Access.hasPolicy(a));
     const name = (project.name || '').trim() || 'Your organisation';
     const site = (project.site || '').trim();
-    const date = (project.date || '').trim();
+    const det = project.details && typeof project.details === 'object' ? project.details : {};
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(det.date || '').trim());
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const date = (iso && +iso[2] >= 1 && +iso[2] <= 12 ? `${+iso[3]} ${MON[+iso[2] - 1]} ${iso[1]}` : String(det.date || '').trim().slice(0, 40)) || (project.date || '').trim();   // the meeting date from the Prepare tab wins
+    const contact = String(det.contact || '').trim().slice(0, 200), engineer = String(det.engineer || '').trim().slice(0, 200);
     const expKey = it.expansion || 'none';
 
     // What you asked for
@@ -222,6 +226,8 @@ section.page h2{margin-top:0}
     <p><b>Client</b> ${esc(name)}</p>
     <p><b>Site</b> ${esc(site || 'Not recorded')}</p>
     <p><b>Date</b> ${esc(date || 'Not recorded')}</p>
+    ${contact ? `<p><b>Contact</b> ${esc(contact)}</p>` : ''}
+    ${engineer ? `<p><b>Prepared by</b> ${esc(engineer)}</p>` : ''}
   </div>
   <p class="note" style="margin-top:40px">This document explains, in plain language, how your network has been planned: which areas it has, who they are for, and what each can reach.</p>
 </section>

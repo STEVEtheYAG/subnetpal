@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v54'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v55'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v54/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v55/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1951,18 +1951,139 @@ test('suggested static routes: VPN pool blackhole only when the pool is outside 
     const n = Pr.normalize({ steps: { nouns: true, map: 'yes', bogus: true, vpn: true }, brief: 5, flows: [{ who: 'a', what: 'b', how: 'c', x: 1 }, null, 'x'] });
     assert.deepStrictEqual(n.steps, { nouns: true, vpn: true });
     assert.strictEqual(Pr.progress(n.steps), 2);
-    assert.strictEqual(n.notes.nouns, '5');
+    assert.strictEqual(n.text, '5');
     assert.strictEqual(n.brief, undefined);
     assert.deepStrictEqual(n.flows, [{ who: 'a', what: 'b', how: 'c' }]);
-    assert.deepStrictEqual(Pr.normalize(null), { steps: {}, notes: {}, flows: [], board: null });
+    assert.deepStrictEqual(Pr.normalize(null), { steps: {}, text: '', flows: [], board: null });
   });
-  test('prepare: step notes kept, junk dropped, old brief migrated into step 1 without loss', () => {
-    let n = Pr.normalize({ notes: { map: 'sketch', bogus: 'x', flows: 7, base: '' }, brief: 'old brief' });
-    assert.deepStrictEqual(n.notes, { map: 'sketch', flows: '7', nouns: 'old brief' });
-    n = Pr.normalize({ notes: { nouns: 'new' }, brief: 'old' });
-    assert.strictEqual(n.notes.nouns, 'new\n\nold');
-    assert.deepStrictEqual(Pr.normalize(n), n);
-    assert.strictEqual(Pr.normalize({ notes: { nouns: 'a'.repeat(30000) } }).notes.nouns.length, 20000);
+  test('prepare: old step notes and brief fold into the one notes page without loss', () => {
+    let n = Pr.normalize({ notes: { nouns: 'brief text', map: 'sketch', bogus: 'x', flows: 7, base: '' }, brief: 'old brief' });
+    assert.strictEqual(n.text, 'brief text\n\nDraw the map:\nsketch\n\nList the flows:\n7\n\nold brief');
+    assert.strictEqual(n.notes, undefined);
+    assert.deepStrictEqual(Pr.normalize(n), n, 'second load changes nothing');
+    n = Pr.normalize({ text: 'new', notes: { nouns: 'old' } });
+    assert.strictEqual(n.text, 'new\n\nold');
+    assert.strictEqual(Pr.normalize({ text: 'a'.repeat(50000) }).text.length, 40000);
+    assert.deepStrictEqual(Pr.normDetails({ contact: 'Sam', date: '2026-11-26', evil: '<x>', engineer: 'x'.repeat(300) }), { contact: 'Sam', phone: '', email: '', address: '', date: '2026-11-26', engineer: 'x'.repeat(200) });
+  });
+  const HARBOUR = `CLIENT BRIEF: Harbourline Physio (fictional)
+
+Harbourline Physio is a 12-person physiotherapy clinic in one rented shopfront. port1 is the WAN: one NBN business fibre line.
+
+PEOPLE (user groups)
+- Physios: 6, work in treatment rooms
+- Reception and billing: 4, front desk
+- Visitors: patients in the waiting room, up to 30 phones
+
+DEVICES
+- 12 staff PCs and laptops, 4 treatment-room tablets
+- 2 office printers (print and scan-to-folder)
+
+SERVERS
+- PhysioBook server: practice management app (patient records and bookings), TCP 8443
+- Backup NAS: file shares (SMB, TCP 445) and nightly cloud backup over HTTPS
+
+NETWORK NEEDS (separate VLANs; pick the subnets yourself)
+- VLAN 10 Staff: physios, reception, owner PCs, tablets. Size for 40 devices
+- VLAN 20 Servers: PhysioBook server, backup NAS. Size for 6
+- VLAN 30 Printers: two office printers. Size for 6
+- VLAN 40 Guest: waiting room wifi, internet only. Size for 60
+- VLAN 50 Payments: two EFTPOS terminals. Size for 4
+- VLAN 99 Mgmt: FortiGate, switch, 3 access points, IT contractor laptop. Size for 12
+
+FLOWS (who, what, how). Default is deny. Allow only these.
+1. Staff -> Internet: allow web, DNS, HTTPS with web filter and antivirus; NAT out port1
+2. Staff -> PhysioBook server: allow TCP 8443 only
+3. Staff -> Backup NAS shares: allow SMB (TCP 445)
+4. Staff -> Printers: allow print (TCP 9100, IPP 631)
+5. Printers -> Backup NAS: allow SMB for scan-to-folder
+6. Printers -> Internet: deny
+7. Servers -> Internet: allow HTTPS, DNS, NTP for updates and cloud backup
+8. Payments -> Payment provider: allow HTTPS (TCP 443) and DNS only
+9. Guest -> Internet: allow web and DNS only, web filter on
+10. Guest -> All internal VLANs: deny
+11. Staff -> Mgmt: deny (ping only)
+12. IT contractor (Mgmt) -> Servers, Printers: allow RDP (TCP 3389) and HTTPS for admin
+13. VPN users -> PhysioBook server and NAS: allow TCP 8443 and SMB; no printers
+
+ADMIN
+Two admins: the IT contractor (super_admin) and the owner (read-only profile). Both need MFA.
+
+REMOTE VPN
+3 users (owner and two physios on home visits) on FortiClient.
+
+DONE WHEN (prove it)
+- A guest phone gets internet but cannot ping any staff, server or printer
+- A VPN user opens PhysioBook from home but cannot reach a printer`;
+  test('notes: Harbourline brief gives its client, WAN port, nouns and 6 networks', () => {
+    const f = Pr.readNotes(HARBOUR);
+    assert.strictEqual(f.client, 'Harbourline Physio');
+    assert.strictEqual(f.wanPort, 'port1');
+    assert.deepStrictEqual(f.groups.map(g => [g.name, g.count]), [['Physios', 6], ['Reception and billing', 4], ['Visitors', 30]]);
+    assert.deepStrictEqual(f.devices.map(g => g.count), [12, 4, 2]);
+    assert.deepStrictEqual(f.servers.map(g => g.name), ['PhysioBook server', 'Backup NAS']);
+    assert.deepStrictEqual(f.networks.map(n => [n.vlan, n.name, n.kind, n.size, n.build]), [
+      ['10', 'Staff', 'staff', 40, 'Staff LAN'], ['20', 'Servers', 'servers', 6, 'Servers'], ['30', 'Printers', 'printers', 6, 'Printers'],
+      ['40', 'Guest', 'guest', 60, 'Guest'], ['50', 'Payments', 'pos', 4, 'POS'], ['99', 'Mgmt', 'mgmt', 12, 'Management']]);
+    assert.strictEqual(f.remote, 3);
+    assert.strictEqual(f.admin.length, 1);
+    assert.strictEqual(f.prove.length, 2, 'test lines are not read as flows');
+  });
+  test('notes: Harbourline 13 flows map onto build names (one row per destination)', () => {
+    const f = Pr.readNotes(HARBOUR), rows = f.flows.map(x => [x.who, x.what, x.how]);
+    assert.deepStrictEqual(rows, [
+      ['Staff LAN', 'internet', 'https, web, dns'], ['Staff LAN', 'Servers', ''], ['Staff LAN', 'Servers', 'smb'], ['Staff LAN', 'Printers', 'print'],
+      ['Printers', 'Servers', 'smb'], ['Printers', 'internet', 'block'], ['Servers', 'internet', 'https, dns, ntp'], ['POS', 'internet', 'https, dns'],
+      ['Guest', 'internet', 'web, dns'], ['Guest', 'all internal', 'block'], ['Staff LAN', 'Management', 'block'],
+      ['Management', 'Servers', 'https, rdp'], ['Management', 'Printers', 'https, rdp'], ['VPN users', 'Servers', 'smb']]);
+    assert.deepStrictEqual(f.flows[1].custom, ['TCP 8443'], 'unknown port is flagged, not guessed');
+    assert.deepStrictEqual(f.flows[0].custom, [], '"port1" is not a port number');
+    assert.deepStrictEqual(f.flows[0].extras, ['web filter', 'antivirus']);
+    assert.deepStrictEqual(f.flows.filter(x => x.vpn).length, 1);
+  });
+  test('notes: found flows become clean policies once the networks are in the plan', () => {
+    const c = I.newClient('H');
+    Object.assign(c.intake.counts, { staff: 40, servers: 6, printers: 6, guest: 60, pos: 4 });
+    Object.assign(c.intake.req, { servers: true, printers: true, guest: true, pos: true });
+    I.applyIntake(c);
+    const al = C.plan(I.toProject(c)).allocations, f = Pr.readNotes(HARBOUR);
+    const pick = i => Pr.flowToPolicy(f.flows[i], al);
+    let o = pick(3); assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.service, o.policy.action, o.why], ['Staff LAN', 'Printers', 'SP_PRINT', 'accept', []]);
+    o = pick(9); assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.action], ['Guest', 'internal', 'deny']);
+    o = pick(7); assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.service, o.policy.nat], ['POS', 'internet', 'HTTPS,DNS', true]);
+    o = pick(11); assert.deepStrictEqual([o.policy.src, o.policy.dst, o.policy.service, o.why], ['Management', 'Servers', 'HTTPS,RDP', []]);
+  });
+  test('notes: free-typed meeting notes still give networks, flows and VPN users', () => {
+    const f = Pr.readNotes('Met Sarah at Acme Dental. 15 staff, 2 dentists, guest wifi for patients about 20 phones.\nThey have a Xero server and 3 printers.\nGuests should only reach the internet.\nStaff need to reach the printers on print.\nPrinters cannot reach the internet.\n4 remote users on FortiClient VPN');
+    assert.deepStrictEqual(f.networks.map(n => [n.build, n.size]), [['Staff LAN', 17], ['Guest', 20], ['Printers', 3], ['Servers', 1]]);
+    assert.deepStrictEqual(f.flows.map(x => [x.who, x.what, x.how]), [['Guest', 'internet', ''], ['Staff LAN', 'Printers', 'print'], ['Printers', 'internet', 'block']]);
+    assert.strictEqual(f.remote, 4);
+    assert.ok(f.servers.some(s => s.name === 'Xero server'));
+    const e = Pr.readNotes(''); assert.deepStrictEqual([e.networks.length, e.flows.length, e.remote, e.client], [0, 0, 0, '']);
+    assert.strictEqual(Pr.readNotes('x'.repeat(100000)).flows.length, 0, 'huge junk is safe');
+  });
+  test('notes: how text -> services, block, custom ports', () => {
+    assert.deepStrictEqual(Pr.howOf('allow RDP (TCP 3389) and HTTPS'), { deny: false, how: 'https, rdp', custom: [], extras: [] });
+    assert.strictEqual(Pr.howOf('deny (ping only)').how, 'block');
+    assert.strictEqual(Pr.howOf('never').deny, true);
+    assert.deepStrictEqual(Pr.howOf('allow udp 5060, tcp/8080').custom, ['UDP 5060', 'TCP 8080']);
+    assert.strictEqual(Pr.howOf('allow web and DNS, web filter on').how, 'web, dns');
+  });
+  test('report: client details from the Prepare tab go on the cover (date, contact, engineer)', () => {
+    const c = I.newClient('D'); c.intake.counts.staff = 5; I.applyIntake(c);
+    c.details = Pr.normDetails({ date: '2026-11-26', contact: 'Sam <Lee>', engineer: 'Steven' });
+    const p = I.toProject(c), h = require('./report.js').build(C.plan(p), p);
+    assert.ok(h.includes('26 Nov 2026') && h.includes('Sam &lt;Lee&gt;') && h.includes('<b>Prepared by</b> Steven'));
+    const q = I.toProject(I.newClient('E')); q.intake.counts.staff = 5; I.applyIntake(q);
+    assert.ok(!/Prepared by|<b>Contact<\/b>/.test(require('./report.js').build(C.plan(q), q)), 'nothing shown when empty');
+  });
+  test('notes: sketch draws internet, FortiGate and one shape per network, all linked', () => {
+    const b = Pr.sketch(Pr.readNotes(HARBOUR), Dw);
+    assert.strictEqual(b.items.length, 8);
+    assert.strictEqual(b.links.length, 7);
+    assert.ok(b.items.some(i => i.label === 'VLAN 50 Payments (4)') && b.items.some(i => /port1/.test(i.label)));
+    assert.deepStrictEqual(Dw.normalize(JSON.parse(JSON.stringify(b))), b, 'survives save and load');
+    b.items.forEach(i => assert.ok(i.x >= 0 && i.x + i.w <= 1000 && i.y >= 0 && i.y + i.h <= 600, 'inside the board'));
   });
   test('prepare: flow -> policy maps who/what/how onto plan networks and services', () => {
     const al = prepPlan();

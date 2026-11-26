@@ -176,11 +176,33 @@
     <section class="acc" id="sec-prepare" role="tabpanel">
       <div class="acc-body" id="body-prepare" hidden>
         <p class="sectionsum" id="sum-prepare"></p>
-        <section class="bcard" aria-label="Reading order">
-          <h3 class="bh">Prepare first: the reading order</h3>
-          <p class="hint exp">Work through these in order before building. Ticks and notes are saved with this client. Tap Notes under a step to write things down.</p>
-          <ol id="prepsteps" class="prepsteps"></ol>
+        <section class="bcard" aria-label="Client details">
+          <h3 class="bh">Client details</h3>
+          <p class="hint exp">Type it once: name and site are the same fields as the Client info panel. Saved with this client; date, contact and engineer go on the client report.</p>
+          <div class="detgrid" id="prepdet">
+            <label class="fld">Client name<input data-det="name" autocomplete="off" placeholder="e.g. Acme Ltd"></label>
+            <label class="fld">Site / location<input data-det="site" autocomplete="off" placeholder="e.g. Head office"></label>
+            <label class="fld">Contact person<input data-det="contact" autocomplete="off" placeholder="e.g. Sam Lee, office manager"></label>
+            <label class="fld">Phone<input data-det="phone" type="tel" autocomplete="off"></label>
+            <label class="fld">Email<input data-det="email" type="email" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+            <label class="fld">Address<input data-det="address" autocomplete="off"></label>
+            <label class="fld">Meeting date<input data-det="date" type="date"></label>
+            <label class="fld">Engineer<input data-det="engineer" autocomplete="off" placeholder="Your name"></label>
+          </div>
+          <p id="detfound" class="hint" hidden></p>
         </section>
+        <div class="prepgrid">
+          <section class="bcard" aria-label="Client notes">
+            <h3 class="bh">Client notes</h3>
+            <p class="hint exp">Type or paste anything about the client: people, devices, servers, VLANs, who needs to reach what. Saved as you type. SubnetPal reads it with simple rules, here on this device (no AI, nothing sent), and fills in the steps.</p>
+            <textarea id="prepnotes" class="prepnotes" rows="18" spellcheck="true" maxlength="40000" aria-label="Client notes" placeholder="e.g.&#10;12 staff, 2 printers, guest wifi for 30 phones&#10;VLAN 20 Servers: Xero server, NAS. Size for 6&#10;Staff -> Servers: allow SMB, RDP&#10;Guest -> All internal: deny&#10;3 remote users on FortiClient VPN"></textarea>
+          </section>
+          <section class="bcard" aria-label="Prepare steps">
+            <h3 class="bh">Prepare steps</h3>
+            <p class="hint exp">Work down the list before building. Each step shows what was found in your notes; Send to build adds it to the plan. Ticks are saved with this client.</p>
+            <ol id="prepsteps" class="prepsteps"></ol>
+          </section>
+        </div>
         <section class="bcard" aria-label="Drawing board">
           <h3 class="bh">Drawing board</h3>
           <p class="hint exp">Add a shape, drag it, drag the blue corner to resize. Arrow: tap the start shape, then the end shape; arrows follow when shapes move. Shift-click selects several. Saved with this client and added to the client report.</p>

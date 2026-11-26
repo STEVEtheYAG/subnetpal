@@ -323,7 +323,8 @@
     $('#sum-remote').textContent = !vp ? 'Not planned. Tick Remote staff in the intake.' : vp.ok ? `${vp.staff} remote staff · VPN pool ${vp.cidr} · reaches ${vp.reach.length} network${vp.reach.length === 1 ? '' : 's'}` : 'No space for the VPN pool';
     $('#sum-export').textContent = 'Client report · FortiOS CLI · CSV · text';
     const pr = prep(), nShapes = pr.board && Array.isArray(pr.board.items) ? pr.board.items.length : 0;
-    $('#sum-prepare').textContent = `${Prep.progress(pr.steps)} of ${Prep.STEPS.length} steps done · ${pr.flows.length} flow${pr.flows.length === 1 ? '' : 's'} · ${nShapes ? nShapes + ' shapes drawn' : 'nothing drawn yet'}`;
+    const fd = Prep.readNotes(pr.text), nn = fd.networks.length, nf = fd.flows.length;
+    $('#sum-prepare').textContent = `${Prep.progress(pr.steps)} of ${Prep.STEPS.length} steps done · notes: ${nn} network${nn === 1 ? '' : 's'}, ${nf} flow${nf === 1 ? '' : 's'} found · ${pr.flows.length} in the flows table · ${nShapes ? nShapes + ' shapes drawn' : 'nothing drawn yet'}`;
     renderHello(c, ok, n, nPol);
   }
   // KPI tiles above the tabs.
@@ -627,41 +628,141 @@
     });
   }
 
-  // ---------- prepare: reading order, drawing board, brief + flows ----------
-  // Saved on the client as prep: { steps:{id:true}, notes:{stepId:text}, flows:[{who,what,how}], board }.
+  // ---------- prepare: client details, notes (read by rules), steps guide, flows, drawing board ----------
+  // Saved on the client as prep: { steps:{id:true}, text, flows:[{who,what,how}], board }, plus details:{contact,phone,email,address,date,engineer}.
   function prep() { const c = cur(); c.prep = Prep.normalize(c.prep); return c.prep; }
-  let board = null, prepFor = null;
+  function details() { const c = cur(); c.details = Prep.normDetails(c.details); return c.details; }
+  let board = null, prepFor = null, found = null, notesTimer = 0;
   const flowRow = (f, i) => `<div class="flowrow" data-flow="${i}">
       <label class="fld">Who<input data-ff="who" list="prepnets" value="${esc(f.who)}" autocomplete="off" placeholder="e.g. Staff LAN"></label>
       <label class="fld">What<input data-ff="what" list="prepnets" value="${esc(f.what)}" autocomplete="off" placeholder="e.g. Servers"></label>
       <label class="fld">How<input data-ff="how" value="${esc(f.how)}" autocomplete="off" placeholder="e.g. https, rdp"></label>
       <span class="flowact"><button type="button" class="btn sm primary" data-fmake>Make policy</button><button type="button" class="pdelx" data-fdel aria-label="Delete flow ${i + 1}" title="Delete">&times;</button></span></div>`;
-  function renderFlows() { const f = prep().flows; $('#flowlist').innerHTML = f.length ? f.map(flowRow).join('') : '<p class="hint">No flows yet. Add one per thing someone needs to reach.</p>'; const nm = $('[data-notes="flows"] .nm'); if (nm) nm.innerHTML = noteMark('flows'); }
-  const FLOWS_HTML = `<datalist id="prepnets"></datalist><h4 class="bh">Flows: who needs what, and how</h4>
+  function renderFlows() { const f = prep().flows, el = $('#flowlist'); if (!el) return; el.innerHTML = f.length ? f.map(flowRow).join('') : '<p class="hint">No flows yet. Add them from your notes above, or one by one.</p>'; const n = $('#flowcount'); if (n) n.textContent = f.length; }
+  const FLOWS_HTML = `<datalist id="prepnets"></datalist>
       <p class="hint exp">One row per flow. Who and What: network names from the plan, "internet" or "all internal". How: services (https, rdp, smb, print, dns, ping...) or "block". Make policy opens a filled-in policy to check and save.</p>
       <div id="flowlist" class="flowlist"></div><div class="btnrow"><button id="btnAddFlow" class="btn sm" type="button">+ Add flow</button></div>`;
-  function noteMark(id) { const n = (prep().notes[id] || '').trim(), f = id === 'flows' ? prep().flows.length : 0; return n || f ? ' <span class="notedot" title="Has notes">&#9679;</span>' : ''; }
-  function renderPrep() {
-    const pr = prep(), c = cur();
-    const open = new Set($$('#prepsteps details[open]').map(d => d.dataset.notes));
-    $('#prepsteps').innerHTML = Prep.STEPS.map((s, i) => `<li class="prepstep${pr.steps[s.id] ? ' done' : ''}"><label class="check"><input type="checkbox" data-step="${s.id}"${pr.steps[s.id] ? ' checked' : ''}><span><b>${i + 1}. ${esc(s.title)}</b><span class="hint">${esc(s.text)}</span></span></label>${s.tab ? `<button type="button" class="btn sm" data-goto="${s.tab}">Open ${esc(s.tab[0].toUpperCase() + s.tab.slice(1))}</button>` : ''}<details class="stepnotes" data-notes="${s.id}"${open.has(s.id) ? ' open' : ''}><summary>Notes<span class="nm">${noteMark(s.id)}</span></summary><textarea data-note="${s.id}" rows="4" spellcheck="true" maxlength="20000" aria-label="Notes for step ${i + 1}, ${esc(s.title)}" placeholder="${s.id === 'nouns' ? 'Paste the client brief or your meeting notes' : 'Write things down here'}">${esc(pr.notes[s.id] || '')}</textarea>${s.id === 'flows' ? FLOWS_HTML : ''}</details></li>`).join('');
+  const sameFlow = (a, b) => ['who', 'what', 'how'].every(k => String(a[k] || '').trim().toLowerCase() === String(b[k] || '').trim().toLowerCase());
+  const flowAdded = f => prep().flows.some(x => sameFlow(x, f));
+  function netInPlan(n) {
+    if (n.kind === 'mgmt') return true;                                     // always planned
+    const al = result && result.ok ? result.allocations : [];
+    return al.some(a => (n.kind === 'other' ? a.name.toLowerCase() === n.name.toLowerCase() : Access.kindOf(a) === n.kind));
+  }
+  const arrow = f => `${esc(f.who)} <span aria-hidden="true">&rarr;</span><span class="sr"> to </span> ${esc(f.what)}`;
+  const chips = (label, list) => list.length ? `<div class="fchips"><span class="flabel">${label}</span>${list.map(it => `<span class="chip">${esc(it.name)}${it.count ? ` <b>${it.count}</b>` : ''}</span>`).join('')}</div>` : '';
+  const nothing = t => `<p class="hint fnone">${t}</p>`;
+  // What each step shows from the notes. Buttons carry data-act; nothing here changes data.
+  function stepFound(id) {
+    const f = found, c = cur();
+    if (id === 'nouns') {
+      const h = chips('People', f.groups) + chips('Devices', f.devices) + chips('Servers', f.servers);
+      return h || nothing('Nothing found yet. Write who works there, their devices and servers, e.g. "12 staff, 2 printers, a NAS".');
+    }
+    if (id === 'map') return f.networks.length ? `<p class="fline">Internet, the FortiGate and ${f.networks.length} network${f.networks.length === 1 ? '' : 's'} to draw.</p><div class="btnrow"><button type="button" class="btn sm" data-act="sketch">Sketch from notes</button></div>` : nothing('Networks found in your notes will be sketched here.');
+    if (id === 'base') {
+      const rows = f.networks.map((n, i) => `<li class="frow2"><span class="ftxt">${n.vlan ? `<span class="dim">VLAN ${esc(n.vlan)}</span> ` : ''}<b>${esc(n.name)}</b>${n.build !== n.name ? ` <span class="dim">(${esc(n.build)} in the plan)</span>` : ''}${n.size ? ` · ${n.size}` : ''}</span>${netInPlan(n) ? '<span class="fok">In plan</span>' : `<button type="button" class="btn sm primary" data-act="net" data-i="${i}">Send to build</button>`}</li>`).join('');
+      const wan = f.wanPort ? `<li class="frow2"><span class="ftxt">Internet (WAN) port <b class="mono">${esc(f.wanPort)}</b></span>${(c.wanPort || '').toLowerCase() === f.wanPort ? '<span class="fok">Set</span>' : `<button type="button" class="btn sm" data-act="wan">Send to build</button>`}</li>` : '';
+      const todo = f.networks.filter(n => !netInPlan(n)).length;
+      return rows || wan ? `<ul class="flist">${rows}${wan}</ul>${todo > 1 ? `<div class="btnrow"><button type="button" class="btn sm" data-act="allnets">Send all ${todo} to build</button></div>` : ''}<p class="hint exp">VLAN numbers in the plan are SubnetPal's own; sizes become the device counts (growth buffer added on top).</p>` : nothing('No networks found yet. Write e.g. "VLAN 20 Servers: NAS. Size for 6" or "guest wifi for 30 phones".');
+    }
+    if (id === 'flows') {
+      const list = f.flows.filter(x => !x.vpn), todo = list.filter(x => !flowAdded(x)).length;
+      const rows = list.map(x => `<li class="frow2"><span class="ftxt">${arrow(x)} · <b>${esc(x.how || '?')}</b>${x.custom.length ? ` <span class="warnchip">needs custom service ${esc(x.custom.join(', '))}</span>` : ''}${x.extras.length ? ` <span class="dim">(${esc(x.extras.join(', '))})</span>` : ''}</span>${flowAdded(x) ? '<span class="fok">Added</span>' : `<button type="button" class="btn sm primary" data-act="flow" data-i="${f.flows.indexOf(x)}">Add</button>`}</li>`).join('');
+      const open = prep().flows.length > 0 || $('#flowsbox') && $('#flowsbox').open;
+      return (rows ? `<ul class="flist">${rows}</ul>${todo > 1 ? `<div class="btnrow"><button type="button" class="btn sm" data-act="allflows">Add all ${todo} to the flows table</button></div>` : ''}` : nothing('No flows found yet. Write e.g. "Staff -> Servers: allow SMB" or "Guests cannot reach staff".'))
+        + `<details class="stepnotes" id="flowsbox"${open ? ' open' : ''}><summary>Flows table (<span id="flowcount">${prep().flows.length}</span>)</summary>${FLOWS_HTML}</details>`;
+    }
+    if (id === 'pols') { const n = prep().flows.length; return n ? `<p class="fline">${n} flow${n === 1 ? '' : 's'} in the flows table: use <b>Make policy</b> on each row (step 4), then check the Policies tab.</p>` : nothing('Add flows in step 4 first; each becomes one policy.'); }
+    if (id === 'admin') return f.admin.length ? `<ul class="fbul">${f.admin.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : nothing('Nothing found. Note who the admins are, MFA, and where admin login is allowed from.');
+    if (id === 'vpn') {
+      const it = c.intake, rm = it.remote || {}, set = rm.on && String(rm.count) === String(f.remote);
+      const vf = f.flows.filter(x => x.vpn);
+      const top = f.remote ? `<ul class="flist"><li class="frow2"><span class="ftxt"><b>${f.remote}</b> remote user${f.remote === 1 ? '' : 's'}</span>${set ? '<span class="fok">In plan</span>' : '<button type="button" class="btn sm primary" data-act="remote">Send to build</button>'}</li></ul>` : '';
+      const fl = vf.length ? `<ul class="fbul">${vf.map(x => `<li>${arrow(x)} · ${esc([x.how].concat(x.custom).filter(Boolean).join(', ') || '?')}</li>`).join('')}</ul><p class="hint exp">Set what VPN users reach on the Remote tab.</p>` : '';
+      return top + fl || nothing('Nothing found. Write e.g. "3 remote users on FortiClient VPN".');
+    }
+    if (id === 'prove') return f.prove.length ? `<ul class="fbul">${f.prove.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : nothing('Nothing found. List the tests that prove it works, under a "Done when" or "Test" heading.');
+    return '';
+  }
+  function renderSteps() {
+    const pr = prep();
+    found = Prep.readNotes(pr.text);
+    const keepFlows = $('#flowsbox') && $('#flowsbox').open;
+    $('#prepsteps').innerHTML = Prep.STEPS.map((s, i) => `<li class="prepstep${pr.steps[s.id] ? ' done' : ''}"><div class="stephead"><label class="check"><input type="checkbox" data-step="${s.id}"${pr.steps[s.id] ? ' checked' : ''}><span><b>${i + 1}. ${esc(s.title)}</b><span class="hint">${esc(s.text)}</span></span></label>${s.tab ? `<button type="button" class="btn sm" data-goto="${s.tab}">Open ${esc(s.tab[0].toUpperCase() + s.tab.slice(1))}</button>` : ''}</div><div class="found">${stepFound(s.id)}</div></li>`).join('');
+    if (keepFlows && $('#flowsbox')) $('#flowsbox').open = true;
     const nets = result && result.ok ? Policy.policyNets(result.allocations) : [];
     $('#prepnets').innerHTML = nets.concat(['internet', 'all internal']).map(n => `<option value="${esc(n)}"></option>`).join('');
-    if (prepFor !== c.id) { prepFor = c.id; if (board) board.reload(); }
     renderFlows();
+  }
+  function renderDetails() {
+    const c = cur(), d = details();
+    $$('#prepdet [data-det]').forEach(el => { if (el === document.activeElement) return; const k = el.dataset.det; el.value = k === 'name' ? c.name || '' : k === 'site' ? c.site || '' : d[k] || ''; });
+    const df = $('#detfound'), cl = found && found.client;
+    df.hidden = !(cl && (c.name || '').trim().toLowerCase() !== cl.toLowerCase());
+    if (!df.hidden) df.innerHTML = `Client in your notes: <b>${esc(cl)}</b> <button type="button" class="btn sm" data-act="usename">Use as client name</button>`;
+  }
+  function renderPrep() {
+    const pr = prep(), c = cur();
+    const ta = $('#prepnotes'); if (ta !== document.activeElement || prepFor !== c.id) ta.value = pr.text;
+    renderSteps();
+    renderDetails();
+    if (prepFor !== c.id) { prepFor = c.id; if (board) board.reload(); }
     if (!board) board = Draw.mount($('#drawbox'), { load: () => prep().board, save: b => { prep().board = b; touch(); renderSummaries(); }, fileName: () => 'subnetpal-sketch-' + ((cur().name || 'client').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'client') });
   }
+  // Send to build: found network -> intake answers (the plan is then rebuilt from the intake, as when typing in Client info).
+  function sendNet(n) {
+    const it = cur().intake, size = String(n.size || '');
+    if (n.kind === 'mgmt') return false;
+    if (n.kind === 'staff') it.counts.staff = size || it.counts.staff || '2';
+    else if (it.req[n.kind] !== undefined || Prep.KIND_NAME[n.kind]) { it.req[n.kind] = true; it.counts[n.kind] = size || it.counts[n.kind] || '2'; }
+    else {
+      it.others = it.others || [];
+      if (it.others.some(o => String(o.name || '').toLowerCase() === n.name.toLowerCase())) return false;
+      if (it.others.length >= Intake.MAX_OTHERS) { toast(`That is the most extra pools one client can hold (${Intake.MAX_OTHERS}).`); return false; }
+      it.others.push({ name: n.name.slice(0, 20), count: size });
+    }
+    return true;
+  }
+  function rebuild(msg) { Intake.applyIntake(cur()); renderIntake(); touch(); recalc(); if (msg) toast(msg); }
   function bindPrep() {
+    $('#prepnotes').addEventListener('input', e => {
+      prep().text = e.target.value.slice(0, 40000); touch();
+      clearTimeout(notesTimer); notesTimer = setTimeout(() => { renderSteps(); renderDetails(); renderSummaries(); }, 350);
+    });
+    $('#prepdet').addEventListener('input', e => {
+      const k = e.target.dataset.det; if (!k) return;
+      const c = cur(), v = e.target.value.slice(0, 200);
+      if (k === 'name' || k === 'site') { c[k] = v; $(k === 'name' ? '#i-name' : '#i-site').value = v; renderClientSel(); if (k === 'name') renderDetails(); }
+      else details()[k] = v;
+      touch();
+    });
+    $('#detfound').addEventListener('click', e => {
+      if (!e.target.closest('[data-act="usename"]') || !found || !found.client) return;
+      cur().name = found.client; $('#i-name').value = found.client; touch(); renderClientSel(); renderDetails();
+    });
     $('#prepsteps').addEventListener('input', e => {
       const id = e.target.dataset && e.target.dataset.step; if (!id) return;
       const pr = prep(); if (e.target.checked) pr.steps[id] = true; else delete pr.steps[id];
       e.target.closest('.prepstep').classList.toggle('done', e.target.checked); touch(); renderSummaries();
     });
-    $('#prepsteps').addEventListener('click', e => { const b = e.target.closest('[data-goto]'); if (b) setOpen(b.dataset.goto, true); });
-    $('#prepsteps').addEventListener('input', e => {
-      const id = e.target.dataset && e.target.dataset.note; if (!id) return;
-      const pr = prep(), v = e.target.value.slice(0, 20000); if (v) pr.notes[id] = v; else delete pr.notes[id];
-      const nm = e.target.closest('details').querySelector('.nm'); if (nm) nm.innerHTML = noteMark(id); touch();
+    $('#prepsteps').addEventListener('click', e => {
+      const g = e.target.closest('[data-goto]'); if (g) { setOpen(g.dataset.goto, true); return; }
+      const b = e.target.closest('[data-act]'); if (!b || !found) return;
+      const act = b.dataset.act, i = +b.dataset.i, c = cur();
+      if (act === 'net') { const n = found.networks[i]; if (n && sendNet(n)) rebuild(`${n.build} sent to the plan`); }
+      else if (act === 'allnets') { const sent = found.networks.filter(n => !netInPlan(n) && sendNet(n)); if (sent.length) rebuild(`${sent.length} network${sent.length === 1 ? '' : 's'} sent to the plan`); }
+      else if (act === 'wan') { c.wanPort = found.wanPort; $('#i-wanport').value = c.wanPort; touch(); recalc(); toast(`WAN port set to ${c.wanPort}`); }
+      else if (act === 'remote') { const it = c.intake; it.remote = Object.assign({ reach: null }, it.remote, { on: true, count: String(found.remote) }); renderIntake(); touch(); recalc(); toast(`${found.remote} remote users sent to the plan`); }
+      else if (act === 'flow' || act === 'allflows') {
+        const add = (act === 'flow' ? [found.flows[i]] : found.flows.filter(x => !x.vpn)).filter(x => x && !flowAdded(x)), pr = prep();   // prep() re-normalises, so take it after flowAdded
+        const room = 60 - pr.flows.length; if (add.length > room) toast('That is the most flows one client can hold (60).');
+        add.slice(0, Math.max(0, room)).forEach(x => pr.flows.push({ who: x.who, what: x.what, how: x.how }));
+        touch(); renderSteps(); renderSummaries(); const fb = $('#flowsbox'); if (fb) fb.open = true;
+      } else if (act === 'sketch') {
+        if (Draw.normalize(prep().board).items.length && !confirm('Replace your drawing with a sketch from the notes?')) return;
+        prep().board = Prep.sketch(found, Draw); touch(); if (board) board.reload(); renderSummaries(); toast('Sketch drawn on the drawing board below');
+      }
     });
     $('#prepsteps').addEventListener('click', e => { if (e.target.closest('#btnAddFlow')) addFlow(); });
     function addFlow() {
@@ -674,7 +775,7 @@
     box.addEventListener('click', e => {
       const r = e.target.closest('[data-flow]'); if (!r) return;
       const i = +r.dataset.flow, pr = prep();
-      if (e.target.closest('[data-fdel]')) { pr.flows.splice(i, 1); touch(); renderFlows(); renderSummaries(); return; }
+      if (e.target.closest('[data-fdel]')) { pr.flows.splice(i, 1); touch(); renderSteps(); renderSummaries(); return; }
       if (e.target.closest('[data-fmake]')) {
         if (!result || !result.ok || !Policy.policyNets(result.allocations).length) { toast('Fill in the client info first so the plan has networks.'); return; }
         const out = Prep.flowToPolicy(pr.flows[i], result.allocations);
