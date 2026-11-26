@@ -2,6 +2,7 @@
   "name": "SubnetPal",
   "short_name": "SubnetPal",
   "description": "Offline IP address planner (VLSM) for firewall builds, with FortiGate CLI export.",
+  "id": "./",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

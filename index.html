@@ -28,6 +28,7 @@
     <summary aria-label="Colour theme" title="Colour theme"><span class="dot" aria-hidden="true"></span><span class="tname" id="tname">Indigo</span></summary>
     <div class="tpop" id="tpop" role="radiogroup" aria-label="Colour theme"></div>
   </details>
+  <button id="btnInstall" class="themebtn" type="button" hidden title="Install SubnetPal as an app on this PC (own window, desktop icon, works offline)">⤓ Install app</button>
   <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco">☾</span><span id="themeTxt">Dark</span></button>
   </div>
 </header>
@@ -171,6 +172,7 @@
       <button type="button" role="tab" data-tab="policies" aria-controls="sec-policies">Policies</button>
       <button type="button" role="tab" data-tab="remote" aria-controls="sec-remote">Remote</button>
       <button type="button" role="tab" data-tab="export" aria-controls="sec-export">Export</button>
+      <button type="button" role="tab" data-tab="lab" aria-controls="sec-lab">Lab</button>
     </div>
 
     <section class="acc" id="sec-prepare" role="tabpanel">
@@ -350,6 +352,14 @@
         <p id="exmsg" class="hint"></p>
       </div>
     </section>
+    <section class="acc" id="sec-lab" role="tabpanel">
+      <div class="acc-body" id="body-lab" hidden>
+        <p class="sectionsum" id="sum-lab">FortiOS 8.0.2 practice mock · test a build before the real FortiGate</p>
+        <p class="hint exp">A practice copy of the FortiGate GUI, offline. Use <b>Send to Lab</b> next to any FortiOS CLI to type it into the mock's CLI console, then check the result in the GUI. The mock saves its own config in this browser; reset it with <span class="mono">execute factoryreset</span> in its console.</p>
+        <div class="btnrow labbar"><button type="button" class="btn sm" id="labcli">Open CLI console</button><button type="button" class="btn sm" id="labforti">Send full build</button><a class="btn sm" href="lab/index.html" target="_blank" rel="noopener">Open in its own window</a></div>
+        <iframe id="labframe" class="labframe" title="FortiOS 8.0.2 mock GUI" data-src="lab/index.html"></iframe>
+      </div>
+    </section>
   </main>
 </div>
 </div>
@@ -364,7 +374,7 @@
   <textarea id="clitext" class="code mono" readonly spellcheck="false" aria-label="FortiOS CLI lines"></textarea>
   <details class="more2"><summary>Notes (not pasted)</summary><pre class="code" id="clinotes"></pre></details>
   <p class="hint" id="clihelp2">The FortiGate GUI console joins pasted lines into one. Use SSH/PuTTY, or "Type-in script": right-click the file, Run with PowerShell (or: powershell -ExecutionPolicy Bypass -File file.ps1), click the console, and it types each line for you.</p>
-  <div class="cliact"><button type="button" class="btn sm" id="clicopy">Copy</button><button type="button" class="btn sm" id="clips">Type-in script (.ps1)</button><button type="button" class="btn sm" id="clidl">Download .txt</button><button type="button" class="btn sm" id="cliclose">Close</button></div>
+  <div class="cliact"><button type="button" class="btn sm" id="clicopy">Copy</button><button type="button" class="btn sm" id="clilab">Send to Lab</button><button type="button" class="btn sm" id="clips">Type-in script (.ps1)</button><button type="button" class="btn sm" id="clidl">Download .txt</button><button type="button" class="btn sm" id="cliclose">Close</button></div>
 </div></dialog>
 
 <script src="calc.js"></script>
@@ -386,6 +396,7 @@
 <script src="guide.js"></script>
 <script src="report.js"></script>
 <script src="topology.js"></script>
+<script src="lab.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

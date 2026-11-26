@@ -6,7 +6,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const color = i => `hsl(${(i * 47 + 205) % 360} 62% 58%)`;
   const rng = Fmt.rng;
-  const SECTIONS = ['prepare', 'plan', 'diagram', 'policies', 'remote', 'export'];
+  const SECTIONS = ['prepare', 'plan', 'diagram', 'policies', 'remote', 'export', 'lab'];
   const isPhone = () => matchMedia('(max-width: 899px)').matches;
 
   // ---------- storage ----------
@@ -606,8 +606,20 @@
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
   const CLI_KINDS = ['forti', 'polcli', 'remote', 'routes'];
+  // Send to Lab: switch to the Lab tab and type the CLI into the FortiOS mock's console.
+  function sendToLab(raw) {
+    const t = raw ? Fmt.cliForPaste(raw) : '';
+    if (!t) { toast('Nothing to send yet. Fix the problem at the top first.'); return; }
+    const d = $('#clidlg'); if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
+    if ($('#carddlg').open) closeCard();
+    setOpen('lab', true);
+    Lab.send($('#labframe'), t).then(n => toast(`Sent ${n} lines to the Lab console`)).catch(() => toast('The Lab did not load. Reload the page.'));
+  }
   function bindOutputs() {
-    $$('[data-copy]').forEach(b => { if (CLI_KINDS.indexOf(b.dataset.copy) < 0) return; const t = document.createElement('button'); t.type = 'button'; t.className = 'btn sm'; t.textContent = 'Type-in script (.ps1)'; t.title = 'For the FortiGate GUI console, which joins pasted lines. Run in PowerShell, then click the console.'; t.addEventListener('click', () => { const raw = text(b.dataset.copy); if (!raw) { toast('Nothing to download yet. Fix the problem at the top first.'); return; } downloadText('subnetpal-type-in.ps1', Fmt.cliTyper(raw)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); }); b.insertAdjacentElement('afterend', t); });
+    $$('[data-copy]').forEach(b => { if (CLI_KINDS.indexOf(b.dataset.copy) < 0) return; const t = document.createElement('button'); t.type = 'button'; t.className = 'btn sm'; t.textContent = 'Type-in script (.ps1)'; t.title = 'For the FortiGate GUI console, which joins pasted lines. Run in PowerShell, then click the console.'; t.addEventListener('click', () => { const raw = text(b.dataset.copy); if (!raw) { toast('Nothing to download yet. Fix the problem at the top first.'); return; } downloadText('subnetpal-type-in.ps1', Fmt.cliTyper(raw)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); }); b.insertAdjacentElement('afterend', t);
+      const l = document.createElement('button'); l.type = 'button'; l.className = 'btn sm'; l.textContent = 'Send to Lab'; l.title = 'Type this CLI into the FortiOS mock on the Lab tab'; l.addEventListener('click', () => sendToLab(text(b.dataset.copy))); t.insertAdjacentElement('afterend', l); });
+    $('#labcli').addEventListener('click', () => Lab.load($('#labframe')).then(cli => cli.open()).catch(() => toast('The Lab did not load. Reload the page.')));
+    $('#labforti').addEventListener('click', () => sendToLab(text('forti')));
     $('.subtabs').addEventListener('click', e => { const b = e.target.closest('button[data-out]'); if (!b) return; outView = b.dataset.out; renderExport(); });
     $$('[data-copy]').forEach(b => b.addEventListener('click', async () => {
       const raw = text(b.dataset.copy), t = raw && CLI_KINDS.indexOf(b.dataset.copy) >= 0 ? Fmt.cliForPaste(raw) : raw;
@@ -794,6 +806,7 @@
     else if (name === 'policies') renderPolicies();
     else if (name === 'remote') renderRemote();
     else if (name === 'export') renderExport();
+    else if (name === 'lab') Lab.load($('#labframe')).catch(() => toast('The Lab did not load. Reload the page.'));
   }
 
   // ---------- policies ----------
@@ -1281,6 +1294,7 @@
     dlg.addEventListener('click', e => { if (e.target === dlg) closeDlg(); });   // backdrop click (Esc is native)
     $('#clips').addEventListener('click', () => { downloadText('subnetpal-type-in.ps1', Fmt.cliTyper($('#clitext').value)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); });
     $('#clidl').addEventListener('click', () => downloadText('subnetpal-' + ($('#clititle').textContent.replace(/^FortiOS CLI: /, '').replace(/[^A-Za-z0-9]+/g, '-') || 'cli') + '.txt', Fmt.cliForPaste($('#clitext').value)));
+    $('#clilab').addEventListener('click', () => sendToLab($('#clitext').value));
     $('#clicopy').addEventListener('click', async () => toast((await copy(Fmt.cliForPaste($('#clitext').value))) ? 'Copied the FortiOS CLI' : 'Copy was blocked. Select the text and copy it.'));
   }
 
@@ -1300,6 +1314,17 @@
     if (!navigator.onLine) { pill.textContent = 'Offline' + (sw ? ' · works' : ''); pill.className = 'pill off'; }
     else if (sw) { pill.textContent = 'Offline ready'; pill.className = 'pill ok'; }
     else { pill.textContent = 'Online'; pill.className = 'pill'; }
+  }
+  // Install as a PC app (Edge/Chrome): the browser fires beforeinstallprompt when the app is installable.
+  function bindInstall() {
+    const btn = $('#btnInstall'); let ask = null;
+    window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); ask = e; btn.hidden = false; });
+    window.addEventListener('appinstalled', () => { ask = null; btn.hidden = true; toast('Installed. Open SubnetPal from the Start menu or desktop.'); });
+    btn.addEventListener('click', async () => {
+      if (!ask) { btn.hidden = true; return; }
+      ask.prompt(); try { await ask.userChoice; } catch (e) { /* dismissed */ }
+      ask = null; btn.hidden = true;
+    });
   }
   function registerSW() {
     const pill = $('#netpill');
@@ -1326,7 +1351,7 @@
     initSide();
   }());
   setOpen('plan', false);
-  registerSW();
+  registerSW(); bindInstall();
   const legacy = { clients: 'plan', intake: 'plan', plan: 'plan', map: 'diagram', outputs: 'export' };
   window.SubnetPal = {
     get state() { return store; }, get result() { return result; }, recalc, setOpen,

@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v55'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v56'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v55/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v56/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1825,6 +1825,39 @@ test('admin checklist: MFA and a renamed / backup admin account are in the notes
   const { raw, cli } = bobBuild(), ix = require('fs').readFileSync(__dirname + '/index.html', 'utf8');
   assert.ok(/MFA/.test(raw) && /backup admin/i.test(raw) && /backup admin/i.test(ix) && /MFA/.test(ix));
   assert.ok(!/edit "admin"[\s\S]*?set (name|password|two-factor)/.test(cli) && (cli.match(/config system admin/g) || []).length === 1);
+});
+
+console.log('Lab (FortiOS mock)');
+test('lab: linesFor drops blanks, # comments and trailing spaces, keeps order, turns tabs into spaces', () => {
+  const Lab = require('./lab.js');
+  assert.deepStrictEqual(Lab.linesFor('config system interface\r\n\n  # note\n\tedit "Staff_V10"  \n    set vlanid 10\nend\n'), ['config system interface', ' edit "Staff_V10"', '    set vlanid 10', 'end']);
+  assert.deepStrictEqual(Lab.linesFor(''), []); assert.deepStrictEqual(Lab.linesFor(null), []);
+});
+test('lab: every line of the full SubnetPal build reaches the console (only # notes are skipped, CRLF is handled)', () => {
+  const Lab = require('./lab.js'), { r, p } = fullClient(), raw = F.toFortiOSRaw(r, p, 'port5'), t = F.cliForPaste(raw);
+  const lines = Lab.linesFor(t); assert.ok(lines.length > 50);
+  assert.strictEqual(lines.length, t.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length);
+  assert.ok(lines.every(l => !/\r/.test(l)));
+  assert.ok(lines.indexOf('end') > 0 && lines.some(l => /^config firewall policy$/.test(l)));
+});
+test('lab: tab, iframe, Send to Lab and the mock are wired, cached offline, and the mock exposes its CLI hook', () => {
+  const fs = require('fs'), rd = f => fs.readFileSync(__dirname + '/' + f, 'utf8');
+  const html = rd('index.html'), app = rd('app.js'), sw = rd('sw.js'), css = rd('style.css'), mock = rd('lab/index.html');
+  assert.ok(/data-tab="lab"/.test(html) && /id="sec-lab"/.test(html) && /id="body-lab"/.test(html));
+  assert.ok(/<iframe id="labframe"[^>]*data-src="lab\/index.html"/.test(html) && !/<iframe id="labframe"[^>]* src=/.test(html));   // loaded on first use only
+  assert.ok(html.indexOf('<script src="lab.js">') > html.indexOf('<script src="format.js">') && html.indexOf('<script src="lab.js">') < html.indexOf('<script src="app.js">'));
+  assert.ok(sw.includes("'./lab.js'") && sw.includes("'./lab/index.html'"));
+  assert.ok(/'lab'\]/.test(app) && /function sendToLab/.test(app) && /id="clilab"/.test(html) && /Send to Lab/.test(app));
+  assert.ok(/window\.__fm\.cli=/.test(mock) && /open:Q,close:S/.test(mock));          // the hook lab.js drives
+  assert.ok(!/<script[^>]+src="https?:|<link[^>]+href="https?:/.test(mock));          // fully offline, nothing from the web
+  assert.ok(/\.labframe \{[^}]*min-width: 0/.test(css) && /\.results\{min-width:0\}|\.results \{[^}]*min-width: 0/.test(css));
+});
+test('install: manifest is installable (id, start_url, standalone, 192 + 512 icons) and the Install app button uses beforeinstallprompt', () => {
+  const fs = require('fs'), m = JSON.parse(fs.readFileSync(__dirname + '/manifest.json', 'utf8')), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');
+  assert.ok(m.id && m.start_url && m.display === 'standalone' && m.name);
+  ['192x192', '512x512'].forEach(sz => { const i = m.icons.find(x => x.sizes === sz); assert.ok(i && fs.existsSync(__dirname + '/' + i.src), sz); });
+  assert.ok(/<button id="btnInstall"[^>]*hidden/.test(html));
+  assert.ok(/beforeinstallprompt/.test(app) && /appinstalled/.test(app) && /bindInstall\(\)/.test(app));
 });
 
 (async () => {
