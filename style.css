@@ -707,6 +707,12 @@ body.showexp .prepstep .hint { display: block; }
 .prepstep.done { opacity: .7; }
 .prepstep.done b { text-decoration: line-through; text-decoration-color: var(--ok); }
 .prepstep .btn { flex: none; }
+.prepstep { flex-wrap: wrap; }
+.stepnotes { flex: 1 1 100%; min-width: 0; padding-bottom: 6px; }
+.stepnotes > summary { cursor: pointer; font-size: .85rem; color: var(--muted, inherit); padding: 2px 0; }
+.stepnotes textarea { width: 100%; box-sizing: border-box; margin-top: 6px; }
+.notedot { color: var(--accent, #2563eb); font-size: .7rem; vertical-align: middle; }
+.stepnotes .bh { margin-top: 12px; }
 .drawbox { min-width: 0; }
 .dtools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
 .dgrp { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }

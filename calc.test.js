@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v53'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v54'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v53/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v54/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1951,9 +1951,18 @@ test('suggested static routes: VPN pool blackhole only when the pool is outside 
     const n = Pr.normalize({ steps: { nouns: true, map: 'yes', bogus: true, vpn: true }, brief: 5, flows: [{ who: 'a', what: 'b', how: 'c', x: 1 }, null, 'x'] });
     assert.deepStrictEqual(n.steps, { nouns: true, vpn: true });
     assert.strictEqual(Pr.progress(n.steps), 2);
-    assert.strictEqual(n.brief, '5');
+    assert.strictEqual(n.notes.nouns, '5');
+    assert.strictEqual(n.brief, undefined);
     assert.deepStrictEqual(n.flows, [{ who: 'a', what: 'b', how: 'c' }]);
-    assert.deepStrictEqual(Pr.normalize(null), { steps: {}, brief: '', flows: [], board: null });
+    assert.deepStrictEqual(Pr.normalize(null), { steps: {}, notes: {}, flows: [], board: null });
+  });
+  test('prepare: step notes kept, junk dropped, old brief migrated into step 1 without loss', () => {
+    let n = Pr.normalize({ notes: { map: 'sketch', bogus: 'x', flows: 7, base: '' }, brief: 'old brief' });
+    assert.deepStrictEqual(n.notes, { map: 'sketch', flows: '7', nouns: 'old brief' });
+    n = Pr.normalize({ notes: { nouns: 'new' }, brief: 'old' });
+    assert.strictEqual(n.notes.nouns, 'new\n\nold');
+    assert.deepStrictEqual(Pr.normalize(n), n);
+    assert.strictEqual(Pr.normalize({ notes: { nouns: 'a'.repeat(30000) } }).notes.nouns.length, 20000);
   });
   test('prepare: flow -> policy maps who/what/how onto plan networks and services', () => {
     const al = prepPlan();

@@ -628,7 +628,7 @@
   }
 
   // ---------- prepare: reading order, drawing board, brief + flows ----------
-  // Saved on the client as prep: { steps:{id:true}, brief, flows:[{who,what,how}], board }.
+  // Saved on the client as prep: { steps:{id:true}, notes:{stepId:text}, flows:[{who,what,how}], board }.
   function prep() { const c = cur(); c.prep = Prep.normalize(c.prep); return c.prep; }
   let board = null, prepFor = null;
   const flowRow = (f, i) => `<div class="flowrow" data-flow="${i}">
@@ -636,13 +636,19 @@
       <label class="fld">What<input data-ff="what" list="prepnets" value="${esc(f.what)}" autocomplete="off" placeholder="e.g. Servers"></label>
       <label class="fld">How<input data-ff="how" value="${esc(f.how)}" autocomplete="off" placeholder="e.g. https, rdp"></label>
       <span class="flowact"><button type="button" class="btn sm primary" data-fmake>Make policy</button><button type="button" class="pdelx" data-fdel aria-label="Delete flow ${i + 1}" title="Delete">&times;</button></span></div>`;
-  function renderFlows() { const f = prep().flows; $('#flowlist').innerHTML = f.length ? f.map(flowRow).join('') : '<p class="hint">No flows yet. Add one per thing someone needs to reach.</p>'; }
+  function renderFlows() { const f = prep().flows; $('#flowlist').innerHTML = f.length ? f.map(flowRow).join('') : '<p class="hint">No flows yet. Add one per thing someone needs to reach.</p>'; const nm = $('[data-notes="flows"] .nm'); if (nm) nm.innerHTML = noteMark('flows'); }
+  const FLOWS_HTML = `<datalist id="prepnets"></datalist><h4 class="bh">Flows: who needs what, and how</h4>
+      <p class="hint exp">One row per flow. Who and What: network names from the plan, "internet" or "all internal". How: services (https, rdp, smb, print, dns, ping...) or "block". Make policy opens a filled-in policy to check and save.</p>
+      <div id="flowlist" class="flowlist"></div><div class="btnrow"><button id="btnAddFlow" class="btn sm" type="button">+ Add flow</button></div>`;
+  function noteMark(id) { const n = (prep().notes[id] || '').trim(), f = id === 'flows' ? prep().flows.length : 0; return n || f ? ' <span class="notedot" title="Has notes">&#9679;</span>' : ''; }
   function renderPrep() {
     const pr = prep(), c = cur();
-    $('#prepsteps').innerHTML = Prep.STEPS.map((s, i) => `<li class="prepstep${pr.steps[s.id] ? ' done' : ''}"><label class="check"><input type="checkbox" data-step="${s.id}"${pr.steps[s.id] ? ' checked' : ''}><span><b>${i + 1}. ${esc(s.title)}</b><span class="hint">${esc(s.text)}</span></span></label>${s.tab ? `<button type="button" class="btn sm" data-goto="${s.tab}">Open ${esc(s.tab[0].toUpperCase() + s.tab.slice(1))}</button>` : ''}</li>`).join('');
+    const open = new Set($$('#prepsteps details[open]').map(d => d.dataset.notes));
+    $('#prepsteps').innerHTML = Prep.STEPS.map((s, i) => `<li class="prepstep${pr.steps[s.id] ? ' done' : ''}"><label class="check"><input type="checkbox" data-step="${s.id}"${pr.steps[s.id] ? ' checked' : ''}><span><b>${i + 1}. ${esc(s.title)}</b><span class="hint">${esc(s.text)}</span></span></label>${s.tab ? `<button type="button" class="btn sm" data-goto="${s.tab}">Open ${esc(s.tab[0].toUpperCase() + s.tab.slice(1))}</button>` : ''}<details class="stepnotes" data-notes="${s.id}"${open.has(s.id) ? ' open' : ''}><summary>Notes<span class="nm">${noteMark(s.id)}</span></summary><textarea data-note="${s.id}" rows="4" spellcheck="true" maxlength="20000" aria-label="Notes for step ${i + 1}, ${esc(s.title)}" placeholder="${s.id === 'nouns' ? 'Paste the client brief or your meeting notes' : 'Write things down here'}">${esc(pr.notes[s.id] || '')}</textarea>${s.id === 'flows' ? FLOWS_HTML : ''}</details></li>`).join('');
     const nets = result && result.ok ? Policy.policyNets(result.allocations) : [];
     $('#prepnets').innerHTML = nets.concat(['internet', 'all internal']).map(n => `<option value="${esc(n)}"></option>`).join('');
-    if (prepFor !== c.id) { prepFor = c.id; $('#prepbrief').value = pr.brief; renderFlows(); if (board) board.reload(); }
+    if (prepFor !== c.id) { prepFor = c.id; if (board) board.reload(); }
+    renderFlows();
     if (!board) board = Draw.mount($('#drawbox'), { load: () => prep().board, save: b => { prep().board = b; touch(); renderSummaries(); }, fileName: () => 'subnetpal-sketch-' + ((cur().name || 'client').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'client') });
   }
   function bindPrep() {
@@ -652,13 +658,18 @@
       e.target.closest('.prepstep').classList.toggle('done', e.target.checked); touch(); renderSummaries();
     });
     $('#prepsteps').addEventListener('click', e => { const b = e.target.closest('[data-goto]'); if (b) setOpen(b.dataset.goto, true); });
-    $('#prepbrief').addEventListener('input', e => { prep().brief = e.target.value.slice(0, 20000); touch(); });
-    $('#btnAddFlow').addEventListener('click', () => {
+    $('#prepsteps').addEventListener('input', e => {
+      const id = e.target.dataset && e.target.dataset.note; if (!id) return;
+      const pr = prep(), v = e.target.value.slice(0, 20000); if (v) pr.notes[id] = v; else delete pr.notes[id];
+      const nm = e.target.closest('details').querySelector('.nm'); if (nm) nm.innerHTML = noteMark(id); touch();
+    });
+    $('#prepsteps').addEventListener('click', e => { if (e.target.closest('#btnAddFlow')) addFlow(); });
+    function addFlow() {
       const pr = prep(); if (pr.flows.length >= 60) { toast('That is the most flows one client can hold (60).'); return; }
       pr.flows.push({ who: '', what: '', how: '' }); touch(); renderFlows(); renderSummaries();
       const ins = $$('#flowlist [data-ff="who"]'); if (ins.length) ins[ins.length - 1].focus();
-    });
-    const box = $('#flowlist');
+    }
+    const box = $('#prepsteps');
     box.addEventListener('input', e => { const r = e.target.closest('[data-flow]'), k = e.target.dataset.ff; if (!r || !k) return; const f = prep().flows[+r.dataset.flow]; if (f) { f[k] = e.target.value.slice(0, 200); touch(); } });
     box.addEventListener('click', e => {
       const r = e.target.closest('[data-flow]'); if (!r) return;

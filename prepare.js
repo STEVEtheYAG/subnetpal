@@ -26,7 +26,13 @@
     STEPS.forEach(s => { if (r.steps && r.steps[s.id] === true) steps[s.id] = true; });
     const s = v => String(v == null ? '' : v).slice(0, 200);
     const flows = (Array.isArray(r.flows) ? r.flows : []).slice(0, MAX_FLOWS).filter(f => f && typeof f === 'object').map(f => ({ who: s(f.who), what: s(f.what), how: s(f.how) }));
-    return { steps, brief: String(r.brief == null ? '' : r.brief).slice(0, 20000), flows, board: r.board && typeof r.board === 'object' ? r.board : null };
+    // notes: one text per step. The old single brief box moves into step 1 (nouns), appended if that already has text.
+    const notes = {}, nt = v => String(v == null ? '' : v).slice(0, 20000);
+    STEPS.forEach(s => { const v = r.notes && typeof r.notes === 'object' ? nt(r.notes[s.id]) : ''; if (v) notes[s.id] = v; });
+    const old = nt(r.brief);
+    if (old.trim()) notes.nouns = (notes.nouns ? notes.nouns + '\n\n' : '') + old;
+    if (notes.nouns) notes.nouns = notes.nouns.slice(0, 20000);
+    return { steps, notes, flows, board: r.board && typeof r.board === 'object' ? r.board : null };
   }
   const progress = steps => STEPS.filter(s => steps && steps[s.id]).length;
 
