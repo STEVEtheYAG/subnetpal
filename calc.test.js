@@ -894,7 +894,7 @@ test('defaults: baseline + recommended on, optional off; explicit denies come be
   const { r, al } = Object.assign(polSample(), {});
   const d = Pol.defaults(al); const f = polFlat(d);
   assert.ok(f.includes('Guest>internal:ALL:deny') && f.includes('Guest>internet:DNS,HTTP,HTTPS:accept'));
-  assert.ok(f.indexOf('Guest>internal:ALL:deny') < f.indexOf('Staff LAN>internet:DNS,HTTP,HTTPS,NTP,PING,SP_QUIC:accept'));
+  assert.ok(f.indexOf('Guest>internal:ALL:deny') < f.indexOf('Staff LAN>internet:DNS,HTTP,HTTPS,NTP,PING:accept'));
   const lastDeny = Math.max(...d.map((x, i) => (x.action === 'deny' ? i : -1))), firstAllow = d.findIndex(x => x.action === 'accept');
   assert.ok(lastDeny < firstAllow, 'denies are not all above the allows');
   assert.ok(!d.some(x => x.card === 'pos-servers' || x.card === 'staff-mgmt-admin'));           // optional: off
@@ -1399,7 +1399,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v62'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v63'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1451,7 +1451,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v62/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v63/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1771,7 +1771,8 @@ test('Bob 4: no allow uses ALL; deny policies carry no profiles; every policy is
   bl.filter(b => /set action deny/.test(b)).forEach(b => assert.ok(!/profile|utm-status|application-list|ips-sensor|nat enable/.test(b), b));
   bl.forEach(b => { const id = /edit (\d+)/.exec(b)[1]; assert.ok(b.includes(`delete ${id}\n    edit ${id}`), 'not rebuilt: ' + id); });
   Cards.LIBRARY.filter(c => c.type === 'policy' && c.action === 'accept').forEach(c => assert.notStrictEqual(c.service, 'ALL', c.id));
-  assert.ok(/set udp-portrange 443/.test(cli) && /edit "SP_QUIC"/.test(cli));                    // custom UDP services are created before use
+  assert.ok(/set udp-portrange 10000-20000/.test(cli) && /edit "SP_RTP"/.test(cli));            // custom UDP services are created before use
+  assert.ok(!/SP_QUIC/.test(cli));                                                               // QUIC is off by default (Harbourline review)
   const i = 3, p = bobBuild().p, r = bobBuild().r, list = Pol.effective(p, r.allocations);       // one policy on its own: rebuilt, then moved back into place
   const one = F.toPolicyFortiOS(r, Object.assign({}, p, { pol: { edited: true, list: [list[i]], toggles: {} } }), '', { idOffset: i, only: true, total: list.length });
   assert.ok(one.includes(`delete ${1001 + i}\n    edit ${1001 + i}`) && one.includes(`move ${1001 + i} after ${1000 + i}`) && !/edit 1000\b/.test(one));
@@ -2285,4 +2286,61 @@ test('done ticks: "Added to FortiGate" on network tiles, policy planks and both 
   assert.ok(app.indexOf("topBar('__vpn'") > 0 && app.indexOf("topBar(a.name") > 0 && app.indexOf("topBar('pol:' + i") > 0);
   assert.ok(css.includes('.donelab') && css.includes('.ncard.done') && css.includes('.topbar'));
   assert.ok(!/\(\?<[=!]/.test(app));
+});
+
+// ---- Bob's Harbourline review (26 Nov) ----
+const hbBuild = (extra) => {
+  const c = I.newClient('Harbourline Physio'); c.portMode = 'new';
+  Object.assign(c.intake.counts, { staff: 40, servers: 6, printers: 6, guest: 60, pos: 4 }); Object.assign(c.intake.req, { servers: true, guest: true, printers: true, pos: true });
+  c.intake.industry = 'clinic'; c.intake.webFilter = true; I.applyIntake(c);
+  c.v6 = { enabled: true, prefix: '2001:db8:abcd::/48' };
+  const p0 = I.toProject(c), r = C.plan(p0); C6.annotate(r, c.v6);
+  const P = require('./prepare.js');
+  c.pol = { edited: true, list: Pol.defaults(r.allocations, Pol.cardCtx(p0, r.allocations)), toggles: {} };
+  (extra || [['printers', 'servers', 'smb'], ['staff', 'servers', 'https'], ['staff', 'printers', 'print'], ['staff', 'internet', ''], ['printers', 'servers', 'smb'], ['servers', 'internet', 'https']])
+    .forEach(f => c.pol.list.push(P.flowToPolicy({ who: f[0], what: f[1], how: f[2] }, r.allocations).policy));
+  const p = I.toProject(c);
+  return { c, p, r, cli: F.toFortiOS(r, p, '') };
+};
+test('Harbourline: an allow made after a block it would hide is lifted above it (Printers to Servers SMB above Printers to internal)', () => {
+  const { p, r } = hbBuild(), f = flat(Pol.effective(p, r.allocations));
+  const allow = f.indexOf('Printers>Servers:SMB:accept'), block = f.indexOf('Printers>internal:ALL:deny');
+  assert.ok(allow >= 0 && block >= 0 && allow < block, f.join('\n'));
+  const t = Pol.tidy([Pol.mkPolicy({ src: 'Guest', dst: 'internal', service: 'ALL', action: 'deny' }), Pol.mkPolicy({ src: 'Guest', dst: 'internet', service: 'HTTPS' })], r.allocations);
+  assert.strictEqual(t.moved, 0);                                                                    // a block on other destinations is left alone
+  const t2 = Pol.tidy([Pol.mkPolicy({ src: 'Printers', dst: 'Servers', service: 'SMB', action: 'deny' }), Pol.mkPolicy({ src: 'Printers', dst: 'Servers', service: 'HTTPS' })], r.allocations);
+  assert.strictEqual(t2.moved, 0);                                                                   // a narrower block that does not cover it stays on top
+});
+test('Harbourline: duplicates fold into the first matching policy (no _2/_3), services merge when the settings match', () => {
+  const { p, r, cli } = hbBuild();
+  const list = Pol.effective(p, r.allocations), keys = list.map(x => `${x.src}>${x.dst}:${x.action}`);
+  assert.strictEqual(new Set(keys).size, keys.length, keys.join('\n'));
+  assert.ok(!/set name "SP6?_[^"]*_\d"/.test(cli));
+  const t = Pol.tidy([Pol.mkPolicy({ src: 'Staff LAN', dst: 'Servers', service: 'HTTPS', nat: false }), Pol.mkPolicy({ src: 'Staff LAN', dst: 'Servers', service: 'SMB,HTTPS', nat: false })], r.allocations);
+  assert.strictEqual(t.list.length, 1); assert.strictEqual(t.list[0].service, 'HTTPS,SMB'); assert.strictEqual(t.merged, 1);
+  const off = Pol.mkPolicy({ src: 'Staff LAN', dst: 'Servers', service: 'SSH', enabled: false });
+  assert.strictEqual(Pol.tidy([t.list[0], off], r.allocations).list.length, 2);                      // a disabled copy is kept (the engineer parked it)
+  const again = Pol.tidy(list, r.allocations); assert.strictEqual(again.merged + again.moved, 0);    // tidy is stable
+  assert.ok(require('fs').readFileSync(__dirname + '/app.js', 'utf8').includes('Policy.tidy(cur().pol.list'));
+});
+test('Harbourline: QUIC off by default, app control on outbound, IPv6 outbound gets the same profiles, no RDP to printers or tills, admin lock-out', () => {
+  const { cli } = hbBuild(), bl = [].concat(...cli.split('config firewall policy\n').slice(1).map(t => polBlocks('config firewall policy\n' + t)));
+  assert.ok(!/SP_QUIC/.test(cli));
+  assert.ok(!Cards.LIBRARY.some(k => /SP_QUIC/.test(k.service || '')));
+  const out = bl.filter(b => /set dstintf "port1"/.test(b) && /set action accept/.test(b));
+  assert.ok(out.length >= 8);
+  out.forEach(b => assert.ok(/application-list "default"/.test(b) && /av-profile "default"/.test(b) && /ips-sensor "default"/.test(b), b));
+  out.filter(b => /srcaddr6/.test(b)).forEach(b => assert.ok(/set nat disable/.test(b) && !/nat enable/.test(b), b));
+  assert.ok(out.some(b => /srcaddr6/.test(b)));
+  const mg = bl.filter(b => /SP_Management_to_(Printers|POS)"/.test(b));
+  assert.strictEqual(mg.length, 2); mg.forEach(b => assert.ok(!/"RDP"/.test(b) && /"SNMP"/.test(b), b));
+  assert.ok(bl.some(b => /SP_Management_to_Servers"/.test(b) && /"RDP"/.test(b)));
+  assert.ok(/set admin-lockout-threshold 3/.test(cli) && /set admin-lockout-duration 300/.test(cli));
+});
+test('Harbourline: the Lab keeps the pasted policy sequence (no re-sort by ID) and Send to Bob names the hand steps', () => {
+  const mock = require('fs').readFileSync(__dirname + '/lab/index.html', 'utf8');
+  assert.ok(mock.includes('spOrd=new WeakMap') && mock.includes('n[r]=spEnt(p).map('));                // backup parser keeps "edit" order, so move lines stick
+  assert.ok(/Hand steps SubnetPal leaves on its checklist/.test(mock) && /FortiToken MFA/.test(mock));
+  const { cli } = hbBuild(), m = cli.match(/move 1000 after (\d+)/), ids = cli.match(/edit (10\d\d)\n/g).map(s => +s.slice(5));
+  assert.ok(m && +m[1] === Math.max.apply(null, ids.filter(x => x !== 1000)));
 });

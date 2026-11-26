@@ -233,7 +233,9 @@
   const adminLines = mg => ['', `# ADMIN HARDENING: admin may only log in from ${mg.name} (${mg.cidr}). !! LOCK-OUT RISK: if you are managing from any other address (another VLAN, the VM host network, port1), your next login is refused. Before pasting, connect a PC to ${mg.name} or add your own address as trusthost2. Assumes the account is called "admin" (check: show system admin).`,
     '# MFA: give the admin account a FortiToken (System > Administrators > admin > Two-factor authentication). Not scripted: it needs a token serial number.',
     '# Backup admin: create a second super_admin with its own strong password, MFA and the same trusted host, test it, then rename or retire the default "admin" (FortiOS cannot rename an account in place: create the new one, then delete "admin"). Not scripted: it needs a password.',
-    'config system admin', '    edit "admin"', `        set trusthost1 ${mg.network} ${mg.netmask}`, '    next', 'end'];
+    'config system admin', '    edit "admin"', `        set trusthost1 ${mg.network} ${mg.netmask}`, '    next', 'end',
+    '# Login lock-out: 3 wrong passwords lock that address out for 5 minutes. The admin HTTPS port is left at 443 (moving it to e.g. 8443 is optional; change it in System > Settings if the client wants it).',
+    'config system global', '    set admin-lockout-threshold 3', '    set admin-lockout-duration 300', 'end'];
   // Optional per-network DNS: dns = { server, domain }. Empty = "Same as System DNS". Only a plain IPv4 address is accepted.
   const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
   const okIp = s => { const m = IPV4.exec(String(s || '').trim()); return !!m && m.slice(1).every(x => Number(x) <= 255); };
@@ -317,6 +319,21 @@
     }
     // Optional security profiles (website filter, application control) attached to individual policies.
     const prof = profileCLI(L, pols);
+    // Security profiles on one accept policy. Used for IPv4 and IPv6 alike (Bob's Harbourline review: IPv6 outbound had none).
+    const utmLines = p => {
+      const pr = prof.get(p.id), u = p.utm || {}, out = [];
+      const on = ['av', 'web', 'dns', 'app', 'ips', 'file'].filter(k => u[k]);
+      if (p.action === 'accept' && (pr || on.length)) {
+        out.push('        set utm-status enable', `        set ssl-ssh-profile ${q(p.ssl || 'certificate-inspection')}`);
+        if (pr && pr.web) out.push(`        set webfilter-profile ${q(pr.web)}`); else if (u.web) out.push('        set webfilter-profile "default"');
+        if (pr && pr.app) out.push(`        set application-list ${q(pr.app)}`); else if (u.app) out.push('        set application-list "default"');
+        if (u.av) out.push('        set av-profile "default"');
+        if (u.dns) out.push('        set dnsfilter-profile "default"');
+        if (u.ips) out.push('        set ips-sensor "default"');
+        if (u.file) out.push('        set file-filter-profile "default"');
+      } else if (p.action === 'accept' && p.ssl) out.push(`        set ssl-ssh-profile ${q(p.ssl)}`);
+      return out;
+    };
     const usedNames = new Set();
     const polName = (pre, p) => { let n = (pre + fname(p.name.replace('(block)', 'block'))).slice(0, 35), k = 2; while (usedNames.has(n)) n = (pre + fname(p.name.replace('(block)', 'block'))).slice(0, 32) + '_' + k++; usedNames.add(n); return n; };
     const customSvc = Object.keys(Policy.CUSTOM_SERVICES || {}).filter(n => pols.some(p => p.services.indexOf(n) >= 0));
@@ -355,17 +372,7 @@
       L.push(`        set logtraffic ${p.log ? p.logmode : 'disable'}`);
       if (p.log && p.logstart) L.push('        set logtraffic-start enable');
       if (p.capture) L.push('        set capture-packet enable');
-      const pr = prof.get(p.id), u = p.utm || {};
-      const on = ['av', 'web', 'dns', 'app', 'ips', 'file'].filter(k => u[k]);
-      if (p.action === 'accept' && (pr || on.length)) {
-        L.push('        set utm-status enable', `        set ssl-ssh-profile ${q(p.ssl || 'certificate-inspection')}`);
-        if (pr && pr.web) L.push(`        set webfilter-profile ${q(pr.web)}`); else if (u.web) L.push('        set webfilter-profile "default"');
-        if (pr && pr.app) L.push(`        set application-list ${q(pr.app)}`); else if (u.app) L.push('        set application-list "default"');
-        if (u.av) L.push('        set av-profile "default"');
-        if (u.dns) L.push('        set dnsfilter-profile "default"');
-        if (u.ips) L.push('        set ips-sensor "default"');
-        if (u.file) L.push('        set file-filter-profile "default"');
-      } else if (p.action === 'accept' && p.ssl) L.push(`        set ssl-ssh-profile ${q(p.ssl)}`);
+      L.push(...utmLines(p));
       L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`);
       L.push('    next');
     });
@@ -383,7 +390,7 @@
         L.push('', 'config firewall addrgrp6', '    edit "SP6_INTERNAL"', '        set member ' + internal.map(x => q(x.obj6)).join(' '), '    next', 'end');
       }
       if (pols.length) {
-        L.push('', '# IPv6 policies mirror the IPv4 ones (no NAT, no website or application profiles). FortiOS 7.0+ has one policy table: IPv6 policies are "config firewall policy" entries with srcaddr6/dstaddr6 (policy6 no longer exists). ' + Policy.NOTE);
+        L.push('', '# IPv6 policies mirror the IPv4 ones: same services and the same security profiles on internet policies, but no NAT. They only pass traffic once the WAN has IPv6 from the ISP; until then they are ready and safe. FortiOS 7.0+ has one policy table: IPv6 policies are "config firewall policy" entries with srcaddr6/dstaddr6 (policy6 no longer exists). ' + Policy.NOTE);
         L.push('config firewall policy');
         usedNames.clear();
         pols.forEach((p, k) => {
@@ -395,6 +402,8 @@
           L.push(`        set dstaddr6 ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
           L.push(`        set schedule ${q(p.sched)}`, `        set service ${p.services.map(q).join(' ')}`, `        set logtraffic ${p.log ? p.logmode : 'disable'}`);
           if (!p.enabled) L.push('        set status disable');
+          if (p.action === 'accept') L.push('        set nat disable');
+          L.push(...utmLines(p));
           L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`, '    next');
         });
         L.push('    edit ' + POL6_ID0, '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr6 "all"', '        set dstaddr6 "all"',

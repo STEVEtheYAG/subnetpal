@@ -20,6 +20,8 @@
   const D = (id, name, o) => Object.assign({ id, name, type: 'advice', tier: 'recommended', risk: 'low', tags: [], why: '', text: '' }, o);
 
   const intakeOf = ctx => (ctx && ctx.intake) || {};
+  // Devices that are managed over web/SSH/SNMP and never run Windows remote desktop (Bob's Harbourline review: no RDP to printers or tills).
+  const DEVICE_KINDS = ['printers', 'pos', 'voice', 'cameras', 'iot', 'other'];
 
   const LIBRARY = [
     // ---- explicit denies ----
@@ -43,7 +45,7 @@
       why: 'Switch, access point and firewall admin pages are reachable from the Management network only. Guests, IoT, printers and card terminals are already refused by their own rules; this covers phones and cameras.' }),
 
     // ---- common allows ----
-    P('staff-internet', 'Staff to the internet', { service: 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC', src: ST, dst: 'internet', tier: 'baseline', tags: ['staff-lan'],
+    P('staff-internet', 'Staff to the internet', { service: 'DNS,HTTP,HTTPS,NTP,PING', src: ST, dst: 'internet', tier: 'baseline', tags: ['staff-lan'],
       why: 'Staff need web, email and cloud apps to do their jobs.' }),
     P('staff-servers', 'Staff to servers', { service: 'DNS,HTTPS,SMB,RDP,KERBEROS,LDAP,NTP,DCE-RPC', src: ST, dst: ['servers'], tier: 'baseline', tags: ['staff-lan', 'servers-dmz'],
       why: 'Staff open shared files, line-of-business apps and databases on the on-site servers.' }),
@@ -71,7 +73,7 @@
       why: 'The terminals only need name lookups, secure web access and time sync, so that is all they get. It is not limited to one provider address yet: ask the provider which addresses it uses and narrow it once known.' }),
     P('mgmt-internet', 'Management to the internet', { service: 'DNS,HTTP,HTTPS,NTP,PING', src: ['mgmt'], dst: 'internet', tier: 'baseline', tags: ['management', 'wifi-ap'],
       why: 'Switches, access points and the firewall fetch firmware, licences and cloud-managed settings.' }),
-    P('mgmt-admin', 'Management to internal networks', { service: 'HTTPS,SSH,RDP,PING,SNMP', src: ['mgmt'], dst: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'dmz'], tier: 'baseline', risk: 'high', tags: ['management'],
+    P('mgmt-admin', 'Management to internal networks', { service: 'HTTPS,SSH,RDP,PING,SNMP', deviceService: 'HTTPS,SSH,PING,SNMP', src: ['mgmt'], dst: ['staff', 'lan', 'servers', 'voice', 'cameras', 'iot', 'other', 'printers', 'pos', 'dmz'], tier: 'baseline', risk: 'high', tags: ['management'],
       why: 'Administrators on the Management network reach every device they look after. This is the one network allowed to do that.' }),
 
     // ---- optional extras (off by default) ----
@@ -137,7 +139,8 @@
   function toPolicy(card, pair, ctx) {
     const dst = pair.to === 'internet' || pair.to === 'internal' ? pair.to : pair.to.name;
     const pol = {
-      card: card.id, name: card.action === 'deny' ? `${pair.from.name} to ${dst} (block)` : '', src: pair.from.name, dst, service: card.service,
+      card: card.id, name: card.action === 'deny' ? `${pair.from.name} to ${dst} (block)` : '', src: pair.from.name, dst,
+      service: card.deviceService && pair.to.name && DEVICE_KINDS.indexOf(Access.kindOf(pair.to)) >= 0 ? card.deviceService : card.service,
       action: card.action, nat: card.action === 'accept' && dst === 'internet', log: true,
     };
     if (ctx && ctx.webFilter && pol.action === 'accept' && dst === 'internet' && /HTTPS|ALL/.test(card.service)) {

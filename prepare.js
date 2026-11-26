@@ -64,7 +64,7 @@
     const words = how.replace(new RegExp(DENY_WORDS.source, 'g'), ' ').replace(/\b(?:access|access to|to|only|allowed|allow|from)\b/g, ' ').replace(/\s+/g, ' ').trim().replace(/^[,/+&\s]+|[,/+&\s]+$/g, '');
     let service = '';
     if (words) { const sv = Policy.serviceOf('on ' + words); if (sv.error) why.push(sv.error + ': pick the services'); else service = sv.service; }
-    if (!service) service = deny ? 'ALL' : dst === 'internet' ? 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC' : 'PING';
+    if (!service) service = deny ? 'ALL' : dst === 'internet' ? 'DNS,HTTP,HTTPS,NTP,PING' : 'PING';
     if (!deny && service === 'ALL') why.push('ALL services on an allow is wide open: narrow it down');
     if (!deny && !words && dst !== 'internet') why.push('no "how": pick the services');
     const p = Policy.mkPolicy({ src, dst, service, action: deny ? 'deny' : 'accept', nat: !deny && dst === 'internet',

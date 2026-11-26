@@ -860,6 +860,7 @@
     const c = cur();
     if (!c.pol || !Array.isArray(c.pol.list)) c.pol = { edited: false, list: [], toggles: {} };
     if (!c.pol.edited) { c.pol.list = Policy.defaults(result.allocations, Policy.cardCtx(project(), result.allocations)); c.pol.edited = true; }
+    c.pol.list = Policy.tidy(c.pol.list, result.allocations).list;   // same order the screen and the CLI show (Policy.effective tidies too)
     return c.pol.list;
   }
   const TIER_LABEL = { baseline: 'Baseline', recommended: 'Recommended', optional: 'Optional' };
@@ -1071,7 +1072,9 @@
   }
   function bindPolicies() {
     const box = $('#pollist'), pop = $('#cardbody');
-    const edit = fn => { const list = materialize(); fn(list); touch(); };
+    // Every edit is tidied: duplicates fold into the first matching policy, an allow hidden under a block moves above it (Bob's Harbourline review).
+    const edit = fn => { const list = materialize(); fn(list); const t = Policy.tidy(cur().pol.list, result.allocations); cur().pol.list = t.list; touch(); return t; };
+    const tidyNote = t => (t && t.merged ? ' Merged with a matching policy (no duplicates).' : '') + (t && t.moved ? ' Moved above the block that would hide it.' : '');
     const rerender = () => { renderPolicies(); renderSummaries(); };
     const onPolChange = e => {
       const t = e.target; if (t.dataset && t.dataset.done !== undefined) return; if (!polDraft || !t.closest('.popol')) return;
@@ -1110,8 +1113,8 @@
       if (e.target.closest('[data-pcancel]')) { closeCard(); return; }
       if (e.target.closest('[data-psave]') && polDraft) {
         const d = polDraft, i = polOpen, isNew = polNew; polDraft = null;
-        edit(list => { if (isNew) list.push(d); else list[i] = d; });
-        closeCard(); rerender(); toast(isNew ? 'Policy added' : 'Policy saved'); return;
+        const t = edit(list => { if (isNew) list.push(d); else list[i] = d; });
+        closeCard(); rerender(); toast((isNew ? 'Policy added.' : 'Policy saved.') + tidyNote(t)); return;
       }
     });
     pop.addEventListener('click', e => {
@@ -1192,7 +1195,7 @@
       drag = null;
       setTimeout(() => {
         d.snks.forEach(x => { x.style.transform = ''; x.classList.remove('shifted'); }); box.classList.remove('dragmode');
-        if (to !== from) { edit(list => { const x = list.splice(from, 1)[0]; list.splice(to, 0, x); }); renderPolicies(); renderSummaries(); toast(`Moved to ${to + 1}`); }
+        if (to !== from) { const t = edit(list => { const x = list.splice(from, 1)[0]; list.splice(to, 0, x); }); renderPolicies(); renderSummaries(); toast(t.moved ? 'An allow cannot sit under a block that hides it, so it stays above.' : `Moved to ${to + 1}`); }
       }, 170);
     });
     box.addEventListener('pointercancel', clearDrag);

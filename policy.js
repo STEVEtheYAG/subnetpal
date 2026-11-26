@@ -13,7 +13,8 @@
     { v: 'DNS', l: 'DNS' }, { v: 'HTTP', l: 'HTTP' }, { v: 'HTTPS', l: 'HTTPS' }, { v: 'SSH', l: 'SSH' }, { v: 'RDP', l: 'RDP' },
     { v: 'SMB', l: 'SMB (file sharing)' }, { v: 'SMTP', l: 'SMTP (email)' }, { v: 'PING', l: 'Ping' }, { v: 'FTP', l: 'FTP' }, { v: 'NTP', l: 'NTP' },
     { v: 'SP_PRINT', l: 'Printing (TCP 9100, 631, 515)' },
-    { v: 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC', l: 'Internet basics (web, QUIC, DNS, NTP, ping)' },
+    { v: 'DNS,HTTP,HTTPS,NTP,PING', l: 'Internet basics (web, DNS, NTP, ping)' },
+    { v: 'SP_QUIC', l: 'QUIC (UDP 443): skips web filter, off by default' },
   ];
   // Custom service objects SubnetPal creates itself (no FortiOS predefined service covers them). Emitted by format.js.
   const CUSTOM_SERVICES = {
@@ -21,8 +22,8 @@
     SP_QUIC: { udp: '443', comment: 'QUIC / HTTP3 (Google, Microsoft 365, video calls)' },
     SP_RTP: { udp: '10000-20000', comment: 'RTP voice media (check the phone system range)' },
   };
-  // Security profiles every Accept-to-internet policy gets unless the engineer turns one off (built-in "default" profiles, certificate inspection).
-  const OUT_UTM = { av: true, web: true, dns: true, ips: true };
+  // Security profiles every Accept-to-internet policy gets unless the engineer turns one off (built-in "default" profiles, certificate inspection; app control added after Bob's Harbourline review).
+  const OUT_UTM = { av: true, web: true, dns: true, ips: true, app: true };
   const utmOf = p => (p.action === 'deny' ? {} : p.utm ? Object.assign({}, p.utm) : p.dst === 'internet' || p.to === 'internet' ? Object.assign({}, OUT_UTM) : {});
   // FortiGuard web category and application category IDs. Unverified: check them on the lab VM.
   const WEB_CATS = [
@@ -55,7 +56,7 @@
     return Cards.build(allocs || [], ctx).map(mkPolicy);
   }
   // Edited list wins; otherwise the defaults follow the plan.
-  const effective = (project, allocs) => (project && project.pol && project.pol.edited ? project.pol.list : defaults(allocs, cardCtx(project, allocs)));
+  const effective = (project, allocs) => (project && project.pol && project.pol.edited ? tidy(JSON.parse(JSON.stringify(project.pol.list || [])), allocs).list : defaults(allocs, cardCtx(project, allocs)));
 
   // The library for this plan as the Policies view shows it. Once the list is edited, a card counts as "on" when its policies are in the list.
   function cardView(project, allocs) {
@@ -157,7 +158,7 @@
       const netOk = t => (allocs || []).some(a => a.name === t && Access.hasPolicy(a));
       if (/internet only|only (?:the )?internet|only (?:access|reach|get|go to) (?:the )?internet|nothing else|no (?:other|internal) access/.test(clause) && hasNet.length && netOk(hasNet[0])) {
         const n = hasNet[0], k = Access.kindOf((allocs || []).find(a => a.name === n));
-        policies.push(mkPolicy({ src: n, dst: 'internet', service: k === 'guest' ? 'DNS,HTTP,HTTPS' : 'DNS,HTTP,HTTPS,NTP,PING,SP_QUIC', action: 'accept', nat: true, replaceSrc: true }));
+        policies.push(mkPolicy({ src: n, dst: 'internet', service: k === 'guest' ? 'DNS,HTTP,HTTPS' : 'DNS,HTTP,HTTPS,NTP,PING', action: 'accept', nat: true, replaceSrc: true }));
         policies.push(mkPolicy({ src: n, dst: 'internal', service: 'ALL', action: 'deny', nat: false, name: `${n} to internal (block)` }));
         return;
       }
@@ -185,6 +186,38 @@
     return clean.filter(p => p.action === 'deny').concat(clean.filter(p => p.action !== 'deny'), rest);
   }
 
+  // ---- tidy (Bob's Harbourline review): no duplicates, no allow hidden under a block ----
+  const svcList = p => String(p.service || 'ALL').split(',').map(s => s.trim()).filter(Boolean);
+  const covers = (big, small) => big.indexOf('ALL') >= 0 || small.every(s => big.indexOf(s) >= 0);
+  // Settings that must match before two allows can share one policy (services are what gets merged).
+  const sig = p => JSON.stringify([p.enabled !== false, p.sched || 'always', !!p.nat, p.insp || 'flow', utmOf(p), p.ssl || '', p.logmode || 'all', p.log !== false]);
+  // Does deny d (same source) catch every packet of allow a? d to "internal" covers any network in the SP_INTERNAL group.
+  const blocks = (d, a, internal) => d.action === 'deny' && d.enabled !== false && d.src === a.src && covers(svcList(d), svcList(a)) &&
+    (d.dst === a.dst || (d.dst === 'internal' && a.dst !== 'internet' && a.dst !== 'internal' && (!internal || internal.has(a.dst))));
+  // -> { list, merged, moved }. merged: later duplicates folded into the first policy with the same source, destination and action
+  // (dropped when the first already has every service, services added when the settings match). moved: allows lifted above a block that hid them.
+  function tidy(list, allocs) {
+    const internal = allocs ? new Set((allocs || []).filter(a => Access.hasPolicy(a) && Access.isInternal(a)).map(a => a.name)) : null;
+    const out = []; let merged = 0, moved = 0;
+    (list || []).forEach(p => {
+      const same = out.find(x => x.src === p.src && x.dst === p.dst && x.action === p.action && x.enabled !== false);
+      if (same && p.enabled !== false) {
+        const a = svcList(same), b = svcList(p);
+        if (covers(a, b)) { merged++; return; }
+        if (p.action === 'deny' || sig(same) === sig(p)) {
+          const all = a.concat(b.filter(s => a.indexOf(s) < 0));
+          same.service = all.indexOf('ALL') >= 0 ? 'ALL' : all.join(','); merged++; return;
+        }
+      }
+      if (p.action !== 'deny' && p.enabled !== false) {
+        const at = out.findIndex(d => blocks(d, p, internal));
+        if (at >= 0) { out.splice(at, 0, p); moved++; return; }
+      }
+      out.push(p);
+    });
+    return { list: out, merged, moved };
+  }
+
   // List -> the shape the FortiOS exporter uses. Policies naming a network that is not in the plan are skipped.
   function resolve(list, allocs) {
     const by = new Map((allocs || []).filter(Access.hasPolicy).map(a => [a.name, a]));
@@ -206,5 +239,5 @@
     return { pols, skipped };
   }
 
-  return { NOTE, SERVICES, CUSTOM_SERVICES, OUT_UTM, utmOf, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, resolve, blankProfile, aliasTable, mentions, serviceOf };
+  return { NOTE, SERVICES, CUSTOM_SERVICES, OUT_UTM, utmOf, WEB_CATS, APP_CATS, mkPolicy, policyName, defaults, effective, cardCtx, cardView, setCardInList, setWebPreset, setWebGroup, policyNets, parse, apply, tidy, resolve, blankProfile, aliasTable, mentions, serviceOf };
 }));
