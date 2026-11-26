@@ -1399,7 +1399,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v63'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v64'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1451,7 +1451,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v63/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v64/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -2263,6 +2263,182 @@ DONE WHEN (prove it)
     assert.ok(/\.results \{[^}]*min-width: 0/.test(css));
     [fs.readFileSync('./draw.js', 'utf8'), fs.readFileSync('./prepare.js', 'utf8'), app].forEach(src => assert.ok(!/\(\?<[=!]/.test(src)));
     assert.ok(!/document\.|addEventListener/.test(fs.readFileSync('./prepare.js', 'utf8')), 'no DOM in prepare.js');
+  });
+  console.log('Bob checks in the Lab');
+  const BC = require('./bobcheck.js');
+  const bcFind = (r, re) => r.findings.filter(f => re.test(f.title));
+  const BAD = `config system global
+    set hostname "FGT60F"
+    set admin-lockout-threshold 10
+    set admintimeout 480
+end
+config system interface
+    edit "port1"
+        set role wan
+        set mode dhcp
+        set allowaccess ping https http
+    next
+    edit "Staff_LAN_Long_V20"
+        set ip 10.1.20.1 255.255.255.0
+        set type vlan
+        set vlanid 20
+        set interface "port8"
+        set allowaccess ping https
+    next
+    edit "Guest_V70"
+        set ip 10.1.20.129 255.255.255.128
+        set type vlan
+        set vlanid 70
+        set interface "port8"
+    next
+end
+config system dhcp server
+    edit 101
+        set interface "Staff_LAN_Long_V20"
+        set default-gateway 10.1.20.254
+        set netmask 255.255.255.0
+        config ip-range
+            edit 1
+                set start-ip 10.1.20.1
+                set end-ip 10.1.20.200
+            next
+        end
+    next
+end
+config firewall address
+    edit "SP_Staff"
+        set subnet 10.1.20.5 255.255.255.0
+    next
+    edit "SP_Old"
+        set subnet 10.9.0.0 255.255.0.0
+    next
+end
+config firewall addrgrp
+    edit "SP_INTERNAL"
+        set member "SP_Staff" "SP_Gone"
+    next
+end
+config firewall policy
+    edit 1000
+        set name "SP_Final_deny"
+        set srcintf "any"
+        set dstintf "any"
+        set action deny
+        set srcaddr "all"
+        set dstaddr "all"
+        set service "ALL"
+        set logtraffic all
+    next
+    edit 1001
+        set name "Staff_out"
+        set srcintf "Staff_LAN_Long_V20"
+        set dstintf "port1"
+        set action accept
+        set srcaddr "SP_Staff"
+        set dstaddr "all"
+        set service "ALL"
+    next
+    edit 1002
+        set name "Staff_to_guest"
+        set srcintf "Staff_LAN_Long_V20"
+        set dstintf "Guest_V70"
+        set action accept
+        set srcaddr "SP_Staff"
+        set dstaddr "all"
+        set service "HTTPS"
+        set nat enable
+    next
+    move 1000 before 1001
+end
+config router static
+end
+config system admin
+    edit "admin"
+        set accprofile "super_admin"
+        set two-factor disable
+    next
+end
+config vpn ipsec phase1-interface
+    edit "RemoteVPN"
+        set type dynamic
+        set interface "port1"
+        set proposal 3des-sha1
+        set dhgrp 2 14
+        set psksecret PSK_CHANGE_ME
+    next
+end
+`;
+  test('Bob checks: parser reads tables, quoted values, nested config and move lines', () => {
+    const t = BC.parse(BAD);
+    assert.deepStrictEqual(t['firewall policy'].list.map(e => e.id), ['1000', '1001', '1002']);
+    assert.deepStrictEqual(t['firewall addrgrp'].list[0].set.member, ['SP_Staff', 'SP_Gone']);
+    assert.strictEqual(t['system dhcp server'].list[0].sub['ip-range'].list[0].set['start-ip'][0], '10.1.20.1');
+    assert.strictEqual(t['system global'].set.hostname[0], 'FGT60F');
+    const m = BC.parse('config firewall policy\n    edit 1\n    next\n    edit 2\n    next\n    edit 3\n    next\n    move 1 after 3\n    delete 2\nend');
+    assert.deepStrictEqual(m['firewall policy'].list.map(e => e.id), ['3', '1']);
+    assert.deepStrictEqual(BC.tokens('set name "a b" c'), ['set', 'name', 'a b', 'c']);
+  });
+  test('Bob checks: interfaces flags long VLAN names, overlap, WAN admin access, clear-text admin, DHCP gateway and range', () => {
+    const r = BC.check(BAD, 'interfaces');
+    assert.ok(r.findings.every(f => f.section === 'interfaces'));
+    assert.strictEqual(bcFind(r, /"Staff_LAN_Long_V20" is 18 characters/)[0].sev, 'High');
+    assert.ok(bcFind(r, /overlap/).length === 1 && bcFind(r, /Admin access \(https\) open on WAN "port1"/)[0].sev === 'High');
+    assert.ok(/set allowaccess ping\n/.test(bcFind(r, /http admin access on "port1"/)[0].fix));            // WAN fix strips management too
+    assert.strictEqual(bcFind(r, /Admin GUI\/SSH open on "Staff_LAN_Long_V20"/)[0].sev, 'Medium');
+    assert.ok(bcFind(r, /hands out gateway 10\.1\.20\.254/).length && bcFind(r, /includes the gateway/).length);
+    assert.ok(bcFind(r, /No DHCP server on "Guest_V70"/)[0].sev === 'Low');
+  });
+  test('Bob checks: objects flags host bits, unused objects, missing group members and the internal group gap', () => {
+    const r = BC.check(BAD, 'objects');
+    assert.ok(bcFind(r, /"SP_Staff" has host bits set/)[0].fix.includes('set subnet 10.1.20.0 255.255.255.0'));
+    assert.ok(bcFind(r, /not used/)[0].why.includes('SP_Old'));
+    assert.strictEqual(bcFind(r, /lists missing object "SP_Gone"/)[0].sev, 'High');
+    assert.ok(!bcFind(r, /misses .*Guest/).length);                                                     // guest stays out of SP_INTERNAL on purpose
+  });
+  test('Bob checks: policies flags final deny not last, shadowed allows, ALL on allows, NAT rules and missing profiles', () => {
+    const r = BC.check(BAD, 'policies');
+    const fd = bcFind(r, /Final deny 1000 "SP_Final_deny" is not last/)[0];
+    assert.ok(fd.sev === 'High' && fd.fix.includes('move 1000 after 1002'));
+    assert.ok(bcFind(r, /1001 "Staff_out" allows service ALL/).length);
+    assert.strictEqual(bcFind(r, /1001 "Staff_out" goes to the internet without NAT/)[0].sev, 'High');
+    assert.strictEqual(bcFind(r, /1002 "Staff_to_guest" has NAT on an internal flow/)[0].sev, 'High');
+    assert.ok(bcFind(r, /1001 "Staff_out" has no SSL inspection, antivirus, web filter, IPS, DNS filter, application control/).length);
+    const sh = BC.check('config firewall policy\n edit 1\n set srcintf "a"\n set dstintf "b"\n set action deny\n set srcaddr "all"\n set dstaddr "all"\n set service "ALL"\n set logtraffic all\n next\n edit 2\n set srcintf "a"\n set dstintf "b"\n set action accept\n set srcaddr "all"\n set dstaddr "all"\n set service "HTTPS"\n next\nend', 'policies');
+    assert.ok(bcFind(sh, /^2 is hidden by 1$/)[0].fix.includes('move 2 before 1'));
+  });
+  test('Bob checks: routes, VPN and admin', () => {
+    assert.ok(!bcFind(BC.check(BAD, 'routes'), /No default route/).length);                             // DHCP WAN brings the default route
+    assert.ok(bcFind(BC.check(BAD.replace('set mode dhcp', 'set mode static'), 'routes'), /No default route/)[0].sev === 'High');
+    const v = BC.check(BAD, 'vpn');
+    ['placeholder pre-shared key', 'weak encryption', 'DH group 2', 'has no phase 2', 'No policy uses tunnel'].forEach(s => assert.ok(v.findings.some(f => f.title.includes(s) && f.sev === 'High'), s));
+    assert.ok(BC.check('config system interface\nend', 'vpn').passed[0].title.includes('No IPsec VPN'));
+    const a = BC.check(BAD, 'admin');
+    ['has no trusted hosts', 'Admin login reachable from the internet'].forEach(s => assert.ok(a.findings.some(f => f.title.includes(s) && f.sev === 'High'), s));
+    ['has no MFA', 'Only one super_admin', 'lockout after 10 tries', 'idle timeout is 480'].forEach(s => assert.ok(a.findings.some(f => f.title.includes(s) && f.sev === 'Medium'), s));
+  });
+  test('Bob checks: a SubnetPal build has no High or Medium findings apart from the MFA hand step', () => {
+    ['accountancy', 'clinic'].forEach(k => {
+      const c = I.demoClient(k); c.portCount = 8; c.portPrefix = 'port'; c.portMap = {};
+      const p = I.toProject(c), r = BC.check(F.toFortiOSRaw(C.plan(p), p, ''));
+      assert.deepStrictEqual(r.findings.filter(f => f.sev !== 'Low').map(f => f.title), ['Admin "admin" has no MFA'], k);
+    });
+  });
+  test('Bob checks: "Ask real Bob" copies only that area with a focused prompt and the offline findings', () => {
+    const pr = BC.prompt(BAD, 'policies', 'Acme');
+    assert.ok(pr.startsWith('Bob, check my firewall policies only') && pr.includes('client "Acme"') && pr.includes('[High] Final deny 1000'));
+    assert.ok(pr.includes('config firewall policy') && !pr.includes('config system admin') && !pr.includes('config vpn ipsec'));
+    assert.ok(pr.includes('Staff_LAN_Long_V20  role -  10.1.20.0/24'));                                  // interface summary for context
+    const ad = BC.prompt(BAD, 'admin'); assert.ok(ad.includes('config system admin') && !ad.includes('config firewall policy'));
+    assert.strictEqual(BC.SECTIONS.map(s => s.label).join('|'), 'Check my interfaces|Check my objects/addresses|Check my policies|Check my routes|Check my VPN|Check my admin/hardening');
+  });
+  test('Bob checks: wired into the Lab (mock exposes full config, loads the panel, precached, no DOM in bobcheck.js)', () => {
+    const mock = fs.readFileSync('./lab/index.html', 'utf8'), sw = fs.readFileSync('./sw.js', 'utf8'), bob = fs.readFileSync('./lab/bob.js', 'utf8'), bc = fs.readFileSync('./bobcheck.js', 'utf8');
+    const v = (sw.match(/subnetpal-v(\d+)/) || [])[1];
+    assert.ok(mock.includes('full:()=>fe(["full-configuration"])'));
+    assert.ok(mock.includes(`<script defer src="../bobcheck.js?v=${v}"></script><script defer src="bob.js?v=${v}"></script>`));
+    assert.ok(sw.includes("'./lab/bob.js'") && sw.includes("'./bobcheck.js'"));
+    assert.ok(!/document\.|window\.|localStorage/.test(bc), 'no DOM in bobcheck.js');
+    [bob, bc].forEach(src => assert.ok(!/\(\?<[=!]/.test(src), 'no lookbehind'));
   });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
