@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v57'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v58'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v57/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v58/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1865,6 +1865,11 @@ test('split view: desktop-only toggle, remembered, draggable divider, Send to La
   const fr = { dataset: { src: 'lab/index.html' }, a: {}, getAttribute(k) { return this.a[k] || null; }, setAttribute(k, v) { this.a[k] = v; } };
   Lab.unload(fr); assert.strictEqual(fr.a.src, undefined);
   fr.a.src = 'lab/index.html'; Lab.unload(fr); assert.strictEqual(fr.a.src, 'about:blank');
+});
+test('lab: the mock console has a Copy CLI button that copies the whole console (clipboard, with a fallback)', () => {
+  const fs = require('fs'), mock = fs.readFileSync(__dirname + '/lab/index.html', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.ok(/data-cli="copy"[^>]*>⧉ Copy CLI</.test(mock) && /u\.dataset\.cli==="copy"\?/.test(mock) && /writeText\(t\)\.then\(f,o\)/.test(mock) && /execCommand\("copy"\)/.test(mock));
+  assert.strictEqual((html.match(/allow="clipboard-write"/g) || []).length, 2);
 });
 test('install: manifest is installable (id, start_url, standalone, 192 + 512 icons) and the Install app button uses beforeinstallprompt', () => {
   const fs = require('fs'), m = JSON.parse(fs.readFileSync(__dirname + '/manifest.json', 'utf8')), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');

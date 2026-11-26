@@ -319,3 +319,7 @@ Steven built a real FortiGate from SubnetPal's CLI; Bob found 5 gaps. The genera
 - **⇆ Split Lab** (top bar, desktop windows 1100px and wider): SubnetPal on the left, the FortiOS mock on the right. Drag the divider (or focus it and use the arrow keys) to resize. The split and the width are remembered (`subnetpal.split`, `subnetpal.labw`).
 - **Send to Lab** in split view types the CLI into the right-hand console and leaves you where you are (no tab switch). The Lab tab hides while the split is on.
 - **Assumptions:** desktop only for now; below 1100px the split pane hides and the Lab tab works as before. Only one copy of the mock runs at a time (the hidden one is unloaded; the mock keeps its config in localStorage, so only the console history is lost when switching). The Lab pane is at least 380px and SubnetPal keeps at least about 540px. In split view the top bar wraps and the theme button shows only its icon.
+
+## Copy CLI in the Lab console (26 Nov, cache v58)
+- The mock's CLI Console header has **⧉ Copy CLI**: copies everything in the console (commands and output) to the clipboard and flashes "✔ Copied". Falls back to a hidden textarea copy if the clipboard API is blocked.
+- **Assumptions:** "Copy CLI" = the whole console text, not just the typed commands. Change made in the repo copy `lab/index.html` only; the original Claude artifact is untouched (re-copying a new artifact build would drop it).
