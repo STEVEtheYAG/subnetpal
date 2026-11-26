@@ -341,3 +341,7 @@ Steven built a real FortiGate from SubnetPal's CLI; Bob found 5 gaps. The genera
 - Client info has **Firewall ports**: **New ports needed** (default: a new box, port1 = WAN, port2 onwards LAN, 8 ports) or **The client already has ports set** (shows the LAN ports count, prefix and WAN port fields to match the real box).
 - Empty port fields now mean 8 ports named port1..port8 (FortiGate VM naming), so SubnetPal never writes `PORT_CHANGE_ME` or `wan1` unless you type them.
 - **Assumptions:** stored per client as `portMode`; older clients with any port field filled in count as "already has ports", so their exports do not change. New box mode ignores typed port fields (kept, not deleted). Prepare's "WAN port" button switches the client to "already has ports". The Export "Parent port" still overrides the VLAN trunk port in both modes.
+
+## Send to Bob in the Lab console (26 Nov, cache v61)
+- The Lab's CLI Console header has **➜ Send to Bob**: copies the mock's `show full-configuration` wrapped in a review prompt (client name from SubnetPal; checks policy order, NAT, profiles, admin hardening, VLANs/DHCP; issues by severity with CLI fixes). Flashes "✔ Copied, paste it to Bob". Offline: nothing is sent anywhere, you paste it into the chat.
+- **Assumptions:** the whole config is copied (about 2,500 lines for the demo client), not only what SubnetPal added. The console itself is not changed by the button. Repo copy of the mock only.
