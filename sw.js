@@ -1,13 +1,13 @@
 /* SubnetPal service worker: precache everything, serve cache-first, refresh in the background.
    Bump CACHE when you deploy changes so installed copies pick them up. */
-const CACHE = 'subnetpal-v59';
+const CACHE = 'subnetpal-v60';
 const ASSETS = [
   './', './index.html', './style.css', './theme.js', './app.js', './calc.js', './calc6.js', './access.js', './contract.js', './docread.js', './vendor/pdf.min.mjs', './vendor/pdf.worker.min.mjs', './webcat.js','./cards.js','./suggest.js','./intake.js','./groups.js', './remote.js', './routes.js', './policy.js', './prepare.js', './draw.js','./format.js', './guide.js', './report.js', './topology.js', './lab.js', './lab/index.html', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));   // 'reload': skip the browser's HTTP cache, so a new version never precaches old files
 });
 
 self.addEventListener('activate', e => {

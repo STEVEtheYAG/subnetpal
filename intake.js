@@ -179,7 +179,11 @@
   }
 
   // Client -> the project object Calc.plan and Fmt expect.
-  const toProject = client => Object.assign({}, client, { existing: parseExisting(client.intake && client.intake.existing) });
+  // Firewall ports: 'new' = a new box, SubnetPal names the ports (port1 WAN, port2+ LAN, 8 ports); 'existing' = use the count, prefix and WAN port typed in.
+  // Older clients with any port field filled in count as 'existing', so their exports do not change.
+  const portModeOf = c => c.portMode === 'new' || c.portMode === 'existing' ? c.portMode : (c.portCount || c.portPrefix || c.wanPort ? 'existing' : 'new');
+  const toProject = client => Object.assign({}, client, { existing: parseExisting(client.intake && client.intake.existing) },
+    portModeOf(client) === 'new' ? { portCount: '', portPrefix: '', wanPort: '' } : {});
 
-  return { GROWTH, EXPANSION_LABEL, VLAN_IDS, COUNT_FIELDS, OPTIONAL, MAX_OTHERS, SAMPLES, DEMOS, DEMO_KEYS, migrate, newIntake, newClient, parseExisting, pickParent, suggestNetworks, applyIntake, sampleClient, demoClient, toProject };
+  return { GROWTH, EXPANSION_LABEL, VLAN_IDS, COUNT_FIELDS, OPTIONAL, MAX_OTHERS, SAMPLES, DEMOS, DEMO_KEYS, migrate, newIntake, newClient, parseExisting, pickParent, suggestNetworks, applyIntake, sampleClient, demoClient, toProject, portModeOf };
 }));

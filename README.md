@@ -331,3 +331,13 @@ Steven built a real FortiGate from SubnetPal's CLI; Bob found 5 gaps. The genera
 - **Send to Lab refuses PORT_CHANGE_ME:** the toast says to set "LAN ports available" (WAN becomes port1) or type a Parent port. A build without ports available also uses `wan1` as WAN, which a FortiGate VM does not have.
 - **Expected on a fresh mock:** "entry not found in datasource" on `delete 1001`... lines. That is the re-paste-safe delete-then-rebuild (same on a real FortiGate the first time) and does no harm.
 - Tested: demo client with 8 ports and IPv6 on, Send to Lab: 0 errors apart from those deletes; 8 interfaces get IPv6, 9 address6 objects, 36 policies (18 IPv6).
+
+## Lab never stays on an old build (26 Nov, cache v60)
+- `sw.js` precaches with `cache: 'reload'`, so a new version never stores files the browser had in its HTTP cache (GitHub Pages caches for 10 minutes).
+- The Lab iframe loads `lab/index.html?v=<cache number>`, and the Lab console's first line says `Connected · SubnetPal Lab build <n>`, so you can see which build you are on. Bump all three together (a test checks they match).
+- Tested: an old installed copy (v58) moves to the new Lab on the first reload after deploy.
+
+## Firewall ports switch: no more PORT_CHANGE_ME (26 Nov, cache v60)
+- Client info has **Firewall ports**: **New ports needed** (default: a new box, port1 = WAN, port2 onwards LAN, 8 ports) or **The client already has ports set** (shows the LAN ports count, prefix and WAN port fields to match the real box).
+- Empty port fields now mean 8 ports named port1..port8 (FortiGate VM naming), so SubnetPal never writes `PORT_CHANGE_ME` or `wan1` unless you type them.
+- **Assumptions:** stored per client as `portMode`; older clients with any port field filled in count as "already has ports", so their exports do not change. New box mode ignores typed port fields (kept, not deleted). Prepare's "WAN port" button switches the client to "already has ports". The Export "Parent port" still overrides the VLAN trunk port in both modes.

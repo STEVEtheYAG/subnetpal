@@ -113,6 +113,7 @@
     $('#rem-on').checked = !!rm.on; $('#rem-count').hidden = !rm.on; $('#rem-count').value = rm.count || '';
     $('#i-industry').value = it.industry || ''; $('#i-serverswhere').value = it.serversWhere || ''; $('#i-wifi').value = it.wifi || ''; $('#i-voip').value = it.voip || '';
     $('#i-dualwan').checked = !!it.dualWan; $('#i-sitevpn').checked = !!it.siteVpn; $('#i-webfilter').checked = !!it.webFilter;
+    const pm = Intake.portModeOf(c); document.querySelectorAll('input[name=portmode]').forEach(r => { r.checked = r.value === pm; }); $('#portfields').hidden = pm === 'new';
     $('#i-ports').value = c.portCount || ''; $('#i-portprefix').value = c.portPrefix || ''; $('#i-wanport').value = c.wanPort || '';
     $('#i-existing').value = it.existing || ''; $('#i-wan').value = it.wanNote || '';
     $('#i-style').value = c.opts.style === 'packed' ? 'packed' : 'vlan24';
@@ -140,6 +141,7 @@
     else if (t.id === 'i-dualwan') it.dualWan = t.checked;
     else if (t.id === 'i-sitevpn') it.siteVpn = t.checked;
     else if (t.id === 'i-webfilter') it.webFilter = t.checked;
+    else if (t.name === 'portmode') { c.portMode = t.value; $('#portfields').hidden = t.value === 'new'; }
     else if (t.id === 'i-ports') { const n = Math.floor(Number(t.value)); c.portCount = n > 0 ? Math.min(48, n) : ''; }
     else if (t.id === 'i-portprefix') c.portPrefix = t.value.trim();
     else if (t.id === 'i-wanport') c.wanPort = t.value.trim();
@@ -652,7 +654,7 @@
   function sendToLab(raw) {
     const t = raw ? Fmt.cliForPaste(raw) : '';
     if (!t) { toast('Nothing to send yet. Fix the problem at the top first.'); return; }
-    if (/PORT_CHANGE_ME/.test(t)) { toast('Not sent: the CLI still says PORT_CHANGE_ME. Set "LAN ports available" in Client info (WAN becomes port1), or type a Parent port on the Export tab.', 7000); return; }
+    if (/PORT_CHANGE_ME/.test(t)) { toast('Not sent: the CLI still says PORT_CHANGE_ME. In Client info, Firewall ports, pick "New ports needed" (or enter the client ports), or type a Parent port on the Export tab.', 7000); return; }
     const d = $('#clidlg'); if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
     if ($('#carddlg').open) closeCard();
     if (!splitOn()) setOpen('lab', true);
@@ -807,7 +809,7 @@
       const act = b.dataset.act, i = +b.dataset.i, c = cur();
       if (act === 'net') { const n = found.networks[i]; if (n && sendNet(n)) rebuild(`${n.build} sent to the plan`); }
       else if (act === 'allnets') { const sent = found.networks.filter(n => !netInPlan(n) && sendNet(n)); if (sent.length) rebuild(`${sent.length} network${sent.length === 1 ? '' : 's'} sent to the plan`); }
-      else if (act === 'wan') { c.wanPort = found.wanPort; $('#i-wanport').value = c.wanPort; touch(); recalc(); toast(`WAN port set to ${c.wanPort}`); }
+      else if (act === 'wan') { c.wanPort = found.wanPort; c.portMode = 'existing'; renderIntake(); $('#i-wanport').value = c.wanPort; touch(); recalc(); toast(`WAN port set to ${c.wanPort}`); }
       else if (act === 'remote') { const it = c.intake; it.remote = Object.assign({ reach: null }, it.remote, { on: true, count: String(found.remote) }); renderIntake(); touch(); recalc(); toast(`${found.remote} remote users sent to the plan`); }
       else if (act === 'flow' || act === 'allflows') {
         const add = (act === 'flow' ? [found.flows[i]] : found.flows.filter(x => !x.vpn)).filter(x => x && !flowAdded(x)), pr = prep();   // prep() re-normalises, so take it after flowAdded

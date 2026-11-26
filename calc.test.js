@@ -1399,7 +1399,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v59'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v60'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1451,7 +1451,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v59/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v60/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1601,10 +1601,10 @@ test('Bob review: DHCP IDs start at 101 with a check note; no id 1 in the main C
   const g = G.iface(r, p, r.allocations.findIndex(a => a.dhcpStart));
   assert.ok(/edit 101\b/.test(g.cli) && !/edit 100\b/.test(g.cli) && g.cliNotes.includes('show system dhcp server'));
 });
-test('Bob review: lock-out warning in every CLI and the parent port flows through; empty keeps PORT_CHANGE_ME', () => {
+test('Bob review: lock-out warning in every CLI and the parent port flows through; empty uses the new-box ports, never PORT_CHANGE_ME', () => {
   const { r, p } = demo('accountancy');
   [F.toFortiOSRaw(r, p, ''), F.toRemoteFortiOSRaw(r, p, '')].forEach(t => assert.ok(/must NOT be the port you are managing/.test(t)));
-  assert.ok(F.toFortiOSRaw(r, p, '').includes('PORT_CHANGE_ME') && !F.toFortiOSRaw(r, p, 'port5').includes('PORT_CHANGE_ME') && F.toFortiOSRaw(r, p, 'port5').includes('set interface "port5"'));
+  assert.ok(!F.toFortiOSRaw(r, p, '').includes('PORT_CHANGE_ME') && !F.toFortiOSRaw(r, p, 'port5').includes('PORT_CHANGE_ME') && F.toFortiOSRaw(r, p, 'port5').includes('set interface "port5"'));
   const ix = fs.readFileSync('index.html', 'utf8');
   assert.ok(ix.includes('Parent port') && ix.includes('Never use the port you are managing') && ix.includes('Pre-flight checklist') && ix.includes('policies 1000+') && ix.includes('rollback'));
 });
@@ -1719,7 +1719,7 @@ test('ports available: plain networks get real ports, VLANs share the highest fr
   assert.strictEqual(pl3.parent, 'port2'); assert.deepStrictEqual(pl3.names.slice(0, 2), ['port3', 'port4']);
   const pl4 = F.portPlan(al, 'PORT_CHANGE_ME', { portCount: 4, portPrefix: 'internal', portMap: {} }); // a box with wan1: nothing reserved
   assert.deepStrictEqual(pl4.names.slice(0, 2), ['internal1', 'internal2']);
-  assert.deepStrictEqual(F.ifaceNames(al, 'PORT_CHANGE_ME', {}).slice(0, 2), ['PORT_CHANGE_ME1', 'PORT_CHANGE_ME2']);   // no count: unchanged
+  assert.deepStrictEqual(F.ifaceNames(al, 'PORT_CHANGE_ME', {}).slice(0, 2), ['port2', 'port3']);   // no count: a new box with 8 ports, port1 is WAN
 });
 test('ports available: running out is reported and falls back to the placeholder', () => {
   const al = [{ name: 'A', vlan: '', role: 'LAN' }, { name: 'B', vlan: '', role: 'LAN' }, { name: 'C', vlan: '', role: 'LAN' }];
@@ -1787,7 +1787,7 @@ test('Bob 5: port1 is WAN (DHCP or the ISP address, alias WAN, PING only); no Tr
   assert.ok(!old.networks.some(n => n.name === 'Transit'));                                         // older generated plans drop the auto Transit
   const own = bobBuild(c => { c.planEdited = true; c.networks.push({ name: 'Uplink', hosts: 2, vlan: '', role: 'Transit', kind: 'transit' }); });
   assert.ok(own.r.allocations.some(a => a.name === 'Uplink') && !/edit "port1"[^]*?alias "Uplink"/.test(own.cli.split('    next')[1] || ''));   // a Transit you add gets its own port, never port1
-  assert.strictEqual(F.wanIf({ wanPort: 'wan', portCount: 8 }), 'wan'); assert.strictEqual(F.wanIf({}), 'wan1');
+  assert.strictEqual(F.wanIf({ wanPort: 'wan', portCount: 8 }), 'wan'); assert.strictEqual(F.wanIf({}), 'port1');
 });
 
 // A tiny model of the FortiGate policy table: the SEQUENCE is what matches first, not the ID. A new ID is either appended (usual) or slotted in by ID
@@ -1847,7 +1847,7 @@ test('lab: tab, iframe, Send to Lab and the mock are wired, cached offline, and 
   const fs = require('fs'), rd = f => fs.readFileSync(__dirname + '/' + f, 'utf8');
   const html = rd('index.html'), app = rd('app.js'), sw = rd('sw.js'), css = rd('style.css'), mock = rd('lab/index.html');
   assert.ok(/data-tab="lab"/.test(html) && /id="sec-lab"/.test(html) && /id="body-lab"/.test(html));
-  assert.ok(/<iframe id="labframe"[^>]*data-src="lab\/index.html"/.test(html) && !/<iframe id="labframe"[^>]* src=/.test(html));   // loaded on first use only
+  assert.ok(/<iframe id="labframe"[^>]*data-src="lab\/index.html\?v=\d+"/.test(html) && !/<iframe id="labframe"[^>]* src=/.test(html));   // loaded on first use only
   assert.ok(html.indexOf('<script src="lab.js">') > html.indexOf('<script src="format.js">') && html.indexOf('<script src="lab.js">') < html.indexOf('<script src="app.js">'));
   assert.ok(sw.includes("'./lab.js'") && sw.includes("'./lab/index.html'"));
   assert.ok(/'lab'\]/.test(app) && /function sendToLab/.test(app) && /id="clilab"/.test(html) && /Send to Lab/.test(app));
@@ -1858,7 +1858,7 @@ test('lab: tab, iframe, Send to Lab and the mock are wired, cached offline, and 
 test('split view: desktop-only toggle, remembered, draggable divider, Send to Lab stays put and one mock runs at a time', () => {
   const fs = require('fs'), rd = f => fs.readFileSync(__dirname + '/' + f, 'utf8'), html = rd('index.html'), app = rd('app.js'), css = rd('style.css'), Lab = require('./lab.js');
   assert.ok(/<button id="btnSplit"[^>]*aria-pressed="false"/.test(html) && /id="labsplit"/.test(html) && /role="separator"/.test(html));
-  assert.ok(/<iframe id="labsplitframe"[^>]*data-src="lab\/index.html"/.test(html) && !/<iframe id="labsplitframe"[^>]* src=/.test(html));
+  assert.ok(/<iframe id="labsplitframe"[^>]*data-src="lab\/index.html\?v=\d+"/.test(html) && !/<iframe id="labsplitframe"[^>]* src=/.test(html));
   assert.ok(/\.splitbtn, \.labsplit \{ display: none; \}/.test(css) && /@media \(min-width: 1100px\) \{\n  \.splitbtn \{ display: inline-flex; \}/.test(css));
   assert.ok(/body\.split \.labsplit \{[^}]*width: var\(--labw/.test(css) && /body\.split \.frame \{ min-width: 0;/.test(css) && /body\.labdrag iframe \{ pointer-events: none; \}/.test(css));
   assert.ok(/subnetpal\.split/.test(app) && /subnetpal\.labw/.test(app) && /bindSplit\(\)/.test(app));
@@ -1883,7 +1883,25 @@ test('lab: mock accepts config ipv6 on interfaces, firewall address6/addrgrp6, a
 });
 test('lab: Send to Lab refuses a CLI that still has PORT_CHANGE_ME and says how to fix it', () => {
   const app = require('fs').readFileSync(__dirname + '/app.js', 'utf8');
-  assert.ok(/if \(\/PORT_CHANGE_ME\/\.test\(t\)\) \{ toast\('Not sent: [^']*LAN ports available[^']*Parent port[^']*', 7000\); return; \}/.test(app));
+  assert.ok(/if \(\/PORT_CHANGE_ME\/\.test\(t\)\) \{ toast\('Not sent: [^']*New ports needed[^']*Parent port[^']*', 7000\); return; \}/.test(app));
+});
+test('lab: a new release never shows an old Lab (precache skips the HTTP cache; iframe URL, console banner and sw cache share one build number)', () => {
+  const fs = require('fs'), rd = f => fs.readFileSync(__dirname + '/' + f, 'utf8'), sw = rd('sw.js'), html = rd('index.html'), mock = rd('lab/index.html');
+  const v = (sw.match(/const CACHE = 'subnetpal-v(\d+)'/) || [])[1];
+  assert.ok(v && /new Request\(u, \{ cache: 'reload' \}\)/.test(sw));
+  assert.strictEqual((html.match(new RegExp('data-src="lab/index\\.html\\?v=' + v + '"', 'g')) || []).length, 2);
+  assert.ok(mock.includes('SubnetPal Lab build ' + v));
+});
+test('ports: "New ports needed" (default) names the ports itself; "already has ports" uses the typed ones; older clients keep theirs', () => {
+  const c = I.newClient('x'); assert.strictEqual(I.portModeOf(c), 'new');
+  Object.assign(c, { portCount: 4, portPrefix: 'internal', wanPort: 'wan1' });
+  assert.strictEqual(I.portModeOf(c), 'existing');                                                     // an older client with ports typed in
+  c.portMode = 'new'; const pn = I.toProject(c); assert.ok(pn.portCount === '' && pn.portPrefix === '' && pn.wanPort === '');
+  assert.strictEqual(F.wanIf(pn), 'port1'); assert.strictEqual(F.portPlan([{ name: 'LAN', vlan: '', role: 'LAN' }], 'PORT_CHANGE_ME', pn).names[0], 'port2');
+  c.portMode = 'existing'; const pe = I.toProject(c); assert.ok(pe.portCount === 4 && pe.wanPort === 'wan1');
+  const ix = require('fs').readFileSync(__dirname + '/index.html', 'utf8'), app = require('fs').readFileSync(__dirname + '/app.js', 'utf8');
+  assert.ok(/name="portmode" value="new"> New ports needed/.test(ix) && /name="portmode" value="existing"> The client already has ports set/.test(ix) && /<div id="portfields">/.test(ix));
+  assert.ok(/t\.name === 'portmode'/.test(app) && /\$\('#portfields'\)\.hidden = pm === 'new'/.test(app));
 });
 test('install: manifest is installable (id, start_url, standalone, 192 + 512 icons) and the Install app button uses beforeinstallprompt', () => {
   const fs = require('fs'), m = JSON.parse(fs.readFileSync(__dirname + '/manifest.json', 'utf8')), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');
@@ -1985,7 +2003,7 @@ test('suggested static routes: default + blackhole, gateway needed, ticks overri
   assert.ok(F.routesNotes(r, I.toProject(c)).includes('Not added until the ISP gateway'));
   c.routes = { gw1: '203.0.113.1', gw2: 'bad', sel: { bh: false } };
   t = F.toRoutesFortiOS(r, I.toProject(c));
-  assert.ok(/^ {8}set gateway 203\.0\.113\.1$/m.test(t) && t.includes('edit 101') && t.includes('set device "wan1"') && t.includes('set distance 10') && !t.includes('blackhole'));
+  assert.ok(/^ {8}set gateway 203\.0\.113\.1$/m.test(t) && t.includes('edit 101') && t.includes('set device "port1"') && t.includes('set distance 10') && !t.includes('blackhole'));
   assert.ok(F.toFortiOS(r, I.toProject(c), 'port5').includes('config router static'));
   assert.ok(!F.toPolicyFortiOS(r, I.toProject(c), 'port5').includes('config router static'));
   c.routes.sel = { def1: false, bh: false }; assert.ok(F.routesNotes(r, I.toProject(c)).includes('No static routes are ticked') && !F.toRoutesFortiOS(r, I.toProject(c)).includes('config'));
@@ -1994,7 +2012,7 @@ test('suggested static routes: default + blackhole, gateway needed, ticks overri
   c.intake.dualWan = true; c.routes = { gw1: '203.0.113.1', gw2: '198.51.100.1' };
   rs = Rt.suggest(r, I.toProject(c)); assert.deepStrictEqual(rs.map(x => x.id), ['def1', 'def2', 'bh']);
   t = F.toRoutesFortiOS(r, I.toProject(c));
-  assert.ok(t.includes('set device "wan2"') && t.includes('edit 102') && t.includes('set distance 20') && F.routesNotes(r, I.toProject(c)).includes('SD-WAN') && !t.includes('SD-WAN'));
+  assert.ok(t.includes('set device "port2"') && t.includes('edit 102') && t.includes('set distance 20') && F.routesNotes(r, I.toProject(c)).includes('SD-WAN') && !t.includes('SD-WAN'));
   // handover doc lists ticked routes
   assert.ok(F.toHandoverDoc(r, I.toProject(c)).includes('## 7. Static routes') && F.toHandoverHTML(r, I.toProject(c)).includes('7. Static routes'));
   c.routes.sel = { def1: false, def2: false, bh: false }; assert.ok(!F.toHandoverDoc(r, I.toProject(c)).includes('Static routes'));

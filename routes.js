@@ -14,7 +14,7 @@
   function wanIfs(project) {
     const dual = !!(project && project.intake && project.intake.dualWan);
     const set = String((project && project.wanPort) || '').trim().replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 15);
-    const n = Math.min(48, Math.max(0, Math.floor(Number(project && project.portCount)) || 0));
+    const n = Math.min(48, Math.max(0, Math.floor(Number(project && project.portCount)) || 8));   // empty = 8 ports, same default as format.js
     const pre = String((project && project.portPrefix && String(project.portPrefix).trim()) || 'port');
     const first = set || (n && pre === 'port' ? 'port1' : 'wan1');
     const m = /^(.*?)(\d+)$/.exec(first);

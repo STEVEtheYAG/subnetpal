@@ -99,7 +99,7 @@
   const PH = 'PORT_CHANGE_ME';
   const phOf = ifName => (ifName && String(ifName).trim()) || PH;
   function portPool(project) {
-    const n = Math.min(48, Math.max(0, Math.floor(Number(project && project.portCount)) || 0));
+    const n = Math.min(48, Math.max(0, Math.floor(Number(project && project.portCount)) || 8));   // empty = 8 ports (FortiGate VM naming), so there is never a placeholder port
     const pre = sanitizeIf((project && project.portPrefix && String(project.portPrefix).trim()) || 'port');
     return Array.from({ length: n }, (_, i) => pre + (i + 1));
   }
