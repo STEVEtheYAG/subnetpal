@@ -534,15 +534,18 @@ test('IPv6 subnet ids never collide (duplicate and missing VLANs)', () => {
   assert.strictEqual(new Set(r.allocations.map(a => a.v6.cidr)).size, 5);
   assert.ok(warns.length >= 1);
 });
-test('IPv6 in outputs: CSV, text, FortiOS address6 / policy6, handover doc; v4-only output unchanged', () => {
+test('IPv6 in outputs: CSV, text, FortiOS address6 / IPv6 policies in the one firewall policy table, handover doc; v4-only output unchanged', () => {
   const { p, r } = v6sample();
   const csv = F.toCSV(r).split('\n');
   assert.ok(/IPv6 subnet,IPv6 gateway$/.test(csv[0]) && csv[1].includes('2001:db8:abcd:'));
   assert.ok(F.toText(r, p).includes('IPv6 site prefix: 2001:db8:abcd::/48'));
   const fo = F.toFortiOSRaw(r, p, 'port5');
   assert.ok(fo.includes('config ipv6') && fo.includes('set ip6-address 2001:db8:abcd:20::1/64') && fo.includes('ip6-send-adv enable'));
-  assert.ok(fo.includes('config firewall address6') && fo.includes('config firewall policy6') && fo.includes('SP6_INTERNAL'));
-  assert.ok(fo.includes(F.FORTI_NOTE) && fo.indexOf('config firewall policy6') > fo.indexOf('config firewall policy\n'));
+  assert.ok(fo.includes('config firewall address6') && !fo.includes('config firewall policy6') && fo.includes('SP6_INTERNAL'));
+  const v6blk = fo.slice(fo.indexOf('config firewall addrgrp6'));               // the IPv6 policies come after the IPv6 addresses, in "config firewall policy"
+  assert.ok(/config firewall policy\n    edit 20\d\d/.test(v6blk) && /set srcaddr6 "SP6_/.test(v6blk) && /set dstaddr6 /.test(v6blk) && !/\n        set (src|dst)addr "/.test(v6blk));
+  assert.ok(/set name "SP6_Final_deny"[\s\S]*?set srcaddr6 "all"\n        set dstaddr6 "all"/.test(v6blk));
+  assert.ok(fo.includes(F.FORTI_NOTE) && fo.indexOf('config firewall address6') > fo.indexOf('config firewall policy\n'));
   const md = F.toHandoverDoc(r, p);
   assert.ok(md.includes('IPv6 subnet') && md.includes('IPv6 site prefix') && !md.includes('undefined'));
   assert.ok(F.toHandoverHTML(r, p).includes('2001:db8:abcd:10::/64'));
@@ -1396,7 +1399,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v58'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v59'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1451,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v58/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v59/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1870,6 +1873,17 @@ test('lab: the mock console has a Copy CLI button that copies the whole console 
   const fs = require('fs'), mock = fs.readFileSync(__dirname + '/lab/index.html', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
   assert.ok(/data-cli="copy"[^>]*>⧉ Copy CLI</.test(mock) && /u\.dataset\.cli==="copy"\?/.test(mock) && /writeText\(t\)\.then\(f,o\)/.test(mock) && /execCommand\("copy"\)/.test(mock));
   assert.strictEqual((html.match(/allow="clipboard-write"/g) || []).length, 2);
+});
+test('lab: mock accepts config ipv6 on interfaces, firewall address6/addrgrp6, and IPv6 policies (srcaddr6/dstaddr6) in firewall policy', () => {
+  const mock = require('fs').readFileSync(__dirname + '/lab/index.html', 'utf8');
+  assert.ok(/"system interface":\["ipv6"\]/.test(mock) && /C\.path!=="ipv6"/.test(mock));                       // config ipv6 allowed, set without edit inside it
+  assert.ok(/g==="ipv6"&&T&&typeof T=="object"/.test(mock) && /"        config ipv6"/.test(mock));               // kept on commit and shown back nested
+  assert.ok(/\["firewall\.address6","firewall address6","name"\]/.test(mock) && /\["firewall\.addrgrp6","firewall addrgrp6","name"\]/.test(mock));
+  assert.ok(/srcaddr6:\(\)=>\["all"/.test(mock) && /dstaddr6:\(\)=>\["all"/.test(mock) && /f\[q\+"6"\]/.test(mock));
+});
+test('lab: Send to Lab refuses a CLI that still has PORT_CHANGE_ME and says how to fix it', () => {
+  const app = require('fs').readFileSync(__dirname + '/app.js', 'utf8');
+  assert.ok(/if \(\/PORT_CHANGE_ME\/\.test\(t\)\) \{ toast\('Not sent: [^']*LAN ports available[^']*Parent port[^']*', 7000\); return; \}/.test(app));
 });
 test('install: manifest is installable (id, start_url, standalone, 192 + 512 icons) and the Install app button uses beforeinstallprompt', () => {
   const fs = require('fs'), m = JSON.parse(fs.readFileSync(__dirname + '/manifest.json', 'utf8')), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');

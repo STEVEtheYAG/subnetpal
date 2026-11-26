@@ -383,21 +383,21 @@
         L.push('', 'config firewall addrgrp6', '    edit "SP6_INTERNAL"', '        set member ' + internal.map(x => q(x.obj6)).join(' '), '    next', 'end');
       }
       if (pols.length) {
-        L.push('', '# IPv6 policies mirror the IPv4 ones (no NAT, no website or application profiles). ' + Policy.NOTE);
-        L.push('config firewall policy6');
+        L.push('', '# IPv6 policies mirror the IPv4 ones (no NAT, no website or application profiles). FortiOS 7.0+ has one policy table: IPv6 policies are "config firewall policy" entries with srcaddr6/dstaddr6 (policy6 no longer exists). ' + Policy.NOTE);
+        L.push('config firewall policy');
         usedNames.clear();
         pols.forEach((p, k) => {
           const f = byAlloc.get(p.from);
           const t = p.to === 'internet' || p.to === 'internal' ? null : byAlloc.get(p.to);
           L.push('    edit ' + (POL6_ID0 + 1 + idOff + k), `        set name ${q(polName('SP6_', p))}`, `        set srcintf ${q(f.name)}`);
           L.push(`        set dstintf ${q(p.to === 'internet' ? wans[0] : p.to === 'internal' ? 'any' : t.name)}`);
-          L.push(`        set action ${p.action}`, `        set srcaddr ${q(f.obj6)}`);
-          L.push(`        set dstaddr ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
+          L.push(`        set action ${p.action}`, `        set srcaddr6 ${q(f.obj6)}`);
+          L.push(`        set dstaddr6 ${q(p.to === 'internet' ? 'all' : p.to === 'internal' ? 'SP6_INTERNAL' : t.obj6)}`);
           L.push(`        set schedule ${q(p.sched)}`, `        set service ${p.services.map(q).join(' ')}`, `        set logtraffic ${p.log ? p.logmode : 'disable'}`);
           if (!p.enabled) L.push('        set status disable');
           L.push(`        set comments ${q(p.comments || 'SubnetPal policy')}`, '    next');
         });
-        L.push('    edit ' + POL6_ID0, '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr "all"', '        set dstaddr "all"',
+        L.push('    edit ' + POL6_ID0, '        set name "SP6_Final_deny"', '        set srcintf "any"', '        set dstintf "any"', '        set action deny', '        set srcaddr6 "all"', '        set dstaddr6 "all"',
           '        set schedule "always"', '        set service "ALL"', '        set logtraffic all', '    next', ...orderLines(pols.map((p, k) => POL6_ID0 + 1 + idOff + k), POL6_ID0), 'end');
       }
     }

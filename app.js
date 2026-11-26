@@ -36,11 +36,11 @@
 
   // ---------- toast ----------
   let toastT;
-  function toast(msg) {
+  function toast(msg, ms) {
     let t = $('#toast');
     if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
     t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1600);
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms || 1600);
   }
 
   // ---------- clients ----------
@@ -652,6 +652,7 @@
   function sendToLab(raw) {
     const t = raw ? Fmt.cliForPaste(raw) : '';
     if (!t) { toast('Nothing to send yet. Fix the problem at the top first.'); return; }
+    if (/PORT_CHANGE_ME/.test(t)) { toast('Not sent: the CLI still says PORT_CHANGE_ME. Set "LAN ports available" in Client info (WAN becomes port1), or type a Parent port on the Export tab.', 7000); return; }
     const d = $('#clidlg'); if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
     if ($('#carddlg').open) closeCard();
     if (!splitOn()) setOpen('lab', true);
