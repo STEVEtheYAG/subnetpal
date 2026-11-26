@@ -1396,7 +1396,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v56'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v57'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1448,7 +1448,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v56/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v57/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1851,6 +1851,20 @@ test('lab: tab, iframe, Send to Lab and the mock are wired, cached offline, and 
   assert.ok(/window\.__fm\.cli=/.test(mock) && /open:Q,close:S/.test(mock));          // the hook lab.js drives
   assert.ok(!/<script[^>]+src="https?:|<link[^>]+href="https?:/.test(mock));          // fully offline, nothing from the web
   assert.ok(/\.labframe \{[^}]*min-width: 0/.test(css) && /\.results\{min-width:0\}|\.results \{[^}]*min-width: 0/.test(css));
+});
+test('split view: desktop-only toggle, remembered, draggable divider, Send to Lab stays put and one mock runs at a time', () => {
+  const fs = require('fs'), rd = f => fs.readFileSync(__dirname + '/' + f, 'utf8'), html = rd('index.html'), app = rd('app.js'), css = rd('style.css'), Lab = require('./lab.js');
+  assert.ok(/<button id="btnSplit"[^>]*aria-pressed="false"/.test(html) && /id="labsplit"/.test(html) && /role="separator"/.test(html));
+  assert.ok(/<iframe id="labsplitframe"[^>]*data-src="lab\/index.html"/.test(html) && !/<iframe id="labsplitframe"[^>]* src=/.test(html));
+  assert.ok(/\.splitbtn, \.labsplit \{ display: none; \}/.test(css) && /@media \(min-width: 1100px\) \{\n  \.splitbtn \{ display: inline-flex; \}/.test(css));
+  assert.ok(/body\.split \.labsplit \{[^}]*width: var\(--labw/.test(css) && /body\.split \.frame \{ min-width: 0;/.test(css) && /body\.labdrag iframe \{ pointer-events: none; \}/.test(css));
+  assert.ok(/subnetpal\.split/.test(app) && /subnetpal\.labw/.test(app) && /bindSplit\(\)/.test(app));
+  assert.ok(/if \(!splitOn\(\)\) setOpen\('lab', true\);/.test(app) && /Lab\.send\(labFrame\(\), t\)/.test(app));
+  assert.ok(/Lab\.unload\(\$\('#labframe'\)\)/.test(app) && /Lab\.unload\(\$\('#labsplitframe'\)\)/.test(app) && typeof Lab.unload === 'function');
+  // unload/load flip the frame's src without a DOM
+  const fr = { dataset: { src: 'lab/index.html' }, a: {}, getAttribute(k) { return this.a[k] || null; }, setAttribute(k, v) { this.a[k] = v; } };
+  Lab.unload(fr); assert.strictEqual(fr.a.src, undefined);
+  fr.a.src = 'lab/index.html'; Lab.unload(fr); assert.strictEqual(fr.a.src, 'about:blank');
 });
 test('install: manifest is installable (id, start_url, standalone, 192 + 512 icons) and the Install app button uses beforeinstallprompt', () => {
   const fs = require('fs'), m = JSON.parse(fs.readFileSync(__dirname + '/manifest.json', 'utf8')), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8');

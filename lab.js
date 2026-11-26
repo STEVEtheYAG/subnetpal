@@ -23,15 +23,18 @@
   }
   // Load the mock on first use only (it is ~430 KB), then return it ready.
   function load(frame) {
-    if (!frame.getAttribute('src')) frame.setAttribute('src', frame.dataset.src || 'lab/index.html');
+    const want = frame.dataset.src || 'lab/index.html';
+    if (frame.getAttribute('src') !== want) frame.setAttribute('src', want);
     return ready(frame);
   }
+  // Free a frame that is not shown (the mock keeps its config in localStorage, so nothing is lost).
+  function unload(frame) { if (frame && frame.getAttribute('src') && frame.getAttribute('src') !== 'about:blank') frame.setAttribute('src', 'about:blank'); }
   // Run every line in the mock's CLI console. Resolves with the number of lines sent.
   function send(frame, text) {
     const lines = linesFor(text);
     if (!lines.length) return Promise.resolve(0);
     return load(frame).then(cli => { cli.open(); lines.forEach(l => cli.run(l)); return lines.length; });
   }
-  const Lab = { linesFor, ready, load, send };
+  const Lab = { linesFor, ready, load, unload, send };
   if (typeof module !== 'undefined' && module.exports) module.exports = Lab; else root.Lab = Lab;
 })(this);

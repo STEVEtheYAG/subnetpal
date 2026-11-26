@@ -607,18 +607,60 @@
   }
   const CLI_KINDS = ['forti', 'polcli', 'remote', 'routes'];
   // Send to Lab: switch to the Lab tab and type the CLI into the FortiOS mock's console.
+  // Split view (desktop): SubnetPal left, the Lab right, one live mock at a time.
+  const WIDE = window.matchMedia ? matchMedia('(min-width: 1100px)') : { matches: false, addEventListener() {} };
+  const splitOn = () => document.body.classList.contains('split') && WIDE.matches;
+  const labFrame = () => splitOn() ? $('#labsplitframe') : $('#labframe');
+  const labErr = () => toast('The Lab did not load. Reload the page.');
+  function labWidth(w) {
+    const max = Math.max(380, window.innerWidth - 560), v = Math.round(Math.min(max, Math.max(380, +w || window.innerWidth / 2)));
+    document.body.style.setProperty('--labw', v + 'px'); return v;
+  }
+  function applySplit(on) {
+    document.body.classList.toggle('split', on);
+    $('#btnSplit').setAttribute('aria-pressed', String(on)); $('#btnSplit').classList.toggle('on', on);
+    if (splitOn()) {
+      Lab.unload($('#labframe')); Lab.load($('#labsplitframe')).catch(labErr);
+      if (openSec === 'lab') setOpen('plan', false);
+    } else {
+      Lab.unload($('#labsplitframe'));
+      if (openSec === 'lab') Lab.load($('#labframe')).catch(labErr);
+    }
+  }
+  function bindSplit() {
+    let w = null, on = false;
+    try { w = localStorage.getItem('subnetpal.labw'); on = localStorage.getItem('subnetpal.split') === '1'; } catch (e) { /* private mode */ }
+    labWidth(w);
+    $('#btnSplit').addEventListener('click', () => {
+      const v = !document.body.classList.contains('split');
+      try { localStorage.setItem('subnetpal.split', v ? '1' : '0'); } catch (e) { /* just not remembered */ }
+      applySplit(v);
+    });
+    WIDE.addEventListener('change', () => applySplit(document.body.classList.contains('split')));
+    window.addEventListener('resize', () => { if (splitOn()) labWidth(parseInt(document.body.style.getPropertyValue('--labw'), 10)); });
+    const div = $('#labdiv'), keep = v => { try { localStorage.setItem('subnetpal.labw', String(v)); } catch (e) { /* not remembered */ } };
+    div.addEventListener('pointerdown', e => { e.preventDefault(); div.setPointerCapture(e.pointerId); document.body.classList.add('labdrag'); });
+    div.addEventListener('pointermove', e => { if (document.body.classList.contains('labdrag')) labWidth(window.innerWidth - e.clientX - 16); });
+    const end = () => { if (!document.body.classList.contains('labdrag')) return; document.body.classList.remove('labdrag'); keep(parseInt(document.body.style.getPropertyValue('--labw'), 10)); };
+    div.addEventListener('pointerup', end); div.addEventListener('pointercancel', end);
+    div.addEventListener('keydown', e => {
+      const d = e.key === 'ArrowLeft' ? 40 : e.key === 'ArrowRight' ? -40 : 0; if (!d) return;
+      e.preventDefault(); keep(labWidth(parseInt(document.body.style.getPropertyValue('--labw'), 10) + d));
+    });
+    if (on) applySplit(true);
+  }
   function sendToLab(raw) {
     const t = raw ? Fmt.cliForPaste(raw) : '';
     if (!t) { toast('Nothing to send yet. Fix the problem at the top first.'); return; }
     const d = $('#clidlg'); if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
     if ($('#carddlg').open) closeCard();
-    setOpen('lab', true);
-    Lab.send($('#labframe'), t).then(n => toast(`Sent ${n} lines to the Lab console`)).catch(() => toast('The Lab did not load. Reload the page.'));
+    if (!splitOn()) setOpen('lab', true);
+    Lab.send(labFrame(), t).then(n => toast(`Sent ${n} lines to the Lab console`)).catch(() => toast('The Lab did not load. Reload the page.'));
   }
   function bindOutputs() {
     $$('[data-copy]').forEach(b => { if (CLI_KINDS.indexOf(b.dataset.copy) < 0) return; const t = document.createElement('button'); t.type = 'button'; t.className = 'btn sm'; t.textContent = 'Type-in script (.ps1)'; t.title = 'For the FortiGate GUI console, which joins pasted lines. Run in PowerShell, then click the console.'; t.addEventListener('click', () => { const raw = text(b.dataset.copy); if (!raw) { toast('Nothing to download yet. Fix the problem at the top first.'); return; } downloadText('subnetpal-type-in.ps1', Fmt.cliTyper(raw)); toast('Downloaded. In PowerShell: run it, then click the console within 8 seconds.'); }); b.insertAdjacentElement('afterend', t);
       const l = document.createElement('button'); l.type = 'button'; l.className = 'btn sm'; l.textContent = 'Send to Lab'; l.title = 'Type this CLI into the FortiOS mock on the Lab tab'; l.addEventListener('click', () => sendToLab(text(b.dataset.copy))); t.insertAdjacentElement('afterend', l); });
-    $('#labcli').addEventListener('click', () => Lab.load($('#labframe')).then(cli => cli.open()).catch(() => toast('The Lab did not load. Reload the page.')));
+    $('#labcli').addEventListener('click', () => Lab.load(labFrame()).then(cli => cli.open()).catch(labErr));
     $('#labforti').addEventListener('click', () => sendToLab(text('forti')));
     $('.subtabs').addEventListener('click', e => { const b = e.target.closest('button[data-out]'); if (!b) return; outView = b.dataset.out; renderExport(); });
     $$('[data-copy]').forEach(b => b.addEventListener('click', async () => {
@@ -806,7 +848,7 @@
     else if (name === 'policies') renderPolicies();
     else if (name === 'remote') renderRemote();
     else if (name === 'export') renderExport();
-    else if (name === 'lab') Lab.load($('#labframe')).catch(() => toast('The Lab did not load. Reload the page.'));
+    else if (name === 'lab' && !splitOn()) Lab.load($('#labframe')).catch(() => toast('The Lab did not load. Reload the page.'));
   }
 
   // ---------- policies ----------
@@ -1351,7 +1393,7 @@
     initSide();
   }());
   setOpen('plan', false);
-  registerSW(); bindInstall();
+  registerSW(); bindInstall(); bindSplit();
   const legacy = { clients: 'plan', intake: 'plan', plan: 'plan', map: 'diagram', outputs: 'export' };
   window.SubnetPal = {
     get state() { return store; }, get result() { return result; }, recalc, setOpen,

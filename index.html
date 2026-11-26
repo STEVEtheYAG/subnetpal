@@ -28,6 +28,7 @@
     <summary aria-label="Colour theme" title="Colour theme"><span class="dot" aria-hidden="true"></span><span class="tname" id="tname">Indigo</span></summary>
     <div class="tpop" id="tpop" role="radiogroup" aria-label="Colour theme"></div>
   </details>
+  <button id="btnSplit" class="themebtn splitbtn" type="button" aria-pressed="false" title="Show the FortiOS Lab beside SubnetPal (desktop)">⇆ Split Lab</button>
   <button id="btnInstall" class="themebtn" type="button" hidden title="Install SubnetPal as an app on this PC (own window, desktop icon, works offline)">⤓ Install app</button>
   <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco">☾</span><span id="themeTxt">Dark</span></button>
   </div>
@@ -362,6 +363,10 @@
     </section>
   </main>
 </div>
+</div>
+<div id="labsplit" class="labsplit" aria-label="FortiOS Lab (split view)">
+  <div id="labdiv" class="labdiv" role="separator" aria-orientation="vertical" aria-label="Resize the Lab (drag, or arrow keys)" tabindex="0"></div>
+  <iframe id="labsplitframe" class="labsplitframe" title="FortiOS 8.0.2 mock GUI (split view)" data-src="lab/index.html"></iframe>
 </div>
 
 <dialog id="carddlg" class="dlg" aria-labelledby="cardtitle">

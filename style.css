@@ -762,3 +762,23 @@ body.showexp .prepstep .hint { display: block; }
 .labframe { display: block; width: 100%; min-width: 0; height: calc(100vh - 230px); min-height: 520px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 @media (max-width: 760px) { .labframe { height: 75vh; min-height: 420px; } }
 @media print { #sec-lab { display: none !important; } }
+/* Split view (desktop, 1100px+): SubnetPal left, the FortiOS Lab right, drag the divider to resize. */
+.splitbtn, .labsplit { display: none; }
+.splitbtn.on { background: var(--panel2); border-color: var(--accent-t); }
+@media (min-width: 1100px) {
+  .splitbtn { display: inline-flex; }
+  body.split { flex-direction: row; }
+  body.split .frame { min-width: 0; margin-right: 0; }
+  body.split .labsplit { display: flex; flex: none; width: var(--labw, 50vw); min-width: 0; margin: 16px 16px 16px 0; }
+  body.split .rtabs [data-tab="lab"] { display: none; }
+  .labdiv { flex: none; width: 14px; cursor: col-resize; display: grid; place-items: center; touch-action: none; }
+  .labdiv::before { content: ""; width: 4px; height: 48px; border-radius: 4px; background: var(--line2); }
+  .labdiv:hover::before, .labdiv:focus-visible::before, body.labdrag .labdiv::before { background: var(--accent-t); }
+  .labsplitframe { flex: 1; min-width: 0; height: 100%; border: 1px solid var(--line); border-radius: 20px; background: #fff; }
+  body.labdrag { cursor: col-resize; user-select: none; }
+  body.labdrag iframe { pointer-events: none; }
+  body.split .tools { flex: 1 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+  body.split .top { border-radius: 26px; }
+  body.split #themeTxt { display: none; }
+}
+@media print { .labsplit { display: none !important; } }
