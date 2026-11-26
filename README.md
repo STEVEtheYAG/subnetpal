@@ -345,3 +345,4 @@ Steven built a real FortiGate from SubnetPal's CLI; Bob found 5 gaps. The genera
 ## Send to Bob in the Lab console (26 Nov, cache v61)
 - The Lab's CLI Console header has **➜ Send to Bob**: copies the mock's `show full-configuration` wrapped in a review prompt (client name from SubnetPal; checks policy order, NAT, profiles, admin hardening, VLANs/DHCP; issues by severity with CLI fixes). Flashes "✔ Copied, paste it to Bob". Offline: nothing is sent anywhere, you paste it into the chat.
 - **Assumptions:** the whole config is copied (about 2,500 lines for the demo client), not only what SubnetPal added. The console itself is not changed by the button. Repo copy of the mock only.
+- **Fix (cache v62):** Send to Bob always copies the whole saved config. Before, if the console was still inside a `config`/`edit` (for example `edit 2001`), it copied only that entry. Unsaved lines of an open edit are not included (they are not saved until `next`/`end`).

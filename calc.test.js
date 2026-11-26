@@ -1399,7 +1399,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v61'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v62'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1451,7 +1451,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v61/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v62/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1906,7 +1906,7 @@ test('ports: "New ports needed" (default) names the ports itself; "already has p
 test('lab: Send to Bob copies the full config with a review prompt and the client name (offline, no network)', () => {
   const mock = require('fs').readFileSync(__dirname + '/lab/index.html', 'utf8');
   assert.ok(/data-cli="bob"[^>]*>➜ Send to Bob</.test(mock) && /u\.dataset\.cli==="bob"\?CP\(BOB\(\),u,"➜ Send to Bob","✔ Copied, paste it to Bob"\)/.test(mock));
-  assert.ok(/t=Mt\("show full-configuration"\)/.test(mock) && /parent\.SubnetPal\.state/.test(mock) && /Bob, review this FortiGate config built from SubnetPal/.test(mock) && /severity \(High, Medium, Low\)/.test(mock));
+  assert.ok(/t=fe\(\["full-configuration"\]\)/.test(mock) && !/t=Mt\("show full-configuration"\)/.test(mock) && /parent\.SubnetPal\.state/.test(mock) && /Bob, review this FortiGate config built from SubnetPal/.test(mock) && /severity \(High, Medium, Low\)/.test(mock));
   assert.ok(/CP\(k\.textContent,u,"⧉ Copy CLI","✔ Copied"\)/.test(mock));                                // Copy CLI still works
 });
 test('install: manifest is installable (id, start_url, standalone, 192 + 512 icons) and the Install app button uses beforeinstallprompt', () => {
