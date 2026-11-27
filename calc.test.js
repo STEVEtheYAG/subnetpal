@@ -1399,7 +1399,7 @@ test('PWA: every script and stylesheet the page loads is precached by the servic
   const files = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/<link[^>]+href="([^"#]+\.(?:css|json))"/g)].map(m => m[1]));
   assert.ok(files.length >= 14);
   files.forEach(f => { assert.ok(fs.existsSync(path.join(__dirname, f)), f + ' is missing'); assert.ok(sw.includes(`'./${f}'`), f + ' is not in the service worker ASSETS'); });
-  assert.ok(/const CACHE = 'subnetpal-v64'/.test(sw));
+  assert.ok(/const CACHE = 'subnetpal-v65'/.test(sw));
 });
 test('printing: staff-to-printers uses the custom SP_PRINT service, defined once in the FortiOS CLI', () => {
   const { r, p } = fullClient(); const f = F.toFortiOSRaw(r, p, 'port5');
@@ -1451,7 +1451,7 @@ test('theme: compact KPI numbers and the five colour themes', () => {
 });
 test('theme: sw.js precaches theme.js and the stylesheet keeps the layout guards and print-light rule', () => {
   const fs = require('fs'), sw = fs.readFileSync(__dirname + '/sw.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v64/.test(sw));
+  assert.ok(sw.includes("'./theme.js'")); assert.ok(/subnetpal-v65/.test(sw));
   assert.ok(css.includes('.results { padding') && css.includes('min-width: 0') && css.includes('minmax(0, 1fr)'));
   assert.ok(/@media screen \{\s*:root\[data-theme="dark"\]/.test(css), 'dark tokens must be screen-only so print stays light');
   for (const p of ['teal', 'blugrn', 'burg', 'peach']) assert.ok(css.includes(`:root[data-theme="light"][data-palette="${p}"]`) && css.includes(`:root[data-theme="dark"][data-palette="${p}"]`), 'both modes for ' + p);
@@ -1576,11 +1576,11 @@ test('guide: Open CLI popup is wired (dialog, textarea, Copy, Close, backdrop) a
   assert.ok(s.cli.includes('config firewall address') && s.cli.includes('set subnet ' + by(r, 'Staff').network) && s.cli.includes('set description'));
   assert.ok(!/dhcp-server/.test(m.cli) && /config firewall address/.test(m.cli));
   ['Outbound shaping profile', 'Outbound bandwidth', 'Comments'].forEach(k => assert.ok(gRow(s, k), k));
-});test('layout: client info slides down from the top, no title banner, S mark bottom-left, theme tools kept', () => {
+});test('layout: client info slides down from the top, wordmark in the top bar, theme tools kept', () => {
   const fs = require('fs'), html = fs.readFileSync(__dirname + '/index.html', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-  ['id="sideTab"', 'aria-controls="side"', 'class="sideclip"', 'class="brandmark"', 'id="themeBtn"', 'id="themes"', 'id="netpill"'].forEach(t => assert.ok(html.includes(t), t));
+  ['id="sideTab"', 'aria-controls="side"', 'class="sideclip"', 'class="wordmark"', 'id="themeBtn"', 'id="themes"', 'id="netpill"'].forEach(t => assert.ok(html.includes(t), t));
   assert.ok(html.indexOf('id="side"') < html.indexOf('class="app"'), 'panel sits above the results');
-  assert.ok(!/<h1>SubnetPal<\/h1>/.test(html) && html.includes('<h1 class="sr">SubnetPal</h1>'), 'title banner removed, h1 kept for screen readers');
+  assert.ok(!/<h1>SubnetPal<\/h1>/.test(html) && /<h1 class="wordmark">.*SubnetPal<\/span><\/h1>/.test(html) && !html.includes('class="brandmark"'), 'quiet wordmark in the top bar, no floating S');
   assert.ok(!html.includes('sideBackdrop') && !app.includes('sideBackdrop') && !html.includes('sumBtn'));
   assert.ok(app.includes("'subnetpal-top-'") && app.includes("'Escape'") && /isPhone\(\) : v === '0'/.test(app), 'saved per layout, closed first on phones');
   assert.ok(css.includes('grid-template-rows: 0fr') && css.includes('columns: 300px 3') && css.includes('.brandmark') && css.includes('bottom: calc(82px'));
@@ -1679,7 +1679,7 @@ test('Groups: kinds and roles map to the four folders; unknown goes to Users', (
   assert.strictEqual(g({ role: 'DMZ' }), 'servers');
   assert.strictEqual(g({ role: 'LAN', kind: '' }), 'users');
   assert.strictEqual(g({}), 'users');
-  assert.deepStrictEqual(G.GROUPS.map(x => x.emoji), ['👤', '🖥️', '🖨️', '🔗']);
+  assert.ok(G.GROUPS.every(x => /^<svg class="ico"/.test(x.icon) && !x.emoji), 'line icons, no emoji');
 });
 test('Groups: UI wires the folder row and Show all, and ships groups.js offline', () => {
   const fs = require('fs'), app = fs.readFileSync('./app.js', 'utf8'), html = fs.readFileSync('./index.html', 'utf8'), sw = fs.readFileSync('./sw.js', 'utf8');
@@ -1691,6 +1691,16 @@ test('Groups: UI passes dim(a) (not the name) so only other groups grey out', ()
   const app = require('fs').readFileSync('./app.js', 'utf8');
   assert.ok(app.includes('dim(a))).join'), 'tile gets dim(a) as its off flag');
   assert.ok(!/\]\], a\.name\)\)\.join/.test(app), 'a.name must not be passed as the off flag');
+});
+test('unslop: quiet chrome (no glows, gradients, emoji or hover lift), VLAN colour stripe on cards', () => {
+  const fs = require('fs'), css = fs.readFileSync(__dirname + '/style.css', 'utf8'), app = fs.readFileSync(__dirname + '/app.js', 'utf8'), html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  const tail = css.slice(css.indexOf('Unslop pass'));
+  assert.ok(tail.length > 100 && tail.includes('--grad: var(--accent)') && tail.includes('--glow1: transparent'), 'gradient and glow tokens flattened');
+  assert.ok(!/text-transform: uppercase/.test(css) && !/font-weight: (700|800)/.test(css), 'sentence case, weights 400-600');
+  assert.ok(/\.ncard:hover[^}]*transform: none/.test(tail) && !tail.includes('backdrop-filter: blur'), 'no lift, no frosted glass');
+  assert.ok(app.includes('style="--c:${swatch}"') && tail.includes('inset 3px 0 0 var(--c'), 'VLAN colour stripe on network cards');
+  const emo = /[\u{1F300}-\u{1FAFF}\u2600-\u26FF]/u;
+  assert.ok(!emo.test(app) && !emo.test(html) && !emo.test(fs.readFileSync(__dirname + '/groups.js', 'utf8')), 'no emoji in the interface');
 });
 console.log('PDF / Word import (docread.js)');
 const D = require('./docread.js'), zlib = require('zlib');

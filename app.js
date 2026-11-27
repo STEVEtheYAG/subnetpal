@@ -345,7 +345,7 @@
   function paintThemeBtn() {
     const t = themeNow(), nx = Theme.other(t);
     $('#themeBtn').setAttribute('aria-label', `Switch to ${nx} mode`);
-    $('#themeIco').textContent = nx === 'dark' ? '☾' : '☀'; $('#themeTxt').textContent = nx === 'dark' ? 'Dark' : 'Light';
+    $('#themeIco').innerHTML = nx === 'dark' ? '<svg class="ico" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>' : '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'; $('#themeTxt').textContent = nx === 'dark' ? 'Dark' : 'Light';
   }
   function paintPalette() {
     const cur = document.documentElement.getAttribute('data-palette') || 'indigo';
@@ -399,7 +399,7 @@
   function guideRows(rows) {
     return rows.map(r => `<div class="fgr"><span class="fk">${esc(r.k)}${apx(r.approx)}</span><span class="fv">${r.chips ? r.chips.map(c => `<span class="chip${c.on ? ' on' : ''}${c.dis ? ' dis' : ''}">${c.on ? '✓ ' : ''}${esc(c.t)}</span>`).join('') + (r.v === 'None' ? ' <span class="dim">None</span>' : '') : `<span class="mono">${esc(r.v)}</span>`}</span>${r.why ? `<span class="fw exp">${esc(r.why)}</span>` : ''}</div>`).join('');
   }
-  const guideList = (title, items, cls) => `<h4 class="fgh${cls ? ' ' + cls : ''}">${esc(title)}</h4><ul class="fgl${cls ? ' ' + cls : ''}">${items.map(i => { const o = typeof i === 'string' ? { t: i, ok: true } : i; return `<li class="${o.ok ? '' : 'bad'}">${o.ok ? '' : '⚠ '}${esc(o.t)}</li>`; }).join('')}</ul>`;
+  const guideList = (title, items, cls) => `<h4 class="fgh${cls ? ' ' + cls : ''}">${esc(title)}</h4><ul class="fgl${cls ? ' ' + cls : ''}">${items.map(i => { const o = typeof i === 'string' ? { t: i, ok: true } : i; return `<li class="${o.ok ? '' : 'bad'}">${esc(o.t)}</li>`; }).join('')}</ul>`;
   const topBar = (key, dk) => `<div class="topbar"><button type="button" class="btn sm" data-opencli="${esc(key)}">Open CLI</button>${doneBox(dk)}</div>`;
   function guidePanel(g, key, title) {
     if (!g) return '';
@@ -421,7 +421,7 @@
     return i < 0 ? null : Guide.iface(result, project(), i);
   }
   // Network cards are tiles; clicking one opens a modal with the full detail (built fresh each time).
-  const tile = (key, swatch, name, type, fields, off) => `<div class="ncard${off ? ' off' : ''}${isDone(doneKeyNet(key)) ? ' done' : ''}" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
+  const tile = (key, swatch, name, type, fields, off) => `<div class="ncard${off ? ' off' : ''}${isDone(doneKeyNet(key)) ? ' done' : ''}" style="--c:${swatch}" role="button" tabindex="0" aria-haspopup="dialog" data-name="${esc(key)}">
         <div class="ncsum">
           <span class="nt"><span class="swatch" style="background:${swatch}"></span><b>${esc(name)}</b><span class="ntype">${esc(type)}</span><span class="chev" aria-hidden="true">›</span></span>
           <dl class="nf">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mono">${v}</dd></div>`).join('')}</dl>
@@ -439,11 +439,10 @@
   }
   function vpnCard(off) {
     const p = Remote.plan(result, project()); if (!p || !p.ok) return '';
-    return tile('__vpn', '#37c2a0', '👤 Remote VPN', 'IPsec pool', [['Pool', esc(p.cidr)], ['Range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`]], off);
+    return tile('__vpn', '#37c2a0', 'Remote VPN', 'IPsec pool', [['Pool', esc(p.cidr)], ['Range', `${ipHtml(p.first)} - ${ipHtml(p.last)}`]], off);
   }
   // Folders: tap one to show only its cards. 'all' shows everything. Remembered per page load only.
   let grpSel = 'all';
-  const grpOf = a => Groups.get(Groups.groupId(a));
   function renderCards() {
     const box = $('#cards'), fb = $('#folders');
     if (!result.ok) { box.innerHTML = '<p class="hint">Fix the problem above to see the networks.</p>'; fb.innerHTML = ''; return; }
@@ -453,11 +452,11 @@
     const count = id => list.filter(a => Groups.groupId(a) === id).length + (vpnOk && id === 'users' ? 1 : 0);
     const shown = Groups.GROUPS.filter(g => count(g.id));
     if (grpSel !== 'all' && !shown.some(g => g.id === grpSel)) grpSel = 'all';
-    fb.innerHTML = `<button type="button" class="folder${grpSel === 'all' ? ' on' : ''}" data-grp="all" aria-pressed="${grpSel === 'all'}"><span class="fe" aria-hidden="true">🗂️</span><b>Show all</b><span class="fc">${list.length + (vpnOk ? 1 : 0)}</span></button>` +
-      shown.map(g => `<button type="button" class="folder${grpSel === g.id ? ' on' : ''}" data-grp="${g.id}" aria-pressed="${grpSel === g.id}"><span class="fe" aria-hidden="true">${g.emoji}</span><b>${esc(g.name)}</b><span class="fc">${count(g.id)}</span></button>`).join('');
+    fb.innerHTML = `<button type="button" class="folder${grpSel === 'all' ? ' on' : ''}" data-grp="all" aria-pressed="${grpSel === 'all'}"><span class="fe" aria-hidden="true">${Groups.ICON.all}</span><b>Show all</b><span class="fc">${list.length + (vpnOk ? 1 : 0)}</span></button>` +
+      shown.map(g => `<button type="button" class="folder${grpSel === g.id ? ' on' : ''}" data-grp="${g.id}" aria-pressed="${grpSel === g.id}"><span class="fe" aria-hidden="true">${g.icon}</span><b>${esc(g.name)}</b><span class="fc">${count(g.id)}</span></button>`).join('');
     const dim = a => grpSel !== 'all' && Groups.groupId(a) !== grpSel;
     box.classList.toggle('sel', grpSel !== 'all');
-    box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), `${grpOf(a).emoji} ${a.name}`, typeOf(a),
+    box.innerHTML = list.map(a => tile(a.name, color(Math.max(0, names.indexOf(a.name))), a.name, typeOf(a),
       [['IP / mask', `${ipHtml(a.gateway || a.firstUsable || '-')} /${esc(a.prefix)}`], ['Range', rangeHtml(a)]], dim(a))).join('') + (vpnOk ? vpnCard(grpSel !== 'all' && grpSel !== 'users') : '');
   }
   // Optional DHCP DNS for one network (default stays System DNS). Stored per client by network name: project().dhcpDns[name] = { server, domain }.

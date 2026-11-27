@@ -20,20 +20,19 @@
 <body>
 <div class="frame">
 <header class="top">
+  <h1 class="wordmark"><svg viewBox="0 0 24 24" aria-hidden="true" class="ico" style="width:20px;height:20px"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10v4M10.5 10v4M14 10v4M17.5 10v4"/></svg><span>SubnetPal</span></h1>
   <button id="sideTab" class="sidebtn" type="button" aria-controls="side" aria-expanded="true" title="Show or hide the client information"><span>Client info</span><span class="chev" aria-hidden="true">▾</span></button>
-  <h1 class="sr">SubnetPal</h1>
-  <div class="tools">
+    <div class="tools">
   <span id="netpill" class="pill" title="Offline status">…</span>
   <details class="themes" id="themes">
     <summary aria-label="Colour theme" title="Colour theme"><span class="dot" aria-hidden="true"></span><span class="tname" id="tname">Indigo</span></summary>
     <div class="tpop" id="tpop" role="radiogroup" aria-label="Colour theme"></div>
   </details>
-  <button id="btnSplit" class="themebtn splitbtn" type="button" aria-pressed="false" title="Show the FortiOS Lab beside SubnetPal (desktop)">⇆ Split Lab</button>
-  <button id="btnInstall" class="themebtn" type="button" hidden title="Install SubnetPal as an app on this PC (own window, desktop icon, works offline)">⤓ Install app</button>
-  <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco">☾</span><span id="themeTxt">Dark</span></button>
+  <button id="btnSplit" class="themebtn splitbtn" type="button" aria-pressed="false" title="Show the FortiOS Lab beside SubnetPal (desktop)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg>Split Lab</button>
+  <button id="btnInstall" class="themebtn" type="button" hidden title="Install SubnetPal as an app on this PC (own window, desktop icon, works offline)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Install app</button>
+  <button id="themeBtn" class="themebtn" type="button" aria-label="Switch to dark mode" title="Light / dark"><span aria-hidden="true" id="themeIco" class="tico"></span><span id="themeTxt">Dark</span></button>
   </div>
 </header>
-<div class="brandmark" role="img" aria-label="SubnetPal" title="SubnetPal">S</div>
 
   <aside id="side" class="side" aria-label="Client information">
 <div class="sideclip"><div class="sidein">
@@ -363,7 +362,7 @@
         <p class="sectionsum" id="sum-lab">FortiOS 8.0.2 practice mock · test a build before the real FortiGate</p>
         <p class="hint exp">A practice copy of the FortiGate GUI, offline. Use <b>Send to Lab</b> next to any FortiOS CLI to type it into the mock's CLI console, then check the result in the GUI. The mock saves its own config in this browser; reset it with <span class="mono">execute factoryreset</span> in its console.</p>
         <div class="btnrow labbar"><button type="button" class="btn sm" id="labcli">Open CLI console</button><button type="button" class="btn sm" id="labforti">Send full build</button><a class="btn sm" href="lab/index.html" target="_blank" rel="noopener">Open in its own window</a></div>
-        <iframe id="labframe" class="labframe" allow="clipboard-write" title="FortiOS 8.0.2 mock GUI" data-src="lab/index.html?v=64"></iframe>
+        <iframe id="labframe" class="labframe" allow="clipboard-write" title="FortiOS 8.0.2 mock GUI" data-src="lab/index.html?v=65"></iframe>
       </div>
     </section>
   </main>
@@ -371,7 +370,7 @@
 </div>
 <div id="labsplit" class="labsplit" aria-label="FortiOS Lab (split view)">
   <div id="labdiv" class="labdiv" role="separator" aria-orientation="vertical" aria-label="Resize the Lab (drag, or arrow keys)" tabindex="0"></div>
-  <iframe id="labsplitframe" class="labsplitframe" allow="clipboard-write" title="FortiOS 8.0.2 mock GUI (split view)" data-src="lab/index.html?v=64"></iframe>
+  <iframe id="labsplitframe" class="labsplitframe" allow="clipboard-write" title="FortiOS 8.0.2 mock GUI (split view)" data-src="lab/index.html?v=65"></iframe>
 </div>
 
 <dialog id="carddlg" class="dlg" aria-labelledby="cardtitle">
